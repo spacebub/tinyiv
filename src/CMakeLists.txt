@@ -23,6 +23,8 @@ add_executable(tinyiv
         image/Orient.h
         image/Pyramid.cpp
         image/Pyramid.h
+        image/Svg.cpp
+        image/Svg.h
 
         render/Canvas.cpp
         render/Canvas.h
