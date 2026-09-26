@@ -170,7 +170,7 @@ namespace tiv {
             }
 
             fill(tile);
-            SDL_SetTextureScaleMode(tile.texture, SDL_SCALEMODE_NEAREST);
+            SDL_SetTextureScaleMode(tile.texture, SDL_SCALEMODE_PIXELART);
             SDL_SetTextureBlendMode(tile.texture, SDL_BLENDMODE_BLEND);
 
             tile.used = stamp;
