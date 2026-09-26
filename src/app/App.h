@@ -58,6 +58,7 @@ namespace tiv {
         void handle(const SDL_Event &event);
         bool handle_play_bar(const SDL_Event &event);
         void seek_to(double x);
+        void step_frame(int delta);
         void deliver();
         void warm_neighbours();
         void frame();

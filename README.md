@@ -6,7 +6,9 @@ stepping is instant and gigapixel files pan without a stutter. One window, one f
 image. No configuration, no editing, no extra features.
 
 Every format libvips reads is shown. JPEG, PNG, WebP and JPEG XL go through their own
-decoders, with a cheap DCT scaled preview for large JPEGs.
+decoders, with a cheap DCT scaled preview for large JPEGs. Animated GIF and WebP play in a
+loop, with a bar along the bottom to pause and seek. A file nothing can read says so in place
+of the image.
 
 ## Building
 
@@ -27,9 +29,12 @@ build/bin/tinyiv photo.jpg
 | Left drag               | Pan                        |
 | Right drag up, down     | Zoom in, out               |
 | Double click, F, F11    | Fullscreen                 |
+| Space                   | Play, pause animation      |
+| [, ]                    | Previous, next frame       |
+| Click, drag on play bar | Play, pause, seek          |
 | Escape, Q               | Quit                       |
 
-Dropping a file on the window opens its folder.
+Dropping a file on the window opens its folder. Stepping a frame pauses the animation.
 
 ## License
 

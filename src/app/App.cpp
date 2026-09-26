@@ -296,6 +296,12 @@ namespace tiv {
                 _playback.toggle(SDL_GetTicks());
                 _dirty = true;
                 break;
+            case Input::Action::FrameBack:
+                step_frame(-1);
+                break;
+            case Input::Action::FrameForward:
+                step_frame(1);
+                break;
             case Input::Action::Redraw:
                 _dirty = true;
                 break;
@@ -359,6 +365,16 @@ namespace tiv {
 
     void App::seek_to(const double x) {
         _playback.seek(PlayBar::seek(play_bar(), SDL_GetWindowDisplayScale(_window), x), SDL_GetTicks());
+        _canvas->replace(_playback.pyramid());
+        _dirty = true;
+    }
+
+    void App::step_frame(const int delta) {
+        if (!_playback.active()) {
+            return;
+        }
+
+        _playback.step(delta);
         _canvas->replace(_playback.pyramid());
         _dirty = true;
     }

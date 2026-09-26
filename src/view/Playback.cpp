@@ -39,6 +39,17 @@ namespace tiv {
         _due = now + delay();
     }
 
+    void Playback::step(const int delta) {
+        if (_animation == nullptr) {
+            return;
+        }
+
+        const auto count = static_cast<long>(frames());
+
+        _playing = false;
+        _frame = static_cast<std::size_t>((((static_cast<long>(_frame) + delta) % count) + count) % count);
+    }
+
     void Playback::seek(const double fraction, const std::uint64_t now) {
         if (_animation == nullptr) {
             return;

@@ -41,6 +41,10 @@ namespace tiv {
                         return Action::Last;
                     case SDLK_SPACE:
                         return Action::TogglePlay;
+                    case SDLK_LEFTBRACKET:
+                        return Action::FrameBack;
+                    case SDLK_RIGHTBRACKET:
+                        return Action::FrameForward;
                     default:
                         return Action::None;
                 }

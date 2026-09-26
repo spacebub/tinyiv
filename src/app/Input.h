@@ -18,7 +18,8 @@
 
 namespace tiv {
     // The fixed scheme: left drag pans, right drag zooms, the wheel and the arrow keys walk the
-    // folder, Home and End jump to its ends, Space plays or pauses an animation.
+    // folder, Home and End jump to its ends, Space plays or pauses an animation, [ and ] step
+    // it back and forward a frame.
     class Input {
 
     public:
@@ -31,6 +32,8 @@ namespace tiv {
             First,
             Last,
             TogglePlay,
+            FrameBack,
+            FrameForward,
             // The view changed.
             Redraw,
         };

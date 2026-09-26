@@ -33,6 +33,9 @@ namespace tiv {
 
         void toggle(std::uint64_t now);
 
+        // Pauses and moves by whole frames, wrapping at either end.
+        void step(int delta);
+
         // Jumps to the frame showing at that fraction of the whole run.
         void seek(double fraction, std::uint64_t now);
 
