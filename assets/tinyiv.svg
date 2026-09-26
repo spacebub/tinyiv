@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="streak" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="streakPink" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2d95" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ff2d95" stop-opacity="0.9"/>
+    </linearGradient>
+    <linearGradient id="echoFade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="1"/>
+    </linearGradient>
+    <radialGradient id="haze" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#171717" stop-opacity="0.62"/>
+      <stop offset="0.5" stop-color="#171717" stop-opacity="0.3"/>
+      <stop offset="0.8" stop-color="#171717" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#171717" stop-opacity="0"/>
+    </radialGradient>
+    <mask id="echoMask">
+      <rect x="100" y="100" width="220" height="320" fill="url(#echoFade)"/>
+    </mask>
+    <filter id="blurX" x="-20%" y="-10%" width="140%" height="120%">
+      <feGaussianBlur stdDeviation="9 1.5"/>
+    </filter>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="3"/>
+    </filter>
+    <clipPath id="inside">
+      <rect x="216" y="152" width="176" height="208" rx="16"/>
+    </clipPath>
+  </defs>
+  <g transform="translate(-121.78 -124.19) scale(1.4851)">
+    <ellipse cx="208" cy="256" rx="118" ry="145" fill="url(#haze)"/>
+    <g transform="skewX(-9) translate(40 0)" mask="url(#echoMask)">
+      <rect x="130" y="136" width="216" height="240" rx="26" fill="none" stroke="#b0b0b0" stroke-width="10" opacity="0.4" filter="url(#blurX)"/>
+      <rect x="160" y="136" width="216" height="240" rx="26" fill="none" stroke="#d4d4d4" stroke-width="10" opacity="0.6" filter="url(#blurX)"/>
+    </g>
+    <g>
+      <rect x="92" y="170" width="110" height="6" rx="3" fill="url(#streak)"/>
+      <rect x="128" y="204" width="66" height="5" rx="2.5" fill="url(#streak)" opacity="0.7"/>
+      <rect x="76" y="250" width="106" height="7" rx="3.5" fill="url(#streakPink)"/>
+      <rect x="138" y="296" width="40" height="5" rx="2.5" fill="url(#streak)" opacity="0.6"/>
+      <rect x="105" y="336" width="65" height="6" rx="3" fill="url(#streak)" opacity="0.85"/>
+    </g>
+    <g transform="skewX(-9) translate(40 0)">
+      <rect x="190" y="136" width="216" height="240" rx="26" fill="none" stroke="#171717" stroke-width="22" opacity="0.55" filter="url(#soft)"/>
+      <rect x="190" y="136" width="216" height="240" rx="26" fill="#1f1f1f" stroke="#ececec" stroke-width="12"/>
+      <g clip-path="url(#inside)">
+        <rect x="216" y="152" width="176" height="208" fill="#262626"/>
+        <path d="M 200 372 L 262 262 L 300 316 L 330 288 L 400 372 Z" fill="#4a4a4a"/>
+        <path d="M 240 372 L 318 300 L 352 330 L 372 312 L 412 372 Z" fill="#6c6c6c"/>
+        <circle cx="342" cy="212" r="26" fill="#ff2d95" opacity="0.55" filter="url(#glow)"/>
+        <circle cx="342" cy="212" r="18" fill="#ff2d95"/>
+      </g>
+    </g>
+  </g>
+</svg>

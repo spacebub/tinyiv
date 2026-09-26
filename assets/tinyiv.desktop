@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=tinyiv
+GenericName=Tiny Image Viewer
+Comment=A tiny, fast image viewer
+Exec=tinyiv %f
+Icon=tinyiv
+Terminal=false
+Categories=Graphics;Viewer;
+MimeType=image/jpeg;image/png;image/webp;image/tiff;image/gif;image/heif;image/heic;image/avif;image/jxl;image/svg+xml;image/bmp;image/x-portable-pixmap;image/vnd.radiance;image/x-exr;image/jp2;
+NoDisplay=false
+StartupNotify=false

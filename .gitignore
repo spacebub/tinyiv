@@ -1,0 +1,29 @@
+# Build trees, the last one Visual Studio's own default
+/build*/
+/cmake-build-*/
+/out/
+
+# A CMake run configured in the source tree anyway
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+
+# Sources fetched by CMake, shared by every build tree
+/.download-cache/
+
+# clangd's index, and Rider's project files
+/.cache/
+/.idea/
+
+# Visual Studio's local state, and a solution generated in the tree
+/.vs/
+*.sln*
+*.vcxproj*
+*.user
+
+# What Explorer and Finder leave behind
+[Tt]humbs.db
+desktop.ini
+.DS_Store
+._*

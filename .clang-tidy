@@ -1,0 +1,43 @@
+Checks: >
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-pro-type-union-access,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -modernize-use-designated-initializers,
+  -modernize-use-trailing-return-type,
+  -portability-avoid-pragma-once,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-redundant-member-init
+
+# The opt-outs, in order:
+#   easily-swappable-parameters: width and height pairs are everywhere in a viewer.
+#   avoid-magic-numbers, magic-numbers: constants are named where a name helps, not by rule.
+#   non-private-member-variables (both spellings): plain structs carry data.
+#   pro-type-union-access: SDL_Event is a union, there is no other way to read it.
+#   include-cleaner: clangd does this live.
+#   designated-initializers, trailing-return-type: style choices, not used here.
+#   avoid-pragma-once: header guards are used instead, so the check is moot.
+#   identifier-length: x, y, w, h are the right names in geometry.
+#   redundant-member-init: explicit {} on every member is deliberate.
+
+CheckOptions:
+  # std::span is the bounds-safe view the guidelines ask for, and subspan() checks its arguments.
+  cppcoreguidelines-pro-bounds-avoid-unchecked-container-access.ExcludeClasses: '::std::span'
+
+HeaderFilterRegex: '.*/src/.*'
+ExcludeHeaderFilterRegex: '.*/(_deps|\.download-cache)/.*'
+WarningsAsErrors: ''
+FormatStyle: none

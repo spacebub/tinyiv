@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+/*
+ * Part of tinyiv
+ *
+ * Copyright (c) 2026
+ * Authors:
+ *	spacebub <spacebubs@proton.me>
+ */
+#include <algorithm>
+
+#include "view/Viewport.h"
+
+namespace tiv {
+    void Viewport::set_area(const double width, const double height) {
+        if (width == _areaWidth && height == _areaHeight) {
+            return;
+        }
+
+        _areaWidth = width;
+        _areaHeight = height;
+
+        fit();
+    }
+
+    void Viewport::set_image(const int width, const int height) {
+        _imageWidth = width;
+        _imageHeight = height;
+
+        fit();
+    }
+
+    void Viewport::fit() {
+        if (!has_image() || _areaWidth <= 0.0 || _areaHeight <= 0.0) {
+            return;
+        }
+
+        _fitZoom = std::min(_areaWidth / _imageWidth, _areaHeight / _imageHeight);
+        _zoom = _fitZoom;
+        _x = (_areaWidth - (_imageWidth * _zoom)) / 2.0;
+        _y = (_areaHeight - (_imageHeight * _zoom)) / 2.0;
+    }
+
+    void Viewport::pan(const double dx, const double dy) {
+        _x += dx;
+        _y += dy;
+    }
+
+    void Viewport::begin_zoom(const double x, const double y) {
+        _anchorX = x;
+        _anchorY = y;
+        _anchorImageX = (x - _x) / _zoom;
+        _anchorImageY = (y - _y) / _zoom;
+        _anchorZoom = _zoom;
+    }
+
+    void Viewport::zoom_by(const double factor) {
+        const double lowest = _fitZoom / ZOOM_RANGE;
+        const double highest = _fitZoom * ZOOM_RANGE;
+
+        _zoom = std::clamp(_anchorZoom * factor, lowest, highest);
+        _x = _anchorX - (_anchorImageX * _zoom);
+        _y = _anchorY - (_anchorImageY * _zoom);
+    }
+
+    Rect Viewport::image_rect() const {
+        return {_x, _y, _imageWidth * _zoom, _imageHeight * _zoom};
+    }
+}
