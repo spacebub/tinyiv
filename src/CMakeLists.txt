@@ -35,6 +35,8 @@ add_executable(tinyiv
 
         services/Loader.cpp
         services/Loader.h
+        services/Refiner.cpp
+        services/Refiner.h
 
         view/Playback.cpp
         view/Playback.h

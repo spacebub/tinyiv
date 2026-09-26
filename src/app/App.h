@@ -23,6 +23,7 @@
 #include "image/Decode.h"
 #include "render/Canvas.h"
 #include "services/Loader.h"
+#include "services/Refiner.h"
 #include "view/Playback.h"
 #include "view/Viewport.h"
 
@@ -60,7 +61,11 @@ namespace tiv {
         void seek_to(double x);
         void step_frame(int delta);
         void deliver();
+        void deliver_detail();
         void warm_neighbours();
+        // The view changed, so the part on screen may want rendering again once it rests.
+        void moved();
+        void refine();
         void frame();
 
         // Milliseconds the loop may sleep, or -1 for until the next event.
@@ -70,9 +75,22 @@ namespace tiv {
         [[nodiscard]] std::string bar_left() const;
         [[nodiscard]] std::string bar_right() const;
 
+        // What was last sent to the refiner, so a request that failed is not repeated.
+        struct Ask {
+            std::uint64_t generation = 0;
+            double scale = 0.0;
+            int x = 0;
+            int y = 0;
+            int width = 0;
+            int height = 0;
+
+            bool operator==(const Ask &) const = default;
+        };
+
         SDL_Window *_window = nullptr;
         SDL_Renderer *_renderer = nullptr;
         std::uint32_t _loaderEvent = 0;
+        std::uint32_t _refinerEvent = 0;
 
         Folder _folder;
         Viewport _viewport;
@@ -80,6 +98,7 @@ namespace tiv {
         Input _input;
         std::unique_ptr<Canvas> _canvas;
         std::unique_ptr<Loader> _loader;
+        std::unique_ptr<Refiner> _refiner;
 
         Decode::Info _info;
         std::uintmax_t _bytes = 0;
@@ -94,6 +113,11 @@ namespace tiv {
         std::string _failure;
         // A drag that started on the play bar's track.
         bool _seeking = false;
+
+        std::uint64_t _movedAt = 0;
+        // Moved and not yet looked at by refine().
+        bool _settling = false;
+        Ask _asked;
 
         bool _fullscreen = false;
         bool _running = true;

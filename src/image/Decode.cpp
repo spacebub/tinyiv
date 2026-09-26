@@ -282,6 +282,8 @@ namespace tiv {
             Whole,
             // Rendered or shrunk on load to the box, for formats that do that cheaply.
             Thumbnail,
+            // Rendered to fit the box, larger or smaller, for formats drawn from shapes.
+            Scaled,
             // Streamed through an integer box shrink, so memory is the output and not the input.
             Shrink,
         };
@@ -325,8 +327,10 @@ namespace tiv {
             try {
                 VImage image;
 
-                if (via == Via::Thumbnail) {
-                    image = VImage::thumbnail(file.c_str(), boxWidth, VImage::option()->set("height", boxHeight)->set("size", VIPS_SIZE_DOWN));
+                if (via == Via::Thumbnail || via == Via::Scaled) {
+                    const VipsSize size = via == Via::Scaled ? VIPS_SIZE_BOTH : VIPS_SIZE_DOWN;
+
+                    image = VImage::thumbnail(file.c_str(), boxWidth, VImage::option()->set("height", boxHeight)->set("size", size));
                 } else {
                     image = VImage::new_from_file(file.c_str(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
 
@@ -1137,6 +1141,10 @@ namespace tiv {
         return false;
     }
 
+    bool Decode::scalable(const Format format) {
+        return format == Format::Svg || format == Format::Pdf;
+    }
+
     bool Decode::direct(const Format format) {
         return format == Format::Jpeg || format == Format::Png || format == Format::WebP || format == Format::Jxl;
     }
@@ -1237,13 +1245,43 @@ namespace tiv {
 
         Via via = Via::Whole;
 
-        if (scales_cheaply(kind)) {
+        if (scalable(kind)) {
+            via = Via::Scaled;
+        } else if (scales_cheaply(kind)) {
             via = Via::Thumbnail;
         } else if (fit == Fit::Force) {
             via = Via::Shrink;
         }
 
         return load_vips(file, boxWidth, boxHeight, out, error, abort, via);
+    }
+
+    bool Decode::render(const std::filesystem::path &file, const double scale, const int x, const int y, const int width, const int height, Bitmap *out, std::string *error, Abort *abort) {
+        ensure_vips();
+
+        try {
+            // Both loaders render only the regions asked for, so the crop is all that is drawn.
+            const VImage image = VImage::new_from_file(file.c_str(), VImage::option()->set("scale", scale));
+            const int left = std::clamp(x, 0, image.width() - 1);
+            const int top = std::clamp(y, 0, image.height() - 1);
+            const VImage part = image.crop(left, top, std::clamp(width, 1, image.width() - left), std::clamp(height, 1, image.height() - top));
+
+            if (!write_rgba(to_rgba(part), out, abort)) {
+                fail(error, file, vips_error());
+
+                return false;
+            }
+
+            return true;
+        } catch (const vips::VError &) {
+            if (abort != nullptr) {
+                abort->disarm();
+            }
+
+            fail(error, file, vips_error());
+
+            return false;
+        }
     }
 
     bool Decode::load_frames(const std::filesystem::path &file, const std::size_t maxBytes, std::vector<Frame> *out, std::string *error, Abort *abort) {

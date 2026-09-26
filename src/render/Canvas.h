@@ -43,6 +43,14 @@ namespace tiv {
         // A neighbour to have ready: its levels up to the screen stay resident.
         void warm(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height);
 
+        // A sharper rendering of part of the image shown, at the scale given, x and y being
+        // where the bitmap sits in the image at that scale. It is drawn wherever it is nearer
+        // the zoom than the levels are, and goes when another image is shown.
+        void refine(std::shared_ptr<const Bitmap> bitmap, double scale, int x, int y);
+
+        // True when the rendering is at this zoom and covers the area, in image pixels.
+        [[nodiscard]] bool refined(double zoom, const Rect &area) const;
+
         // Forgets every image but the one shown and the ones listed.
         void keep(std::span<const std::uint64_t> images);
 
@@ -68,6 +76,14 @@ namespace tiv {
             std::unique_ptr<Tiles> tiles;
         };
 
+        struct Detail {
+            std::uint64_t image = 0;
+            double scale = 1.0;
+            // In image pixels.
+            Rect area;
+            std::unique_ptr<Tiles> tiles;
+        };
+
         struct Held {
             std::uint64_t image = 0;
             int width = 0;
@@ -90,6 +106,7 @@ namespace tiv {
         [[nodiscard]] std::size_t fit_sheet(const Held &held) const;
 
         void draw_sheet(Held &held, std::size_t index, const Rect &screen, const Rect &image);
+        [[nodiscard]] bool detail_wins(double zoom, std::size_t sheet) const;
         std::size_t upload_warm(std::size_t budget);
         void evict();
 
@@ -98,6 +115,7 @@ namespace tiv {
         std::size_t _budget;
         Held _current;
         std::vector<Held> _warm;
+        Detail _detail;
         std::uint64_t _frame = 1;
         double _areaWidth = 0.0;
         double _areaHeight = 0.0;

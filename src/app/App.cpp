@@ -6,6 +6,8 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -27,6 +29,7 @@
 #include "render/PlayBar.h"
 #include "render/StatusBar.h"
 #include "services/Loader.h"
+#include "services/Refiner.h"
 #include "view/Playback.h"
 #include "view/Viewport.h"
 
@@ -36,6 +39,8 @@ namespace tiv {
         constexpr int PREFETCH_AHEAD = 6;
         constexpr int PREFETCH_BEHIND = 2;
         constexpr double BADGE_MARGIN = 12.0;
+        // A scalable image renders this share of the view beyond each edge, so a short pan stays sharp.
+        constexpr double REFINE_MARGIN = 0.25;
         constexpr SDL_Color BACKGROUND{0, 0, 0, 255};
 
         std::string human_size(const std::uintmax_t bytes) {
@@ -68,6 +73,7 @@ namespace tiv {
     }
 
     App::~App() {
+        _refiner = nullptr;
         _loader = nullptr;
         _canvas = nullptr;
 
@@ -88,8 +94,10 @@ namespace tiv {
         }
 
         // The first decode starts before the window exists, so the two overlap.
-        _loaderEvent = SDL_RegisterEvents(1);
+        _loaderEvent = SDL_RegisterEvents(2);
+        _refinerEvent = _loaderEvent + 1;
         _loader = std::make_unique<Loader>(_loaderEvent);
+        _refiner = std::make_unique<Refiner>(_refinerEvent);
 
         show(_folder.index(), 1);
 
@@ -162,6 +170,7 @@ namespace tiv {
 
         _viewport.set_area(width, height - bar);
         _repaints = REPAINTS;
+        moved();
     }
 
     void App::set_fullscreen(const bool on) {
@@ -183,6 +192,8 @@ namespace tiv {
         _failure.clear();
         _seeking = false;
         _playback.stop();
+        _refiner->cancel();
+        _asked = {};
 
         std::vector<std::filesystem::path> ahead;
         std::vector<std::filesystem::path> behind;
@@ -230,6 +241,8 @@ namespace tiv {
                 _dirty = true;
             }
 
+            refine();
+
             if (_canvas->pending(_viewport)) {
                 _canvas->upload(_viewport, UPLOAD_BUDGET);
                 _dirty = true;
@@ -246,6 +259,12 @@ namespace tiv {
     void App::handle(const SDL_Event &event) {
         if (event.type == _loaderEvent) {
             deliver();
+
+            return;
+        }
+
+        if (event.type == _refinerEvent) {
+            deliver_detail();
 
             return;
         }
@@ -304,6 +323,7 @@ namespace tiv {
                 break;
             case Input::Action::Redraw:
                 _dirty = true;
+                moved();
                 break;
             case Input::Action::None:
                 break;
@@ -405,6 +425,7 @@ namespace tiv {
                 _shown = result.generation;
                 _info = result.info;
                 _viewport.set_image(_info.width, _info.height);
+                moved();
             }
 
             if (result.animation != nullptr && result.animation == _playback.animation()) {
@@ -436,6 +457,72 @@ namespace tiv {
         }
 
         warm_neighbours();
+    }
+
+    void App::deliver_detail() {
+        Refiner::Result result;
+
+        while (_refiner->take(&result)) {
+            if (result.generation == _generation && _shown == _generation) {
+                _canvas->refine(std::move(result.bitmap), result.scale, result.x, result.y);
+                _dirty = true;
+            }
+        }
+    }
+
+    void App::moved() {
+        _movedAt = SDL_GetTicks();
+        _settling = true;
+    }
+
+    // Once the view rests on a scalable image, the part on screen renders again at the zoom shown.
+    void App::refine() {
+        if (!_settling || SDL_GetTicks() - _movedAt < static_cast<std::uint64_t>(Refiner::REST_MS)) {
+            return;
+        }
+
+        _settling = false;
+
+        if (!Decode::scalable(_info.kind) || _shown != _generation || !_viewport.has_image()) {
+            return;
+        }
+
+        // In pixels of the image at the zoom.
+        const Rect image = _viewport.image_rect();
+        const double left = std::max(-image.x, 0.0);
+        const double top = std::max(-image.y, 0.0);
+        const double right = std::min(_viewport.area_width() - image.x, image.width);
+        const double bottom = std::min(_viewport.area_height() - image.y, image.height);
+
+        if (right <= left || bottom <= top) {
+            return;
+        }
+
+        const double zoom = _viewport.zoom();
+
+        if (_canvas->refined(zoom, {left / zoom, top / zoom, (right - left) / zoom, (bottom - top) / zoom})) {
+            return;
+        }
+
+        const double marginX = _viewport.area_width() * REFINE_MARGIN;
+        const double marginY = _viewport.area_height() * REFINE_MARGIN;
+        const auto x = static_cast<int>(std::floor(std::max(left - marginX, 0.0)));
+        const auto y = static_cast<int>(std::floor(std::max(top - marginY, 0.0)));
+        const Ask ask{
+                _generation,
+                zoom,
+                x,
+                y,
+                static_cast<int>(std::ceil(std::min(right + marginX, image.width))) - x,
+                static_cast<int>(std::ceil(std::min(bottom + marginY, image.height))) - y,
+        };
+
+        if (ask == _asked) {
+            return;
+        }
+
+        _asked = ask;
+        _refiner->render(ask.generation, _folder.current(), ask.scale, ask.x, ask.y, ask.width, ask.height);
     }
 
     // The images either side stay on the GPU, so stepping to them draws at once.
@@ -501,13 +588,21 @@ namespace tiv {
     }
 
     int App::wait_ms() const {
+        const std::uint64_t now = SDL_GetTicks();
         int wait = _loading ? StatusBar::LOADING_TICK_MS : -1;
 
-        if (_playback.playing()) {
-            const std::uint64_t now = SDL_GetTicks();
-            const int due = _playback.due() > now ? static_cast<int>(_playback.due() - now) : 0;
+        const auto until = [&](const std::uint64_t at) {
+            const int left = at > now ? static_cast<int>(at - now) : 0;
 
-            wait = wait < 0 ? due : std::min(wait, due);
+            wait = wait < 0 ? left : std::min(wait, left);
+        };
+
+        if (_playback.playing()) {
+            until(_playback.due());
+        }
+
+        if (_settling) {
+            until(_movedAt + static_cast<std::uint64_t>(Refiner::REST_MS));
         }
 
         return wait;

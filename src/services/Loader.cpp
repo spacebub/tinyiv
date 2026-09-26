@@ -60,6 +60,13 @@ namespace tiv {
             return {std::max(static_cast<int>(std::floor(info.width * shrink)), 1), std::max(static_cast<int>(std::floor(info.height * shrink)), 1)};
         }
 
+        // Fits the box, enlarged if need be.
+        Box filled(const Decode::Info &info, const int boxWidth, const int boxHeight) {
+            const double scale = std::min(static_cast<double>(boxWidth) / info.width, static_cast<double>(boxHeight) / info.height);
+
+            return {std::max(static_cast<int>(std::floor(info.width * scale)), 1), std::max(static_cast<int>(std::floor(info.height * scale)), 1)};
+        }
+
         // A pyramid is its base and a third again.
         std::size_t pyramid_bytes(const Box box) {
             return static_cast<std::size_t>(box.width) * static_cast<std::size_t>(box.height) * Bitmap::CHANNELS * 4 / 3;
@@ -226,7 +233,10 @@ namespace tiv {
         const Entry &entry = found->second;
         const bool animate = file == _request.current && entry.info.frames > 1 && entry.animation == nullptr;
 
-        if (!entry.error.empty() || (entry.whole && !animate) || !near(file)) {
+        // A scalable image is only ever rendered for the screen, the Refiner draws it sharper.
+        const bool done = entry.whole || Decode::scalable(entry.info.kind);
+
+        if (!entry.error.empty() || (done && !animate) || !near(file)) {
             return false;
         }
 
@@ -398,6 +408,7 @@ namespace tiv {
             screenHeight = _screenHeight;
         }
 
+        const bool scalable = Decode::scalable(entry.info.kind);
         const bool cheap = Decode::scales_cheaply(entry.info.kind);
         const bool over = entry.info.pixels() > MAX_PIXELS;
         const std::size_t nativeBytes = static_cast<std::size_t>(entry.info.pixels()) * Bitmap::CHANNELS;
@@ -409,7 +420,9 @@ namespace tiv {
         Decode::Fit fit = Decode::Fit::Cheap;
         bool whole = true;
 
-        if (!job.whole && cheap) {
+        if (scalable) {
+            box = filled(entry.info, screenWidth, screenHeight);
+        } else if (!job.whole && cheap) {
             box = fitted(entry.info, screenWidth, screenHeight);
             whole = false;
         } else if (over && !nativeThenHalve) {
@@ -419,7 +432,7 @@ namespace tiv {
             box = capped(entry.info);
         }
 
-        std::size_t estimate = pyramid_bytes(whole ? capped(entry.info) : box);
+        std::size_t estimate = pyramid_bytes(whole && !scalable ? capped(entry.info) : box);
 
         if (whole && nativeThenHalve) {
             estimate += nativeBytes;
@@ -450,7 +463,7 @@ namespace tiv {
             whole = true;
         }
 
-        if (!over && whole && entry.info.kind != Decode::Format::Other) {
+        if (!over && whole && !scalable && entry.info.kind != Decode::Format::Other) {
             entry.info.width = decoded.width();
             entry.info.height = decoded.height();
         }
@@ -701,7 +714,9 @@ namespace tiv {
             return;
         }
 
-        post({_request.generation, entry.whole ? Kind::Full : Kind::Preview, entry.info, entry.pyramid, {}, false, entry.animation});
+        const bool full = entry.whole || Decode::scalable(entry.info.kind);
+
+        post({_request.generation, full ? Kind::Full : Kind::Preview, entry.info, entry.pyramid, {}, false, entry.animation});
     }
 
     void Loader::post(Result result) {

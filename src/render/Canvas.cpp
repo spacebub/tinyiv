@@ -7,6 +7,8 @@
  *	spacebub <spacebubs@proton.me>
  */
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -44,6 +46,26 @@ namespace tiv {
 
         Rect whole(const Tiles &tiles) {
             return {0.0, 0.0, static_cast<double>(tiles.width()), static_cast<double>(tiles.height())};
+        }
+
+        bool contains(const Rect &outer, const Rect &inner) {
+            constexpr double SLACK = 1e-6;
+
+            return inner.x >= outer.x - SLACK && inner.y >= outer.y - SLACK && inner.x + inner.width <= outer.x + outer.width + SLACK
+                   && inner.y + inner.height <= outer.y + outer.height + SLACK;
+        }
+
+        // What is left of the outer rect around the inner one, which lies within it, as bands.
+        std::array<Rect, 4> around(const Rect &outer, const Rect &inner) {
+            const double right = inner.x + inner.width;
+            const double bottom = inner.y + inner.height;
+
+            return {{
+                    {outer.x, outer.y, outer.width, inner.y - outer.y},
+                    {outer.x, bottom, outer.width, outer.y + outer.height - bottom},
+                    {outer.x, inner.y, inner.x - outer.x, inner.height},
+                    {right, inner.y, outer.x + outer.width - right, inner.height},
+            }};
         }
     }
 
@@ -87,6 +109,10 @@ namespace tiv {
     void Canvas::show(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height) {
         if (pyramid == nullptr || pyramid->empty()) {
             return;
+        }
+
+        if (image != _current.image) {
+            _detail = {};
         }
 
         Held previous = std::move(_current);
@@ -165,11 +191,29 @@ namespace tiv {
         _warm.push_back(build(std::move(pyramid), image, width, height, {}));
     }
 
+    void Canvas::refine(std::shared_ptr<const Bitmap> bitmap, const double scale, const int x, const int y) {
+        if (bitmap == nullptr || bitmap->empty() || _current.sheets.empty() || scale <= 0.0) {
+            return;
+        }
+
+        const Rect area{x / scale, y / scale, bitmap->width() / scale, bitmap->height() / scale};
+
+        _detail = {_current.image, scale, area, std::make_unique<Tiles>(_renderer, _maxTexture, std::move(bitmap))};
+
+        // Whole, so it never has holes to fall back from.
+        _detail.tiles->upload(whole(*_detail.tiles), ~std::size_t{0}, _frame);
+    }
+
+    bool Canvas::refined(const double zoom, const Rect &area) const {
+        return _detail.tiles != nullptr && _detail.image == _current.image && _detail.scale == zoom && contains(_detail.area, area);
+    }
+
     void Canvas::keep(const std::span<const std::uint64_t> images) {
         std::erase_if(_warm, [&](const Held &held) { return std::ranges::find(images, held.image) == images.end(); });
     }
 
     void Canvas::clear() {
+        _detail = {};
         _current = {};
         _warm.clear();
     }
@@ -286,7 +330,45 @@ namespace tiv {
             return;
         }
 
-        draw_sheet(_current, wanted(_current, viewport.zoom()), visible, image);
+        const std::size_t sheet = wanted(_current, viewport.zoom());
+
+        if (!detail_wins(viewport.zoom(), sheet)) {
+            draw_sheet(_current, sheet, visible, image);
+
+            return;
+        }
+
+        const Rect placed{image.x + (_detail.area.x * viewport.zoom()), image.y + (_detail.area.y * viewport.zoom()), _detail.area.width * viewport.zoom(), _detail.area.height * viewport.zoom()};
+        const Rect over = intersect(visible, placed);
+
+        if (over.width <= 0.0 || over.height <= 0.0) {
+            draw_sheet(_current, sheet, visible, image);
+
+            return;
+        }
+
+        // The levels only around the rendering, since translucent pixels drawn twice show.
+        for (const Rect &band : around(visible, over)) {
+            if (band.width > 0.0 && band.height > 0.0) {
+                draw_sheet(_current, sheet, band, image);
+            }
+        }
+
+        Tiles &tiles = *_detail.tiles;
+        const double perX = tiles.width() / placed.width;
+        const double perY = tiles.height() / placed.height;
+        const Rect area{(over.x - placed.x) * perX, (over.y - placed.y) * perY, over.width * perX, over.height * perY};
+
+        tiles.draw(area, over, _frame, [](const Rect &) {});
+    }
+
+    // Whichever is nearer the zoom, the rendering or the level, as a ratio either way.
+    bool Canvas::detail_wins(const double zoom, const std::size_t sheet) const {
+        if (_detail.tiles == nullptr || _detail.image != _current.image) {
+            return false;
+        }
+
+        return std::abs(std::log(_detail.scale / zoom)) <= std::abs(std::log(_current.sheets.at(sheet).scale / zoom));
     }
 
     // Whatever the sheet is missing under the screen rect is drawn from the one below it.
@@ -344,6 +426,8 @@ namespace tiv {
             });
         };
 
-        return std::accumulate(_warm.begin(), _warm.end(), sum(_current), [&](const std::size_t total, const Held &held) { return total + sum(held); });
+        const std::size_t detail = _detail.tiles != nullptr ? _detail.tiles->resident_bytes() : 0;
+
+        return std::accumulate(_warm.begin(), _warm.end(), sum(_current) + detail, [&](const std::size_t total, const Held &held) { return total + sum(held); });
     }
 }

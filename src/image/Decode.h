@@ -87,6 +87,9 @@ namespace tiv::Decode {
     // so a screen sized preview is worth asking for before the full decode.
     [[nodiscard]] bool scales_cheaply(Format format);
 
+    // True when the format is drawn from shapes, so it renders sharp at any scale.
+    [[nodiscard]] bool scalable(Format format);
+
     // True when the format has its own decoder here rather than going through libvips.
     [[nodiscard]] bool direct(Format format);
 
@@ -99,14 +102,19 @@ namespace tiv::Decode {
     // Decodes straight into an RGBA8 bitmap, oriented for display. A box smaller than the
     // image asks for the size the image would have fitted into it: formats that scale
     // cheaply deliver that size, every other one delivers the image whole and leaves the
-    // shrinking to the caller. Force makes every format deliver a size within the box without
-    // ever holding the image whole, for images too large for that.
+    // shrinking to the caller. Scalable formats render to fit the box, larger or smaller.
+    // Force makes every format deliver a size within the box without ever holding the image
+    // whole, for images too large for that.
     enum class Fit : std::uint8_t {
         Cheap,
         Force,
     };
 
     bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error = nullptr, Abort *abort = nullptr, Fit fit = Fit::Cheap);
+
+    // Part of a scalable image rendered at the scale, the part given in pixels of the image
+    // at that scale.
+    bool render(const std::filesystem::path &file, double scale, int x, int y, int width, int height, Bitmap *out, std::string *error = nullptr, Abort *abort = nullptr);
 
     struct Frame {
         Bitmap bitmap;

@@ -6,9 +6,10 @@ stepping is instant and gigapixel files pan without a stutter. One window, one f
 image. No configuration, no editing, no extra features.
 
 Every format libvips reads is shown. JPEG, PNG, WebP and JPEG XL go through their own
-decoders, with a cheap DCT scaled preview for large JPEGs. Animated GIF and WebP play in a
-loop, with a bar along the bottom to pause and seek. A file nothing can read says so in place
-of the image.
+decoders, with a cheap DCT scaled preview for large JPEGs. SVG and PDF render again at the
+zoom on screen once the view rests, so they stay sharp at any zoom. Animated GIF and WebP
+play in a loop, with a bar along the bottom to pause and seek. A file nothing can read says
+so in place of the image.
 
 ## Building
 
