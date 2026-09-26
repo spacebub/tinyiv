@@ -62,6 +62,10 @@ namespace tiv {
             return SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE * TEXT_SCALE * scale;
         }
 
+        float badge_width(const std::string &text, const float scale) {
+            return (static_cast<float>(text.size()) * glyph(scale)) + (2.0F * PADDING * scale);
+        }
+
         // Cut to the width in glyphs, ending in three dots when something had to go.
         std::string fitted(const std::string &text, const float width, const float scale) {
             const auto room = static_cast<std::size_t>(std::max(width / glyph(scale), 0.0F));
@@ -115,7 +119,7 @@ namespace tiv {
     void StatusBar::badge(SDL_Renderer *renderer, const double x, const double y, const float scale, const std::string &given, const bool loading) {
         const std::string text = loading ? spinning(given) : given;
         const float padding = PADDING * scale;
-        const float width = (static_cast<float>(text.size()) * glyph(scale)) + (2.0F * padding);
+        const float width = badge_width(text, scale);
         const float height = HEIGHT * scale;
         const SDL_FRect area{static_cast<float>(x), static_cast<float>(y) - height, width, height};
 
@@ -125,5 +129,12 @@ namespace tiv {
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
         text_at(renderer, area.x + padding, area.y + ((height - glyph(scale)) / 2.0F), scale, text);
+    }
+
+    void StatusBar::notice(SDL_Renderer *renderer, const Rect &area, const float scale, const std::string &text) {
+        const double x = area.x + ((area.width - badge_width(text, scale)) / 2.0);
+        const double y = area.y + ((area.height + (HEIGHT * scale)) / 2.0);
+
+        badge(renderer, std::max(x, area.x), y, scale, text, false);
     }
 }

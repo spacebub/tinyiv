@@ -48,6 +48,9 @@ namespace tiv {
         // A bitmap of the same size whose pixels later uploads read.
         void rebind(std::shared_ptr<const Bitmap> bitmap);
 
+        // Like rebind(), and every resident tile is rewritten from the new pixels.
+        void refresh(std::shared_ptr<const Bitmap> bitmap);
+
         // Uploads the tiles meeting the area, nearest its centre first, until the budget is
         // spent. Returns the bytes spent.
         std::size_t upload(const Rect &area, std::size_t budget, std::uint64_t stamp);
@@ -80,6 +83,7 @@ namespace tiv {
         [[nodiscard]] Tile &at(int column, int row) { return _tiles.at((static_cast<std::size_t>(row) * static_cast<std::size_t>(_columns)) + static_cast<std::size_t>(column)); }
         [[nodiscard]] const Tile &at(int column, int row) const { return _tiles.at((static_cast<std::size_t>(row) * static_cast<std::size_t>(_columns)) + static_cast<std::size_t>(column)); }
         [[nodiscard]] static std::size_t bytes_of(const Tile &tile);
+        void fill(const Tile &tile) const;
         void release(Tile &tile);
 
         SDL_Renderer *_renderer;

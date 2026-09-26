@@ -11,12 +11,14 @@
 
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "image/Bitmap.h"
 
@@ -49,6 +51,8 @@ namespace tiv::Decode {
         Format kind = Format::Other;
         // EXIF orientation, 1 to 8.
         int orientation = 1;
+        // More than one for an animated GIF.
+        int frames = 1;
 
         [[nodiscard]] long pixels() const { return static_cast<long>(width) * height; }
     };
@@ -86,6 +90,9 @@ namespace tiv::Decode {
     // True when the format has its own decoder here rather than going through libvips.
     [[nodiscard]] bool direct(Format format);
 
+    // False when neither a decoder here nor libvips knows the file.
+    [[nodiscard]] bool recognised(const std::filesystem::path &file);
+
     // Reads the header only.
     bool probe(const std::filesystem::path &file, Info *info, std::string *error = nullptr);
 
@@ -100,6 +107,16 @@ namespace tiv::Decode {
     };
 
     bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error = nullptr, Abort *abort = nullptr, Fit fit = Fit::Cheap);
+
+    struct Frame {
+        Bitmap bitmap;
+        // How long the frame stays up, in milliseconds.
+        int delay = 0;
+    };
+
+    // Every frame of an animation, each shrunk by the same integer factor as far as it takes
+    // for all of them to fit in the bytes given.
+    bool load_frames(const std::filesystem::path &file, std::size_t maxBytes, std::vector<Frame> *out, std::string *error = nullptr, Abort *abort = nullptr);
 
     // libvips starts on first use. This frees it, once nothing decodes any more.
     void shutdown();

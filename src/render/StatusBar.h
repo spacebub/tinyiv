@@ -32,6 +32,9 @@ namespace tiv::StatusBar {
     // spinner after the text while loading.
     void badge(SDL_Renderer *renderer, double x, double y, float scale, const std::string &given, bool loading);
 
+    // The badge, centred in the area, for a message in place of the image.
+    void notice(SDL_Renderer *renderer, const Rect &area, float scale, const std::string &text);
+
 }
 
 

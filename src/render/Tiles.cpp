@@ -70,6 +70,26 @@ namespace tiv {
         }
     }
 
+    void Tiles::refresh(std::shared_ptr<const Bitmap> bitmap) {
+        if (bitmap->width() != _width || bitmap->height() != _height) {
+            return;
+        }
+
+        _bitmap = std::move(bitmap);
+
+        for (const Tile &tile : _tiles) {
+            if (tile.texture != nullptr) {
+                fill(tile);
+            }
+        }
+    }
+
+    void Tiles::fill(const Tile &tile) const {
+        const std::span<const std::uint8_t> origin = _bitmap->row(tile.area.y).subspan(static_cast<std::size_t>(tile.area.x) * Bitmap::CHANNELS);
+
+        SDL_UpdateTexture(tile.texture, nullptr, origin.data(), static_cast<int>(_bitmap->pitch()));
+    }
+
     std::size_t Tiles::bytes_of(const Tile &tile) {
         return static_cast<std::size_t>(tile.area.w) * static_cast<std::size_t>(tile.area.h) * Bitmap::CHANNELS;
     }
@@ -149,9 +169,7 @@ namespace tiv {
                 break;
             }
 
-            const std::span<const std::uint8_t> origin = _bitmap->row(tile.area.y).subspan(static_cast<std::size_t>(tile.area.x) * Bitmap::CHANNELS);
-
-            SDL_UpdateTexture(tile.texture, nullptr, origin.data(), static_cast<int>(_bitmap->pitch()));
+            fill(tile);
             SDL_SetTextureScaleMode(tile.texture, SDL_SCALEMODE_NEAREST);
             SDL_SetTextureBlendMode(tile.texture, SDL_BLENDMODE_BLEND);
 

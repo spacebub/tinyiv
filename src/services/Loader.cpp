@@ -21,6 +21,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "image/Animation.h"
 #include "image/Bitmap.h"
 #include "image/Decode.h"
 #include "image/Pyramid.h"
@@ -206,21 +207,26 @@ namespace tiv {
     }
 
     // What a file needs decoded, if anything. A file that is not near never needs the whole
-    // image, since it would be trimmed to the screen straight away.
-    bool Loader::wants_job(const std::filesystem::path &file, bool *whole, bool *later) const {
+    // image, since it would be trimmed to the screen straight away, and only the current one
+    // needs its frames.
+    bool Loader::wants_job(const std::filesystem::path &file, bool *whole, bool *frames, bool *later) const {
         if (running(file)) {
             return false;
         }
 
         const auto found = _cache.find(file);
 
-        if (found == _cache.end()) {
-            *whole = false;
+        *whole = false;
+        *frames = false;
 
+        if (found == _cache.end()) {
             return true;
         }
 
-        if (!found->second.error.empty() || found->second.whole || !near(file)) {
+        const Entry &entry = found->second;
+        const bool animate = file == _request.current && entry.info.frames > 1 && entry.animation == nullptr;
+
+        if (!entry.error.empty() || (entry.whole && !animate) || !near(file)) {
             return false;
         }
 
@@ -230,7 +236,8 @@ namespace tiv {
             return false;
         }
 
-        *whole = true;
+        *whole = !entry.whole;
+        *frames = entry.whole;
 
         return true;
     }
@@ -262,8 +269,9 @@ namespace tiv {
             }
 
             bool whole = false;
+            bool frames = false;
 
-            if (!wants_job(*file, &whole, later)) {
+            if (!wants_job(*file, &whole, &frames, later)) {
                 continue;
             }
 
@@ -274,6 +282,7 @@ namespace tiv {
 
             out->file = *file;
             out->whole = whole;
+            out->frames = frames;
             out->abort = std::make_shared<Decode::Abort>();
             out->estimate = 0;
 
@@ -290,7 +299,7 @@ namespace tiv {
 
         while (_running) {
             if (!_trash.empty()) {
-                std::vector<std::shared_ptr<const Pyramid>> trash;
+                std::vector<std::shared_ptr<const void>> trash;
 
                 trash.swap(_trash);
                 hold.unlock();
@@ -347,18 +356,33 @@ namespace tiv {
         return true;
     }
 
+    // Forgets the job for the file and the memory it was expected to take. Under the lock.
+    void Loader::finish(const std::filesystem::path &file) {
+        if (const auto job = std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == file; }); job != _jobs.end()) {
+            _inflight -= std::min(_inflight, job->estimate);
+            _jobs.erase(job);
+        }
+    }
+
     void Loader::decode(Job &job) {
+        if (job.frames) {
+            decode_frames(job);
+
+            return;
+        }
+
         Entry entry;
         Decode::Abort &abort = *job.abort;
 
         const auto drop = [&] {
             const std::scoped_lock hold(_guard);
 
-            std::erase_if(_jobs, [&](const Job &other) { return other.file == job.file; });
+            finish(job.file);
             _wake.notify_all();
         };
 
         if (!Decode::probe(job.file, &entry.info, &entry.error)) {
+            entry.unsupported = !Decode::recognised(job.file);
             store(job.file, std::move(entry));
 
             return;
@@ -443,21 +467,79 @@ namespace tiv {
         store(job.file, std::move(entry));
     }
 
+    void Loader::decode_frames(Job &job) {
+        const auto drop = [&] {
+            const std::scoped_lock hold(_guard);
+
+            finish(job.file);
+            _wake.notify_all();
+        };
+
+        Decode::Info info;
+        int thumbWidth = 0;
+        int thumbHeight = 0;
+
+        {
+            const std::scoped_lock hold(_guard);
+
+            if (const auto found = _cache.find(job.file); found != _cache.end()) {
+                info = found->second.info;
+            }
+
+            thumbWidth = _screenWidth / THUMB_DIVISOR;
+            thumbHeight = _screenHeight / THUMB_DIVISOR;
+        }
+
+        if (info.frames < 2) {
+            drop();
+
+            return;
+        }
+
+        const std::size_t estimate = std::min(pyramid_bytes(capped(info)) * static_cast<std::size_t>(info.frames), MAX_ANIMATION_BYTES);
+
+        if (!admit(job, estimate)) {
+            return;
+        }
+
+        std::vector<Decode::Frame> frames;
+
+        // The levels below each frame add up to a third of it again.
+        if (!Decode::load_frames(job.file, MAX_ANIMATION_BYTES / 4 * 3, &frames, nullptr, job.abort.get())) {
+            if (job.abort->requested()) {
+                drop();
+            } else {
+                store_frames(job.file, nullptr);
+            }
+
+            return;
+        }
+
+        auto animation = std::make_shared<Animation>();
+
+        animation->frames.reserve(frames.size());
+
+        for (Decode::Frame &frame : frames) {
+            if (job.abort->requested()) {
+                drop();
+
+                return;
+            }
+
+            animation->frames.push_back({std::make_shared<const Pyramid>(Pyramid::build(std::move(frame.bitmap), thumbWidth, thumbHeight)), frame.delay});
+        }
+
+        store_frames(job.file, std::move(animation));
+    }
+
     void Loader::store(const std::filesystem::path &file, Entry entry) {
         {
             const std::scoped_lock hold(_guard);
 
-            if (const auto job = std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == file; }); job != _jobs.end()) {
-                _inflight -= std::min(_inflight, job->estimate);
-                _jobs.erase(job);
-            }
+            finish(file);
 
             if (const auto old = _cache.find(file); old != _cache.end()) {
-                if (old->second.pyramid != nullptr) {
-                    _bytes -= old->second.pyramid->bytes();
-                    _trash.push_back(std::move(old->second.pyramid));
-                }
-
+                release(old->second);
                 _cache.erase(old);
             }
 
@@ -480,30 +562,87 @@ namespace tiv {
         _wake.notify_all();
     }
 
+    void Loader::store_frames(const std::filesystem::path &file, std::shared_ptr<const Animation> animation) {
+        {
+            const std::scoped_lock hold(_guard);
+
+            finish(file);
+
+            if (const auto found = _cache.find(file); found != _cache.end()) {
+                Entry &entry = found->second;
+
+                release_animation(entry);
+
+                if (animation == nullptr) {
+                    entry.info.frames = 1;
+                } else {
+                    _bytes += animation->bytes();
+                    entry.animation = std::move(animation);
+                }
+
+                if (file == _request.current) {
+                    post_cached(entry);
+                }
+
+                trim();
+            } else if (animation != nullptr) {
+                _trash.push_back(std::move(animation));
+            }
+        }
+
+        _wake.notify_all();
+    }
+
+    void Loader::release(Entry &entry) {
+        if (entry.pyramid != nullptr) {
+            _bytes -= entry.pyramid->bytes();
+            _trash.push_back(std::move(entry.pyramid));
+        }
+
+        release_animation(entry);
+    }
+
+    void Loader::release_animation(Entry &entry) {
+        if (entry.animation != nullptr) {
+            _bytes -= entry.animation->bytes();
+            _trash.push_back(std::move(entry.animation));
+        }
+    }
+
     // Decodes for files navigation has left behind stop, and so do whole decodes for files
     // that are no longer neighbours, since they would be trimmed on arrival.
     void Loader::abort_strays() {
         for (const Job &job : _jobs) {
             const int at = rank(job.file);
 
-            if (at == FAR || (job.whole && !near(job.file))) {
+            if (at == FAR || (job.whole && !near(job.file)) || (job.frames && job.file != _request.current)) {
                 job.abort->request();
             }
         }
     }
 
-    // Full resolution stays only for the current image and its neighbours. Beyond the
-    // budget, the files farthest from the current go, least recently wanted first, then the
-    // far end of the window itself, and last of all the neighbours drop to the screen. The
-    // current image is never touched.
+    // Full resolution and frames stay only for the current image and its neighbours. Beyond
+    // the budget, the files farthest from the current go, least recently wanted first, then
+    // the far end of the window itself, then the neighbours' frames, and last of all the
+    // neighbours drop to the screen. The current image is never touched.
     void Loader::trim() {
         for (auto &[file, entry] : _cache) {
             if (entry.whole && entry.pyramid != nullptr && !near(file)) {
                 cut(entry);
             }
+
+            if (!near(file)) {
+                release_animation(entry);
+            }
         }
 
         while (_bytes > _budget && evict_one()) {
+        }
+
+        for (auto &[file, entry] : _cache) {
+            if (_bytes > _budget && file != _request.current) {
+                release_animation(entry);
+            }
         }
 
         for (auto &[file, entry] : _cache) {
@@ -549,8 +688,7 @@ namespace tiv {
             return false;
         }
 
-        _bytes -= victim->second.pyramid->bytes();
-        _trash.push_back(std::move(victim->second.pyramid));
+        release(victim->second);
         _cache.erase(victim);
 
         return true;
@@ -558,12 +696,12 @@ namespace tiv {
 
     void Loader::post_cached(const Entry &entry) {
         if (!entry.error.empty()) {
-            post({_request.generation, Kind::Failed, entry.info, nullptr, entry.error});
+            post({_request.generation, Kind::Failed, entry.info, nullptr, entry.error, entry.unsupported, nullptr});
 
             return;
         }
 
-        post({_request.generation, entry.whole ? Kind::Full : Kind::Preview, entry.info, entry.pyramid, {}});
+        post({_request.generation, entry.whole ? Kind::Full : Kind::Preview, entry.info, entry.pyramid, {}, false, entry.animation});
     }
 
     void Loader::post(Result result) {

@@ -23,6 +23,7 @@
 #include <thread>
 #include <vector>
 
+#include "image/Animation.h"
 #include "image/Decode.h"
 #include "image/Pyramid.h"
 
@@ -30,7 +31,8 @@ namespace tiv {
     // The threads that decode. Requests coalesce to the latest, the files around it decode
     // in parallel nearest first, whatever navigation has passed is aborted, and the cache
     // stays within its budget: full resolution for the image on screen and its two
-    // neighbours, screen sized pyramids for the rest, the farthest evicted first.
+    // neighbours, screen sized pyramids for the rest, the farthest evicted first. Once
+    // navigation rests on an animation, its frames decode too, and stay while it is near.
     class Loader {
 
     public:
@@ -48,6 +50,10 @@ namespace tiv {
             Decode::Info info;
             std::shared_ptr<const Pyramid> pyramid;
             std::string error;
+            // Failed because nothing here reads the format.
+            bool unsupported = false;
+            // Every frame, once decoded, for an image whose info counts more than one.
+            std::shared_ptr<const Animation> animation;
         };
 
         // Full resolution is capped here, so one image never takes more than this many pixels.
@@ -56,6 +62,9 @@ namespace tiv {
         // Navigation has to be still this long before a format that already gave a cheap
         // preview is decoded whole.
         static constexpr int REST_MS = 120;
+
+        // The frames of one animation take at most this, shrunk to fit.
+        static constexpr std::size_t MAX_ANIMATION_BYTES = std::size_t{384} * 1024 * 1024;
 
         // The smallest level is the screen divided by this.
         static constexpr int THUMB_DIVISOR = 4;
@@ -104,7 +113,9 @@ namespace tiv {
             std::shared_ptr<const Pyramid> pyramid;
             // The first level is the whole image, up to the cap. Off once trimmed to the screen.
             bool whole = false;
+            std::shared_ptr<const Animation> animation;
             std::string error;
+            bool unsupported = false;
             // The request that last wanted it.
             std::uint64_t used = 0;
         };
@@ -112,6 +123,8 @@ namespace tiv {
         struct Job {
             std::filesystem::path file;
             bool whole = false;
+            // Every frame of an animation, rather than the first.
+            bool frames = false;
             std::shared_ptr<Decode::Abort> abort;
             // Bytes the decode is expected to add, once known.
             std::size_t estimate = 0;
@@ -127,10 +140,16 @@ namespace tiv {
 
         void work();
         bool pick(Job *out, bool *later);
-        [[nodiscard]] bool wants_job(const std::filesystem::path &file, bool *whole, bool *later) const;
+        [[nodiscard]] bool wants_job(const std::filesystem::path &file, bool *whole, bool *frames, bool *later) const;
         void decode(Job &job);
+        void decode_frames(Job &job);
         bool admit(const Job &job, std::size_t estimate);
+        void finish(const std::filesystem::path &file);
         void store(const std::filesystem::path &file, Entry entry);
+        // A null animation means the frames failed, and the image stays still.
+        void store_frames(const std::filesystem::path &file, std::shared_ptr<const Animation> animation);
+        void release(Entry &entry);
+        void release_animation(Entry &entry);
         void abort_strays();
         void trim();
         void cut(Entry &entry);
@@ -153,8 +172,8 @@ namespace tiv {
         std::size_t _inflight = 0;
         // Set when a prefetch could not be admitted, cleared when memory or the request changes.
         bool _starved = false;
-        // Pyramids evicted on the main thread, freed by whichever worker wakes next.
-        std::vector<std::shared_ptr<const Pyramid>> _trash;
+        // Pyramids and animations evicted on the main thread, freed by whichever worker wakes next.
+        std::vector<std::shared_ptr<const void>> _trash;
 
         int _screenWidth = 3840;
         int _screenHeight = 2160;

@@ -23,6 +23,7 @@
 #include "image/Decode.h"
 #include "render/Canvas.h"
 #include "services/Loader.h"
+#include "view/Playback.h"
 #include "view/Viewport.h"
 
 namespace tiv {
@@ -55,9 +56,15 @@ namespace tiv {
         // Direction is the way the wheel was going, so prefetch leans that way.
         void show(int index, int direction);
         void handle(const SDL_Event &event);
+        bool handle_play_bar(const SDL_Event &event);
+        void seek_to(double x);
         void deliver();
         void warm_neighbours();
         void frame();
+
+        // Milliseconds the loop may sleep, or -1 for until the next event.
+        [[nodiscard]] int wait_ms() const;
+        [[nodiscard]] Rect play_bar() const;
 
         [[nodiscard]] std::string bar_left() const;
         [[nodiscard]] std::string bar_right() const;
@@ -68,6 +75,7 @@ namespace tiv {
 
         Folder _folder;
         Viewport _viewport;
+        Playback _playback;
         Input _input;
         std::unique_ptr<Canvas> _canvas;
         std::unique_ptr<Loader> _loader;
@@ -81,7 +89,10 @@ namespace tiv {
         // image behind a preview.
         bool _loading = false;
         int _direction = 1;
-        int _failures = 0;
+        // Shown in place of an image that could not be opened.
+        std::string _failure;
+        // A drag that started on the play bar's track.
+        bool _seeking = false;
 
         bool _fullscreen = false;
         bool _running = true;

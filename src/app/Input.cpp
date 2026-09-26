@@ -39,6 +39,8 @@ namespace tiv {
                         return Action::First;
                     case SDLK_END:
                         return Action::Last;
+                    case SDLK_SPACE:
+                        return Action::TogglePlay;
                     default:
                         return Action::None;
                 }

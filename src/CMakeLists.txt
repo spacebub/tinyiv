@@ -9,6 +9,8 @@ add_executable(tinyiv
         gallery/Folder.cpp
         gallery/Folder.h
 
+        image/Animation.cpp
+        image/Animation.h
         image/Bitmap.cpp
         image/Bitmap.h
         image/Decode.cpp
@@ -24,6 +26,8 @@ add_executable(tinyiv
 
         render/Canvas.cpp
         render/Canvas.h
+        render/PlayBar.cpp
+        render/PlayBar.h
         render/StatusBar.cpp
         render/StatusBar.h
         render/Tiles.cpp
@@ -32,6 +36,8 @@ add_executable(tinyiv
         services/Loader.cpp
         services/Loader.h
 
+        view/Playback.cpp
+        view/Playback.h
         view/Viewport.cpp
         view/Viewport.h)
 

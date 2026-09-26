@@ -24,8 +24,10 @@
 #include "gallery/Folder.h"
 #include "image/Decode.h"
 #include "render/Canvas.h"
+#include "render/PlayBar.h"
 #include "render/StatusBar.h"
 #include "services/Loader.h"
+#include "view/Playback.h"
 #include "view/Viewport.h"
 
 namespace tiv {
@@ -178,6 +180,9 @@ namespace tiv {
         _bytes = std::filesystem::file_size(_folder.current(), failure);
         _info = {};
         _loading = true;
+        _failure.clear();
+        _seeking = false;
+        _playback.stop();
 
         std::vector<std::filesystem::path> ahead;
         std::vector<std::filesystem::path> behind;
@@ -201,15 +206,15 @@ namespace tiv {
             const bool idle = !_canvas->pending(_viewport) && _repaints == 0;
 
             // Nothing to upload or repaint means nothing to do until something happens, except
-            // that a loading indicator has to keep moving.
-            if (idle && _loading) {
-                if (SDL_WaitEventTimeout(&event, StatusBar::LOADING_TICK_MS)) {
+            // that a loading indicator has to keep moving and an animation has frames due.
+            if (idle) {
+                const int wait = wait_ms();
+
+                if (wait < 0 ? SDL_WaitEvent(&event) : SDL_WaitEventTimeout(&event, wait)) {
                     handle(event);
-                } else {
+                } else if (_loading) {
                     _dirty = true;
                 }
-            } else if (idle && SDL_WaitEvent(&event)) {
-                handle(event);
             }
 
             while (_running && SDL_PollEvent(&event)) {
@@ -218,6 +223,11 @@ namespace tiv {
 
             if (!_running) {
                 break;
+            }
+
+            if (_playback.advance(SDL_GetTicks())) {
+                _canvas->replace(_playback.pyramid());
+                _dirty = true;
             }
 
             if (_canvas->pending(_viewport)) {
@@ -243,6 +253,10 @@ namespace tiv {
         if (is_window_event(event)) {
             layout();
 
+            return;
+        }
+
+        if (handle_play_bar(event)) {
             return;
         }
 
@@ -278,12 +292,75 @@ namespace tiv {
             case Input::Action::Last:
                 show(_folder.count() - 1, -1);
                 break;
+            case Input::Action::TogglePlay:
+                _playback.toggle(SDL_GetTicks());
+                _dirty = true;
+                break;
             case Input::Action::Redraw:
                 _dirty = true;
                 break;
             case Input::Action::None:
                 break;
         }
+    }
+
+    // Clicks and drags on the play bar, which the view never sees. True when the event was one.
+    bool App::handle_play_bar(const SDL_Event &event) {
+        if (!_playback.active()) {
+            return false;
+        }
+
+        const float density = SDL_GetWindowPixelDensity(_window);
+
+        switch (event.type) {
+            case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+                if (event.button.button != SDL_BUTTON_LEFT) {
+                    return false;
+                }
+
+                const double x = event.button.x * density;
+
+                switch (PlayBar::hit(play_bar(), SDL_GetWindowDisplayScale(_window), x, event.button.y * density)) {
+                    case PlayBar::Part::Toggle:
+                        _playback.toggle(SDL_GetTicks());
+                        _dirty = true;
+                        break;
+                    case PlayBar::Part::Track:
+                        _seeking = true;
+                        seek_to(x);
+                        break;
+                    case PlayBar::Part::None:
+                        return false;
+                }
+
+                return true;
+            }
+
+            case SDL_EVENT_MOUSE_MOTION:
+                if (_seeking) {
+                    seek_to(event.motion.x * density);
+                }
+
+                return _seeking;
+
+            case SDL_EVENT_MOUSE_BUTTON_UP:
+                if (!_seeking || event.button.button != SDL_BUTTON_LEFT) {
+                    return false;
+                }
+
+                _seeking = false;
+
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    void App::seek_to(const double x) {
+        _playback.seek(PlayBar::seek(play_bar(), SDL_GetWindowDisplayScale(_window), x), SDL_GetTicks());
+        _canvas->replace(_playback.pyramid());
+        _dirty = true;
     }
 
     void App::deliver() {
@@ -297,9 +374,12 @@ namespace tiv {
             if (result.kind == Loader::Kind::Failed) {
                 std::println(stderr, "tinyiv: {}", result.error);
 
-                if (++_failures < _folder.count()) {
-                    show(_folder.index() + _direction, _direction);
-                }
+                // The previous image stays on the canvas, so an empty view is what hides it.
+                _failure = result.unsupported ? "Unsupported file format" : "Could not open this image";
+                _loading = false;
+                _shown = result.generation;
+                _viewport.set_image(0, 0);
+                _dirty = true;
 
                 continue;
             }
@@ -308,11 +388,19 @@ namespace tiv {
             if (_shown != result.generation) {
                 _shown = result.generation;
                 _info = result.info;
-                _failures = 0;
                 _viewport.set_image(_info.width, _info.height);
             }
 
+            if (result.animation != nullptr && result.animation == _playback.animation()) {
+                continue;
+            }
+
             _canvas->show(result.pyramid, static_cast<std::uint64_t>(_folder.index()), _info.width, _info.height);
+
+            if (result.animation != nullptr) {
+                _playback.start(result.animation, SDL_GetTicks());
+                _canvas->replace(_playback.pyramid());
+            }
             // Straight away, or the frame between the old image and this one is blank.
             _canvas->upload(_viewport, UPLOAD_BUDGET);
 
@@ -321,7 +409,8 @@ namespace tiv {
                     _loading = true;
                     break;
                 case Loader::Kind::Full:
-                    _loading = false;
+                    // An animation is still loading until its frames arrive.
+                    _loading = result.info.frames > 1 && result.animation == nullptr;
                     break;
                 case Loader::Kind::Failed:
                     break;
@@ -375,6 +464,12 @@ namespace tiv {
 
         if (_viewport.has_image()) {
             _canvas->draw(_viewport);
+        } else if (!_failure.empty()) {
+            StatusBar::notice(_renderer, {0.0, 0.0, _viewport.area_width(), _viewport.area_height()}, scale, _failure);
+        }
+
+        if (_playback.active()) {
+            PlayBar::draw(_renderer, play_bar(), scale, _playback.playing(), _playback.progress());
         }
 
         if (!_fullscreen) {
@@ -389,6 +484,26 @@ namespace tiv {
         SDL_RenderPresent(_renderer);
     }
 
+    int App::wait_ms() const {
+        int wait = _loading ? StatusBar::LOADING_TICK_MS : -1;
+
+        if (_playback.playing()) {
+            const std::uint64_t now = SDL_GetTicks();
+            const int due = _playback.due() > now ? static_cast<int>(_playback.due() - now) : 0;
+
+            wait = wait < 0 ? due : std::min(wait, due);
+        }
+
+        return wait;
+    }
+
+    // Along the bottom of the view, over the image.
+    Rect App::play_bar() const {
+        const auto height = static_cast<double>(PlayBar::height(SDL_GetWindowDisplayScale(_window)));
+
+        return {0.0, _viewport.area_height() - height, _viewport.area_width(), height};
+    }
+
     std::string App::bar_left() const {
         return std::format("[{}/{}] {}", _folder.index() + 1, _folder.count(), _folder.current().filename().string());
     }
@@ -396,6 +511,10 @@ namespace tiv {
     std::string App::bar_right() const {
         if (_info.width == 0) {
             return human_size(_bytes);
+        }
+
+        if (_playback.active()) {
+            return std::format("{}x{}, {} {}/{}, {}", _info.width, _info.height, _info.format, _playback.frame() + 1, _playback.frames(), human_size(_bytes));
         }
 
         return std::format("{}x{}, {}, {}", _info.width, _info.height, _info.format, human_size(_bytes));

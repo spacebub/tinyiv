@@ -48,6 +48,10 @@ namespace tiv {
         // The direct decoders check for an abort every this many rows.
         constexpr int ABORT_ROWS = 64;
 
+        // Browsers play frame delays this short at the default, and GIFs are made for browsers.
+        constexpr int SHORTEST_DELAY = 10;
+        constexpr int DEFAULT_DELAY = 100;
+
         constexpr std::array<std::string_view, 32> SUFFIXES = {
                 ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp", ".jxl", ".gif", ".bmp", ".tif", ".tiff",
                 ".heic", ".heif", ".avif", ".svg", ".svgz", ".pdf", ".jp2", ".j2k", ".jpx", ".exr", ".hdr",
@@ -254,6 +258,7 @@ namespace tiv {
                 info->width = swapped ? image.height() : image.width();
                 info->height = swapped ? image.width() : image.height();
                 info->orientation = vips_image_get_orientation(image.get_image());
+                info->frames = info->kind == Decode::Format::Gif ? std::max(vips_image_get_n_pages(image.get_image()), 1) : 1;
 
                 if (info->format.empty()) {
                     info->format = vips_format_name(image);
@@ -287,6 +292,28 @@ namespace tiv {
             return factor;
         }
 
+        // Renders the image into a new bitmap, which must be RGBA8 already.
+        bool write_rgba(const VImage &image, Bitmap *out, Decode::Abort *abort) {
+            Bitmap held = Bitmap::allocate(image.width(), image.height());
+            const VImage target = VImage::new_from_memory(held.data(), held.bytes(), held.width(), held.height(), Bitmap::CHANNELS, VIPS_FORMAT_UCHAR);
+
+            if (abort != nullptr) {
+                abort->arm(image.get_image());
+            }
+
+            const bool written = vips_image_write(image.get_image(), target.get_image()) == 0;
+
+            if (abort != nullptr) {
+                abort->disarm();
+            }
+
+            if (written) {
+                *out = std::move(held);
+            }
+
+            return written;
+        }
+
         bool load_vips(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Decode::Abort *abort, const Via via) {
             ensure_vips();
 
@@ -310,28 +337,11 @@ namespace tiv {
                     image = image.autorot();
                 }
 
-                image = to_rgba(image);
-
-                Bitmap held = Bitmap::allocate(image.width(), image.height());
-                const VImage target = VImage::new_from_memory(held.data(), held.bytes(), held.width(), held.height(), Bitmap::CHANNELS, VIPS_FORMAT_UCHAR);
-
-                if (abort != nullptr) {
-                    abort->arm(image.get_image());
-                }
-
-                const bool written = vips_image_write(image.get_image(), target.get_image()) == 0;
-
-                if (abort != nullptr) {
-                    abort->disarm();
-                }
-
-                if (!written) {
+                if (!write_rgba(to_rgba(image), out, abort)) {
                     fail(error, file, vips_error());
 
                     return false;
                 }
-
-                *out = std::move(held);
 
                 return true;
             } catch (const vips::VError &) {
@@ -343,6 +353,29 @@ namespace tiv {
 
                 return false;
             }
+        }
+
+        // The smallest integer shrink that brings every frame together within the bytes.
+        int frame_shrink(const int width, const int height, const int frames, const std::size_t maxBytes) {
+            const auto bytes = [&](const int factor) {
+                return static_cast<std::size_t>((width + factor - 1) / factor) * static_cast<std::size_t>((height + factor - 1) / factor) * Bitmap::CHANNELS
+                       * static_cast<std::size_t>(frames);
+            };
+
+            int factor = 1;
+
+            while (bytes(factor) > maxBytes && factor < std::max(width, height)) {
+                ++factor;
+            }
+
+            return factor;
+        }
+
+        int frame_delay(const std::vector<int> &delays, const int frame) {
+            const auto at = static_cast<std::size_t>(frame);
+            const int delay = at < delays.size() ? delays.at(at) : 0;
+
+            return delay <= SHORTEST_DELAY ? DEFAULT_DELAY : delay;
         }
 
         // --- JPEG ---
@@ -1102,6 +1135,22 @@ namespace tiv {
         return format == Format::Jpeg || format == Format::Png || format == Format::WebP || format == Format::Jxl;
     }
 
+    bool Decode::recognised(const std::filesystem::path &file) {
+        Mapped mapped;
+
+        if (Mapped::open(file, &mapped) && sniff(mapped.data()) != Format::Other) {
+            return true;
+        }
+
+        ensure_vips();
+
+        const bool known = vips_foreign_find_load(file.c_str()) != nullptr;
+
+        vips_error_clear();
+
+        return known;
+    }
+
     bool Decode::probe(const std::filesystem::path &file, Info *info, std::string *error) {
         Mapped mapped;
 
@@ -1189,6 +1238,60 @@ namespace tiv {
         }
 
         return load_vips(file, boxWidth, boxHeight, out, error, abort, via);
+    }
+
+    bool Decode::load_frames(const std::filesystem::path &file, const std::size_t maxBytes, std::vector<Frame> *out, std::string *error, Abort *abort) {
+        ensure_vips();
+
+        try {
+            // Sequential, so the frames stream through one by one instead of the whole strip decoding up front.
+            VImage strip = VImage::new_from_file(file.c_str(), VImage::option()->set("n", -1)->set("access", VIPS_ACCESS_SEQUENTIAL));
+            const int height = vips_image_get_page_height(strip.get_image());
+            const int frames = strip.height() / height;
+            const std::vector<int> delays = strip.get_typeof("delay") != 0 ? strip.get_array_int("delay") : std::vector<int>{};
+            const int factor = frame_shrink(strip.width(), height, frames, maxBytes);
+            std::vector<Frame> held;
+
+            strip = to_rgba(strip);
+            held.reserve(static_cast<std::size_t>(frames));
+
+            for (int frame = 0; frame < frames; ++frame) {
+                if (aborted(abort)) {
+                    fail(error, file, "aborted");
+
+                    return false;
+                }
+
+                VImage page = strip.crop(0, frame * height, strip.width(), height);
+
+                if (factor > 1) {
+                    page = page.shrink(factor, factor);
+                }
+
+                Frame next;
+
+                if (!write_rgba(page, &next.bitmap, abort)) {
+                    fail(error, file, vips_error());
+
+                    return false;
+                }
+
+                next.delay = frame_delay(delays, frame);
+                held.push_back(std::move(next));
+            }
+
+            *out = std::move(held);
+
+            return true;
+        } catch (const vips::VError &) {
+            if (abort != nullptr) {
+                abort->disarm();
+            }
+
+            fail(error, file, vips_error());
+
+            return false;
+        }
     }
 
     void Decode::shutdown() {

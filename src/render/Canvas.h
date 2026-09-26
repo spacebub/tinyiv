@@ -36,6 +36,10 @@ namespace tiv {
         // smaller than. Levels the same size as before, of the same image, keep their tiles.
         void show(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height);
 
+        // Another frame of the image shown. Levels the same size as the shown ones keep their
+        // textures, rewritten in place.
+        void replace(std::shared_ptr<const Pyramid> pyramid);
+
         // A neighbour to have ready: its levels up to the screen stay resident.
         void warm(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height);
 

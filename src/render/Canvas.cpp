@@ -119,6 +119,29 @@ namespace tiv {
         }
     }
 
+    void Canvas::replace(std::shared_ptr<const Pyramid> pyramid) {
+        if (pyramid == nullptr || pyramid->empty() || _current.sheets.empty()) {
+            return;
+        }
+
+        const auto &levels = pyramid->levels;
+        const bool same = levels.size() == _current.sheets.size() && std::ranges::equal(std::views::reverse(levels), _current.sheets, [](const auto &level, const Sheet &sheet) {
+            return level->width() == sheet.tiles->width() && level->height() == sheet.tiles->height();
+        });
+
+        if (!same) {
+            show(std::move(pyramid), _current.image, _current.width, _current.height);
+
+            return;
+        }
+
+        for (std::size_t i = 0; i < levels.size(); ++i) {
+            _current.sheets.at(i).tiles->refresh(levels.at(levels.size() - 1 - i));
+        }
+
+        _current.pyramid = std::move(pyramid);
+    }
+
     void Canvas::warm(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height) {
         if (pyramid == nullptr || pyramid->empty() || image == _current.image) {
             return;
