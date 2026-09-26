@@ -51,7 +51,7 @@ namespace tiv::Decode {
         Format kind = Format::Other;
         // EXIF orientation, 1 to 8.
         int orientation = 1;
-        // More than one for an animated GIF.
+        // More than one for an animated GIF or WebP.
         int frames = 1;
 
         [[nodiscard]] long pixels() const { return static_cast<long>(width) * height; }

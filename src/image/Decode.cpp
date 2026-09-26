@@ -48,7 +48,7 @@ namespace tiv {
         // The direct decoders check for an abort every this many rows.
         constexpr int ABORT_ROWS = 64;
 
-        // Browsers play frame delays this short at the default, and GIFs are made for browsers.
+        // Browsers play frame delays this short at the default, and animations are made for browsers.
         constexpr int SHORTEST_DELAY = 10;
         constexpr int DEFAULT_DELAY = 100;
 
@@ -202,6 +202,11 @@ namespace tiv {
             return held;
         }
 
+        // Pages of these formats are frames, where in a TIFF or a PDF they are separate images.
+        bool animates(const Decode::Format kind) {
+            return kind == Decode::Format::Gif || kind == Decode::Format::WebP;
+        }
+
         std::string vips_format_name(const VImage &image) {
             if (image.get_typeof(VIPS_META_LOADER) == 0) {
                 return {};
@@ -258,7 +263,7 @@ namespace tiv {
                 info->width = swapped ? image.height() : image.width();
                 info->height = swapped ? image.width() : image.height();
                 info->orientation = vips_image_get_orientation(image.get_image());
-                info->frames = info->kind == Decode::Format::Gif ? std::max(vips_image_get_n_pages(image.get_image()), 1) : 1;
+                info->frames = animates(info->kind) ? std::max(vips_image_get_n_pages(image.get_image()), 1) : 1;
 
                 if (info->format.empty()) {
                     info->format = vips_format_name(image);
@@ -841,10 +846,11 @@ namespace tiv {
             WebPIncremental &operator=(WebPIncremental &&) = delete;
         };
 
+        // An animation is left to libvips, which counts its frames.
         bool probe_webp(const std::span<const std::uint8_t> data, Decode::Info *info) {
             WebPBitstreamFeatures features;
 
-            if (WebPGetFeatures(data.data(), data.size(), &features) != VP8_STATUS_OK) {
+            if (WebPGetFeatures(data.data(), data.size(), &features) != VP8_STATUS_OK || features.has_animation != 0) {
                 return false;
             }
 
