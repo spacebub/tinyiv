@@ -55,6 +55,14 @@ namespace tiv {
         bool is_window_event(const SDL_Event &event) {
             return event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST;
         }
+
+        // Zero is mailbox on the gpu renderer, so each refresh shows the newest frame. Under FIFO a
+        // drag that starts from idle queues frames ahead of the display and stutters until it fills.
+        int vsync_setting(SDL_Renderer *renderer, SDL_Window *window) {
+            auto *device = static_cast<SDL_GPUDevice *>(SDL_GetPointerProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_GPU_DEVICE_POINTER, nullptr));
+
+            return device != nullptr && SDL_WindowSupportsGPUPresentMode(device, window, SDL_GPU_PRESENTMODE_MAILBOX) ? 0 : 1;
+        }
     }
 
     App::~App() {
@@ -134,7 +142,7 @@ namespace tiv {
             return false;
         }
 
-        SDL_SetRenderVSync(_renderer, 1);
+        SDL_SetRenderVSync(_renderer, vsync_setting(_renderer, _window));
 
         const auto maxTexture = static_cast<int>(SDL_GetNumberProperty(SDL_GetRendererProperties(_renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, Tiles::SIZE));
         _canvas = std::make_unique<Canvas>(_renderer, maxTexture);

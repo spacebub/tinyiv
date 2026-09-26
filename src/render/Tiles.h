@@ -67,8 +67,6 @@ namespace tiv {
             SDL_Texture *texture = nullptr;
             // What the tile shows, in bitmap pixels.
             SDL_Rect area{};
-            // What the texture holds: area plus a one pixel apron so filtering never shows a seam.
-            SDL_Rect stored{};
             std::uint64_t used = 0;
         };
 

@@ -53,14 +53,6 @@ namespace tiv {
                 const int y = row * _size;
 
                 tile.area = {x, y, std::min(_size, _width - x), std::min(_size, _height - y)};
-
-                const int left = std::max(x - 1, 0);
-                const int top = std::max(y - 1, 0);
-                const int right = std::min(x + tile.area.w + 1, _width);
-                const int bottom = std::min(y + tile.area.h + 1, _height);
-
-                tile.stored = {left, top, right - left, bottom - top};
-
                 _tiles.push_back(tile);
             }
         }
@@ -79,7 +71,7 @@ namespace tiv {
     }
 
     std::size_t Tiles::bytes_of(const Tile &tile) {
-        return static_cast<std::size_t>(tile.stored.w) * static_cast<std::size_t>(tile.stored.h) * Bitmap::CHANNELS;
+        return static_cast<std::size_t>(tile.area.w) * static_cast<std::size_t>(tile.area.h) * Bitmap::CHANNELS;
     }
 
     void Tiles::release(Tile &tile) {
@@ -151,16 +143,16 @@ namespace tiv {
 
             Tile &tile = at(want.column, want.row);
 
-            tile.texture = SDL_CreateTexture(_renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, tile.stored.w, tile.stored.h);
+            tile.texture = SDL_CreateTexture(_renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, tile.area.w, tile.area.h);
 
             if (tile.texture == nullptr) {
                 break;
             }
 
-            const std::span<const std::uint8_t> origin = _bitmap->row(tile.stored.y).subspan(static_cast<std::size_t>(tile.stored.x) * Bitmap::CHANNELS);
+            const std::span<const std::uint8_t> origin = _bitmap->row(tile.area.y).subspan(static_cast<std::size_t>(tile.area.x) * Bitmap::CHANNELS);
 
             SDL_UpdateTexture(tile.texture, nullptr, origin.data(), static_cast<int>(_bitmap->pitch()));
-            SDL_SetTextureScaleMode(tile.texture, SDL_SCALEMODE_LINEAR);
+            SDL_SetTextureScaleMode(tile.texture, SDL_SCALEMODE_NEAREST);
             SDL_SetTextureBlendMode(tile.texture, SDL_BLENDMODE_BLEND);
 
             tile.used = stamp;
@@ -217,8 +209,8 @@ namespace tiv {
                 }
 
                 const SDL_FRect source{
-                        static_cast<float>(part.x - tile.stored.x),
-                        static_cast<float>(part.y - tile.stored.y),
+                        static_cast<float>(part.x - tile.area.x),
+                        static_cast<float>(part.y - tile.area.y),
                         static_cast<float>(part.width),
                         static_cast<float>(part.height),
                 };
