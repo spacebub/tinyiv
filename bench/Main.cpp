@@ -24,6 +24,7 @@ int main(int argc, char **argv) {
     bench::Corpus::prepare(dir);
 
     bench::register_bitmap();
+    bench::register_bmp();
     bench::register_decode();
     bench::register_orient();
     bench::register_pyramid();

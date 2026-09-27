@@ -414,7 +414,7 @@ namespace tiv {
         const std::size_t nativeBytes = static_cast<std::size_t>(entry.info.pixels()) * Bitmap::CHANNELS;
         // WebP and JXL have no cheaper decode than the native size, which is halved down after,
         // as long as the transient bitmap fits the budget.
-        const bool nativeThenHalve = over && !cheap && Decode::direct(entry.info.kind) && entry.info.kind != Decode::Format::Png && nativeBytes <= _budget;
+        const bool nativeThenHalve = over && (entry.info.kind == Decode::Format::WebP || entry.info.kind == Decode::Format::Jxl) && nativeBytes <= _budget;
 
         Box box{};
         Decode::Fit fit = Decode::Fit::Cheap;

@@ -13,6 +13,8 @@ add_executable(tinyiv
         image/Animation.h
         image/Bitmap.cpp
         image/Bitmap.h
+        image/Bmp.cpp
+        image/Bmp.h
         image/Decode.cpp
         image/Decode.h
         image/Exif.cpp

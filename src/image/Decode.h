@@ -90,9 +90,6 @@ namespace tiv::Decode {
     // True when the format is drawn from shapes, so it renders sharp at any scale.
     [[nodiscard]] bool scalable(Format format);
 
-    // True when the format has its own decoder here rather than going through libvips.
-    [[nodiscard]] bool direct(Format format);
-
     // False when neither a decoder here nor libvips knows the file.
     [[nodiscard]] bool recognised(const std::filesystem::path &file);
 

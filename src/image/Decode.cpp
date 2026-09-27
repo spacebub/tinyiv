@@ -33,6 +33,7 @@
 #include <webp/decode.h>
 
 #include "image/Bitmap.h"
+#include "image/Bmp.h"
 #include "image/Decode.h"
 #include "image/Exif.h"
 #include "image/Mapped.h"
@@ -1097,6 +1098,40 @@ namespace tiv {
 
             return Direct::Done;
         }
+
+        // --- BMP ---
+
+        bool probe_bmp(const std::span<const std::uint8_t> data, Decode::Info *info) {
+            Bmp::Image image;
+
+            if (!Bmp::Image::open(data, &image)) {
+                return false;
+            }
+
+            info->width = image.width();
+            info->height = image.height();
+
+            return true;
+        }
+
+        // A variant the decoder does not know, such as an embedded JPEG, is left to libvips.
+        Direct load_bmp(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit) {
+            Bmp::Image image;
+
+            if (!Bmp::Image::open(data, &image)) {
+                return Direct::Skip;
+            }
+
+            const int factor = fit == Decode::Fit::Force ? shrink_factor(image.width(), image.height(), boxWidth, boxHeight) : 1;
+
+            if (!image.decode(factor, out, abort)) {
+                fail(error, file, aborted(abort) ? "aborted" : "bmp decode failed");
+
+                return Direct::Failed;
+            }
+
+            return Direct::Done;
+        }
     }
 
     void Decode::Abort::request() {
@@ -1203,10 +1238,6 @@ namespace tiv {
         return format == Format::Svg || format == Format::Pdf;
     }
 
-    bool Decode::direct(const Format format) {
-        return format == Format::Jpeg || format == Format::Png || format == Format::WebP || format == Format::Jxl;
-    }
-
     bool Decode::recognised(const std::filesystem::path &file) {
         Mapped mapped;
 
@@ -1249,6 +1280,9 @@ namespace tiv {
             case Format::Jxl:
                 known = probe_jxl(mapped.data(), info);
                 break;
+            case Format::Bmp:
+                known = probe_bmp(mapped.data(), info);
+                break;
             default:
                 break;
         }
@@ -1284,6 +1318,9 @@ namespace tiv {
                 break;
             case Format::Jxl:
                 direct = fit == Fit::Cheap ? load_jxl(file, mapped.data(), out, error, abort) : Direct::Skip;
+                break;
+            case Format::Bmp:
+                direct = load_bmp(file, mapped.data(), boxWidth, boxHeight, out, error, abort, fit);
                 break;
             default:
                 break;

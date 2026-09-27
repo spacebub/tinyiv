@@ -28,6 +28,7 @@ python3 ../.download-cache/benchmark-v1.9.5/tools/compare.py benchmarks before.j
 | `Decode_full`         | The whole image, up to the cap                                  |
 | `Decode_forced`       | The streamed path that bounds memory for images over the cap    |
 | `Pyramid_halve`       | The mipmap kernels, scalar to AVX2                              |
+| `Bmp_decode`          | The BMP row kernels, scalar to AVX2, whole and forced           |
 | `Upload_static`       | Texture upload throughput                                       |
 | `Tiles_visible_4k`    | The tiles one screen of a 128 MP image needs                    |
 | `Canvas_draw`         | One frame of draw calls                                         |
