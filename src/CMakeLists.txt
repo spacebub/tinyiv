@@ -19,6 +19,8 @@ add_executable(tinyiv
         image/Decode.h
         image/Exif.cpp
         image/Exif.h
+        image/Icon.cpp
+        image/Icon.h
         image/Mapped.cpp
         image/Mapped.h
         image/Orient.cpp

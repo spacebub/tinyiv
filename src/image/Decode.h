@@ -34,6 +34,8 @@ namespace tiv::Decode {
         Jxl,
         Gif,
         Bmp,
+        Ico,
+        Icns,
         Tiff,
         Heif,
         Svg,

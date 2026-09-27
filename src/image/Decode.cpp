@@ -36,6 +36,7 @@
 #include "image/Bmp.h"
 #include "image/Decode.h"
 #include "image/Exif.h"
+#include "image/Icon.h"
 #include "image/Mapped.h"
 #include "image/Orient.h"
 #include "image/Shrink.h"
@@ -57,8 +58,8 @@ namespace tiv {
         constexpr int SHORTEST_DELAY = 10;
         constexpr int DEFAULT_DELAY = 100;
 
-        constexpr std::array<std::string_view, 32> SUFFIXES = {
-                ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp", ".jxl", ".gif", ".bmp", ".tif", ".tiff",
+        constexpr std::array<std::string_view, 34> SUFFIXES = {
+                ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp", ".jxl", ".gif", ".bmp", ".ico", ".icns", ".tif", ".tiff",
                 ".heic", ".heif", ".avif", ".svg", ".svgz", ".pdf", ".jp2", ".j2k", ".jpx", ".exr", ".hdr",
                 ".ppm", ".pgm", ".pbm", ".pnm", ".pfm", ".fits", ".fit", ".nii", ".v", ".vips",
         };
@@ -112,6 +113,10 @@ namespace tiv {
                     return "GIF";
                 case Decode::Format::Bmp:
                     return "BMP";
+                case Decode::Format::Ico:
+                    return "ICO";
+                case Decode::Format::Icns:
+                    return "ICNS";
                 case Decode::Format::Tiff:
                     return "TIFF";
                 case Decode::Format::Heif:
@@ -352,6 +357,29 @@ namespace tiv {
                 }
 
                 if (!write_rgba(to_rgba(image), out, abort)) {
+                    fail(error, file, vips_error());
+
+                    return false;
+                }
+
+                return true;
+            } catch (const vips::VError &) {
+                if (abort != nullptr) {
+                    abort->disarm();
+                }
+
+                fail(error, file, vips_error());
+
+                return false;
+            }
+        }
+
+        // The data has to stay mapped until the image is written.
+        bool load_vips_buffer(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out, std::string *error, Decode::Abort *abort) {
+            ensure_vips();
+
+            try {
+                if (!write_rgba(to_rgba(VImage::new_from_buffer(data.data(), data.size(), "")), out, abort)) {
                     fail(error, file, vips_error());
 
                     return false;
@@ -1132,6 +1160,70 @@ namespace tiv {
 
             return Direct::Done;
         }
+
+        // --- ICO and ICNS ---
+
+        bool icon_entry(const Decode::Format kind, const std::span<const std::uint8_t> data, Icon::Entry *entry) {
+            return kind == Decode::Format::Ico ? Icon::largest_ico(data, entry) : Icon::largest_icns(data, entry);
+        }
+
+        bool probe_icon(const Decode::Format kind, const std::span<const std::uint8_t> data, Decode::Info *info) {
+            Icon::Entry entry;
+
+            if (!icon_entry(kind, data, &entry)) {
+                return false;
+            }
+
+            info->width = entry.width;
+            info->height = entry.height;
+
+            return true;
+        }
+
+        // Only the largest entry is shown.
+        Direct load_icon(const std::filesystem::path &file, const Decode::Format kind, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Decode::Abort *abort, const Decode::Fit fit) {
+            Icon::Entry entry;
+
+            if (!icon_entry(kind, data, &entry)) {
+                return Direct::Skip;
+            }
+
+            switch (entry.payload) {
+                case Icon::Payload::Png:
+                    return load_png(file, entry.data, boxWidth, boxHeight, out, error, abort, fit);
+                case Icon::Payload::Jpeg2000:
+                    return load_vips_buffer(file, entry.data, out, error, abort) ? Direct::Done : Direct::Failed;
+                case Icon::Payload::Packed:
+                    if (!Icon::unpack(entry, out)) {
+                        fail(error, file, "icns decode failed");
+
+                        return Direct::Failed;
+                    }
+
+                    return Direct::Done;
+                case Icon::Payload::Dib: {
+                    Bmp::Image image;
+
+                    if (!Bmp::Image::open_icon(entry.data, &image)) {
+                        fail(error, file, "ico entry unreadable");
+
+                        return Direct::Failed;
+                    }
+
+                    const int factor = fit == Decode::Fit::Force ? shrink_factor(image.width(), image.height(), boxWidth, boxHeight) : 1;
+
+                    if (!image.decode(factor, out, abort)) {
+                        fail(error, file, aborted(abort) ? "aborted" : "ico decode failed");
+
+                        return Direct::Failed;
+                    }
+
+                    return Direct::Done;
+                }
+            }
+
+            return Direct::Skip;
+        }
     }
 
     void Decode::Abort::request() {
@@ -1195,6 +1287,14 @@ namespace tiv {
             return Format::Bmp;
         }
 
+        if (starts_with(head, std::string_view("\0\0\1\0", 4)) && head.size() >= 6 && (head[4] != 0 || head[5] != 0)) {
+            return Format::Ico;
+        }
+
+        if (starts_with(head, "icns")) {
+            return Format::Icns;
+        }
+
         if (starts_with(head, "II*\0") || starts_with(head, "MM\0*")) {
             return Format::Tiff;
         }
@@ -1225,6 +1325,8 @@ namespace tiv {
             case Format::Jxl:
             case Format::Gif:
             case Format::Bmp:
+            case Format::Ico:
+            case Format::Icns:
             case Format::Tiff:
             case Format::Heif:
             case Format::Other:
@@ -1283,6 +1385,10 @@ namespace tiv {
             case Format::Bmp:
                 known = probe_bmp(mapped.data(), info);
                 break;
+            case Format::Ico:
+            case Format::Icns:
+                known = probe_icon(info->kind, mapped.data(), info);
+                break;
             default:
                 break;
         }
@@ -1321,6 +1427,10 @@ namespace tiv {
                 break;
             case Format::Bmp:
                 direct = load_bmp(file, mapped.data(), boxWidth, boxHeight, out, error, abort, fit);
+                break;
+            case Format::Ico:
+            case Format::Icns:
+                direct = load_icon(file, kind, mapped.data(), boxWidth, boxHeight, out, error, abort, fit);
                 break;
             default:
                 break;
