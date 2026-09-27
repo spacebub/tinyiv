@@ -29,6 +29,7 @@
 #include "image/Orient.h"
 #include "image/Pyramid.h"
 #include "services/Loader.h"
+#include "services/Memory.h"
 
 namespace tiv {
     namespace {
@@ -360,6 +361,7 @@ namespace tiv {
                 hold.unlock();
                 trash.clear();
                 hold.lock();
+                _freed = true;
 
                 continue;
             }
@@ -368,6 +370,21 @@ namespace tiv {
             bool later = false;
 
             if (!pick(&job, &later)) {
+                if (_freed && _jobs.empty() && !later) {
+                    if (!rested(GIVE_BACK_MS)) {
+                        _wake.wait_until(hold, _request.at + std::chrono::milliseconds(GIVE_BACK_MS));
+
+                        continue;
+                    }
+
+                    _freed = false;
+                    hold.unlock();
+                    Memory::give_back();
+                    hold.lock();
+
+                    continue;
+                }
+
                 if (later) {
                     _wake.wait_until(hold, _request.at + std::chrono::milliseconds(REST_MS));
                 } else {
@@ -380,7 +397,14 @@ namespace tiv {
             hold.unlock();
             decode(job);
             hold.lock();
+            _freed = true;
         }
+    }
+
+    bool Loader::idle() const {
+        const std::scoped_lock hold(_guard);
+
+        return _jobs.empty();
     }
 
     // Accounts for a decode about to start. False when the budget cannot take it yet, in

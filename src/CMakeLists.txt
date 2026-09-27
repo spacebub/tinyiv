@@ -47,6 +47,8 @@ add_executable(tinyiv
 
         services/Loader.cpp
         services/Loader.h
+        services/Memory.cpp
+        services/Memory.h
         services/Refiner.cpp
         services/Refiner.h
 

@@ -9,10 +9,6 @@
 #include <filesystem>
 #include <print>
 
-#ifdef __GLIBC__
-#include <malloc.h>
-#endif
-
 #include <benchmark/benchmark.h>
 
 #include "support/Corpus.h"
@@ -22,12 +18,6 @@
 #include "image/Decode.h"
 
 int main(int argc, char **argv) {
-#ifdef __GLIBC__
-    // As the app sets it, or peak_rss_mb counts what earlier runs left in the arenas.
-    // NOLINTNEXTLINE(concurrency-mt-unsafe): no other thread exists yet.
-    mallopt(M_MMAP_THRESHOLD, 1024 * 1024);
-#endif
-
     const std::filesystem::path dir = std::filesystem::current_path() / "corpus";
 
     std::println(stderr, "corpus: {}", dir.string());

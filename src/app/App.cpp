@@ -35,6 +35,7 @@
 #include "render/PlayBar.h"
 #include "render/StatusBar.h"
 #include "services/Loader.h"
+#include "services/Memory.h"
 #include "services/Refiner.h"
 #include "view/Playback.h"
 #include "view/Viewport.h"
@@ -290,6 +291,7 @@ namespace tiv {
         }
 
         _loader->show(++_generation, _folder.current(), std::move(ahead), std::move(behind));
+        _shownAt = SDL_GetTicks();
         _dirty = true;
     }
 
@@ -301,6 +303,8 @@ namespace tiv {
             // Nothing to upload or repaint means nothing to do until something happens, except
             // that a loading indicator has to keep moving and an animation has frames due.
             if (idle) {
+                give_back();
+
                 const int wait = wait_ms();
 
                 if (wait < 0 ? SDL_WaitEvent(&event) : SDL_WaitEventTimeout(&event, wait)) {
@@ -611,6 +615,15 @@ namespace tiv {
         }
 
         warm_neighbours();
+        _giveBack = true;
+    }
+
+    // Once everything has arrived and navigation rests, what the old images held goes back to the system.
+    void App::give_back() {
+        if (_giveBack && !_loading && SDL_GetTicks() - _shownAt >= static_cast<std::uint64_t>(Loader::GIVE_BACK_MS) && _loader->idle()) {
+            Memory::give_back();
+            _giveBack = false;
+        }
     }
 
     void App::deliver_detail() {
@@ -857,6 +870,11 @@ namespace tiv {
 
         if (_settling) {
             until(_movedAt + static_cast<std::uint64_t>(Refiner::REST_MS));
+        }
+
+        // Past it, the next event or delivery gives memory back, and waking early would only spin.
+        if (const std::uint64_t due = _shownAt + static_cast<std::uint64_t>(Loader::GIVE_BACK_MS); _giveBack && due > now) {
+            until(due);
         }
 
         return wait;

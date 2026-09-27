@@ -64,6 +64,10 @@ namespace tiv {
         // preview is decoded whole.
         static constexpr int REST_MS = 120;
 
+        // Navigation has to be still this long before freed memory goes back to the system,
+        // since until then the next image reuses it without the system zeroing fresh pages.
+        static constexpr int GIVE_BACK_MS = 1000;
+
         // The frames of one animation take at most this, shrunk to fit.
         static constexpr std::size_t MAX_ANIMATION_BYTES = std::size_t{384} * 1024 * 1024;
 
@@ -99,6 +103,9 @@ namespace tiv {
 
         // The file now says this orientation. Decodes of it still running read the old one, so they stop.
         void reoriented(const std::filesystem::path &file, int orientation);
+
+        // No decode is running.
+        [[nodiscard]] bool idle() const;
 
         [[nodiscard]] std::size_t cached_bytes() const;
         [[nodiscard]] std::size_t cached_files() const;
@@ -183,6 +190,8 @@ namespace tiv {
         bool _starved = false;
         // Pyramids and animations evicted on the main thread, freed by whichever worker wakes next.
         std::vector<std::shared_ptr<const void>> _trash;
+        // Memory was freed since it was last given back.
+        bool _freed = false;
 
         int _screenWidth = 3840;
         int _screenHeight = 2160;

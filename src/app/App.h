@@ -69,6 +69,7 @@ namespace tiv {
         void step_frame(int delta);
         void deliver();
         void deliver_detail();
+        void give_back();
         void warm_neighbours();
         // Reads the image from disk again, dropping any turn not saved.
         void reload();
@@ -124,6 +125,9 @@ namespace tiv {
         // Replaces the image details in the status bar until the next image or turn.
         std::string _message;
         bool _help = false;
+        // Images came and went since freed memory was last given back.
+        bool _giveBack = false;
+        std::uint64_t _shownAt = 0;
         std::uintmax_t _bytes = 0;
         std::uint64_t _generation = 0;
         // Whose levels the canvas holds.
