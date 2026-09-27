@@ -102,7 +102,8 @@ namespace tiv {
         }
 
         // Decoders read front to back, and the read ahead hides the disk.
-        madvise(memory, size, MADV_SEQUENTIAL | MADV_WILLNEED);
+        madvise(memory, size, MADV_SEQUENTIAL);
+        madvise(memory, size, MADV_WILLNEED);
 
         out->_data = static_cast<const std::uint8_t *>(memory);
         out->_size = size;
