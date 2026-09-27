@@ -14,6 +14,10 @@
 #include <string>
 #include <tuple>
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
 #include "app/App.h"
 #include "image/Decode.h"
 
@@ -46,6 +50,12 @@ namespace {
 }
 
 int main(const int argc, char **argv) {
+#ifdef __GLIBC__
+    // glibc raises its mmap threshold with each large free, after which freed pixel buffers stay resident in its arenas.
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): no other thread exists yet.
+    mallopt(M_MMAP_THRESHOLD, 1024 * 1024);
+#endif
+
     try {
         return run({argv, static_cast<std::size_t>(argc)});
     } catch (const std::exception &failure) {

@@ -12,8 +12,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <string>
 #include <thread>
 #include <utility>
@@ -438,6 +440,8 @@ namespace tiv {
             estimate += nativeBytes;
         }
 
+        estimate += entry.info.scratch;
+
         if (!admit(job, estimate)) {
             return;
         }
@@ -639,6 +643,8 @@ namespace tiv {
     // the far end of the window itself, then the neighbours' frames, and last of all the
     // neighbours drop to the screen. The current image is never touched.
     void Loader::trim() {
+        evict_outside();
+
         for (auto &[file, entry] : _cache) {
             if (entry.whole && entry.pyramid != nullptr && !near(file)) {
                 cut(entry);
@@ -676,6 +682,30 @@ namespace tiv {
         }
 
         entry.whole = false;
+    }
+
+    // Outside the window, only as many files stay as turning back would find ahead and not
+    // behind, the most recently wanted. The rest would sit there until the budget ran out.
+    void Loader::evict_outside() {
+        const std::size_t spare = _request.ahead.size() - std::min(_request.ahead.size(), _request.behind.size());
+        std::vector<std::map<std::filesystem::path, Entry>::iterator> outside;
+
+        for (auto it = _cache.begin(); it != _cache.end(); ++it) {
+            if (rank(it->first) == FAR) {
+                outside.push_back(it);
+            }
+        }
+
+        if (outside.size() <= spare) {
+            return;
+        }
+
+        std::ranges::sort(outside, std::ranges::greater{}, [](const auto &it) { return it->second.used; });
+
+        for (const auto &it : std::span(outside).subspan(spare)) {
+            release(it->second);
+            _cache.erase(it);
+        }
     }
 
     // Drops the entry farthest from the current image, the least recently wanted first at

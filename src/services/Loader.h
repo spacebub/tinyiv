@@ -31,7 +31,8 @@ namespace tiv {
     // The threads that decode. Requests coalesce to the latest, the files around it decode
     // in parallel nearest first, whatever navigation has passed is aborted, and the cache
     // stays within its budget: full resolution for the image on screen and its two
-    // neighbours, screen sized pyramids for the rest, the farthest evicted first. Once
+    // neighbours, screen sized pyramids for the rest and a few just passed, the farthest
+    // evicted first. Once
     // navigation rests on an animation, its frames decode too, and stay while it is near.
     class Loader {
 
@@ -152,6 +153,7 @@ namespace tiv {
         void release_animation(Entry &entry);
         void abort_strays();
         void trim();
+        void evict_outside();
         void cut(Entry &entry);
         bool evict_one();
         void post_cached(const Entry &entry);

@@ -55,6 +55,8 @@ namespace tiv::Decode {
         int orientation = 1;
         // More than one for an animated GIF or WebP.
         int frames = 1;
+        // Memory the decoder holds beside the bitmap until it is done, where that is more than a few rows.
+        std::size_t scratch = 0;
 
         [[nodiscard]] long pixels() const { return static_cast<long>(width) * height; }
     };

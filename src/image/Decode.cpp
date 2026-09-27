@@ -949,6 +949,11 @@ namespace tiv {
             info->width = features.width;
             info->height = features.height;
 
+            // Format 2 is lossless, whose decoder keeps every pixel as ARGB, since a back reference can reach any earlier one.
+            if (features.format == 2) {
+                info->scratch = static_cast<std::size_t>(info->pixels()) * sizeof(std::uint32_t);
+            }
+
             return true;
         }
 
