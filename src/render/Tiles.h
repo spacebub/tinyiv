@@ -14,11 +14,13 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <SDL3/SDL.h>
 
 #include "image/Bitmap.h"
+#include "image/Store.h"
 #include "view/Viewport.h"
 
 namespace tiv {
@@ -33,6 +35,9 @@ namespace tiv {
         using Missing = std::function<void(const Rect &)>;
 
         Tiles(SDL_Renderer *renderer, int maxTexture, std::shared_ptr<const Bitmap> bitmap);
+
+        // A level of a pyramid on disk. Tiles upload once the store has them in memory.
+        Tiles(SDL_Renderer *renderer, std::shared_ptr<const Store> store, int level);
         ~Tiles();
 
         Tiles(const Tiles &) = delete;
@@ -56,6 +61,14 @@ namespace tiv {
         std::size_t upload(const Rect &area, std::size_t budget, std::uint64_t stamp);
 
         [[nodiscard]] bool covered(const Rect &area) const;
+
+        // True when a tile meeting the area has no texture and its pixels are at hand, so
+        // upload() would do something.
+        [[nodiscard]] bool uploadable(const Rect &area) const;
+
+        // The store's keys of the tiles meeting the area that have no texture, nearest its
+        // centre first. Nothing for a bitmap, which has every tile at hand.
+        void missing(const Rect &area, std::vector<Store::Key> *out) const;
 
         // The area, in bitmap pixels, of the bitmap shown whole in the screen rect with the
         // orientation. Tiles drawn are stamped as used.
@@ -83,8 +96,11 @@ namespace tiv {
         [[nodiscard]] Span rows(const Rect &area) const;
         [[nodiscard]] Tile &at(int column, int row) { return _tiles.at((static_cast<std::size_t>(row) * static_cast<std::size_t>(_columns)) + static_cast<std::size_t>(column)); }
         [[nodiscard]] const Tile &at(int column, int row) const { return _tiles.at((static_cast<std::size_t>(row) * static_cast<std::size_t>(_columns)) + static_cast<std::size_t>(column)); }
+        void lay_out();
         [[nodiscard]] static std::size_t bytes_of(const Tile &tile);
         void fill(const Tile &tile) const;
+        // The tiles meeting the area without a texture, nearest its centre first.
+        [[nodiscard]] std::vector<std::pair<int, int>> wanting(const Rect &area) const;
         void release(Tile &tile);
 
         SDL_Renderer *_renderer;
@@ -97,6 +113,9 @@ namespace tiv {
         std::size_t _resident = 0;
         std::size_t _bytes = 0;
         std::shared_ptr<const Bitmap> _bitmap;
+        // Instead of the bitmap, for a level on disk.
+        std::shared_ptr<const Store> _store;
+        int _level = 0;
     };
 }
 

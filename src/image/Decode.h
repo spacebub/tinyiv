@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <span>
 #include <string>
@@ -125,6 +126,14 @@ namespace tiv::Decode {
     // Every frame of an animation, each shrunk by the same integer factor as far as it takes
     // for all of them to fit in the bytes given.
     bool load_frames(const std::filesystem::path &file, std::size_t maxBytes, std::vector<Frame> *out, std::string *error = nullptr, Abort *abort = nullptr);
+
+    // Hands the image over as stored, top to bottom, in RGBA8 bands of the rows given, so an
+    // image of any size decodes in the memory of one band. Begin hears the size first, and
+    // whether the image has alpha. Either returning false stops the decode.
+    using Begin = std::function<bool(int width, int height, bool alpha)>;
+    using Take = std::function<bool(int y, int rows, std::span<const std::uint8_t> pixels)>;
+
+    bool stream(const std::filesystem::path &file, int rows, const Begin &begin, const Take &take, std::string *error = nullptr, Abort *abort = nullptr);
 
     // A PNG held in memory, decoded whole.
     bool load_png_memory(std::span<const std::uint8_t> data, Bitmap *out, std::string *error = nullptr);

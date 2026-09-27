@@ -29,6 +29,7 @@
 #include "image/Decode.h"
 #include "image/Orient.h"
 #include "image/Pyramid.h"
+#include "image/Store.h"
 #include "services/Loader.h"
 #include "services/Memory.h"
 
@@ -147,6 +148,13 @@ namespace tiv {
             if (const auto found = _cache.find(current); found != _cache.end()) {
                 found->second.used = _request.sequence;
                 post_cached(found->second);
+            }
+
+            // What the images left behind read of their files goes, what is on disk stays.
+            for (auto &[file, entry] : _cache) {
+                if (entry.store != nullptr && file != current) {
+                    entry.store->shrink();
+                }
             }
 
             for (const auto *list : {&_request.ahead, &_request.behind}) {
@@ -290,6 +298,12 @@ namespace tiv {
         }
 
         const Entry &entry = found->second;
+
+        // A pyramid on disk costs a pass over the whole file, so only the image on screen makes one.
+        if (entry.streamed) {
+            return file == _request.current && entry.store == nullptr && entry.error.empty();
+        }
+
         const bool animate = file == _request.current && entry.info.frames > 1 && entry.animation == nullptr;
 
         // A scalable image is only ever rendered for the screen, the Refiner draws it sharper.
@@ -420,6 +434,37 @@ namespace tiv {
         return _jobs.empty();
     }
 
+    void Loader::stream_all(const bool on) {
+        {
+            const std::scoped_lock hold(_guard);
+
+            if (_streamAll == on) {
+                return;
+            }
+
+            _streamAll = on;
+
+            for (const Job &job : _jobs) {
+                job.abort->request();
+            }
+
+            for (auto &[file, entry] : _cache) {
+                release(entry);
+            }
+
+            _cache.clear();
+            _starved = false;
+        }
+
+        _wake.notify_all();
+    }
+
+    bool Loader::streaming_all() const {
+        const std::scoped_lock hold(_guard);
+
+        return _streamAll;
+    }
+
     // Accounts for a decode about to start. False when the budget cannot take it yet, in
     // which case nothing but the current image starts until memory frees up.
     bool Loader::admit(const Job &job, const std::size_t estimate) {
@@ -485,6 +530,24 @@ namespace tiv {
         if (!Decode::probe(job.file, &entry.info, &entry.error)) {
             entry.unsupported = !Decode::recognised(job.file);
             store(job.file, std::move(entry));
+
+            return;
+        }
+
+        bool all = false;
+
+        {
+            const std::scoped_lock hold(_guard);
+
+            all = _streamAll;
+        }
+
+        // Too large for memory, or in streaming mode, a still image shows from disk. Drawings
+        // and animations have no pyramid to stream, so they stay in memory.
+        const bool still = !Decode::scalable(entry.info.kind) && entry.info.frames <= 1;
+
+        if (still && (all || entry.info.pixels() > max_pixels())) {
+            decode_stream(job, std::move(entry));
 
             return;
         }
@@ -591,6 +654,45 @@ namespace tiv {
 
         if (abort.requested()) {
             drop();
+
+            return;
+        }
+
+        store(job.file, std::move(entry));
+    }
+
+    // Opens the pyramid made for the file before, or makes one when it is the current image.
+    // The others wait for a pyramid until they are shown, since it takes a pass over the whole file.
+    void Loader::decode_stream(Job &job, Entry entry) {
+        entry.streamed = true;
+        entry.store = Store::open(job.file);
+
+        bool build = false;
+
+        {
+            const std::scoped_lock hold(_guard);
+
+            if (const auto found = std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == job.file; }); found != _jobs.end()) {
+                found->streaming = true;
+            }
+
+            build = entry.store == nullptr && job.file == _request.current;
+
+            if (build) {
+                _progress.store(0.0F, std::memory_order_relaxed);
+                post({_request.generation, Kind::Building, entry.info, nullptr, {}, false, nullptr, nullptr});
+            }
+        }
+
+        if (build) {
+            entry.store = Store::build(job.file, &_progress, &entry.error, job.abort.get());
+        }
+
+        if (job.abort->requested()) {
+            const std::scoped_lock hold(_guard);
+
+            finish(job.file);
+            _wake.notify_all();
 
             return;
         }
@@ -740,6 +842,10 @@ namespace tiv {
             _trash.push_back(std::move(entry.pyramid));
         }
 
+        if (entry.store != nullptr) {
+            _trash.push_back(std::move(entry.store));
+        }
+
         release_animation(entry);
     }
 
@@ -756,7 +862,7 @@ namespace tiv {
         for (const Job &job : _jobs) {
             const int at = rank(job.file);
 
-            if (at == FAR || (job.whole && !near(job.file)) || (job.frames && job.file != _request.current)) {
+            if (at == FAR || (job.whole && !near(job.file)) || ((job.frames || job.streaming) && job.file != _request.current)) {
                 job.abort->request();
             }
         }
@@ -864,6 +970,17 @@ namespace tiv {
     void Loader::post_cached(const Entry &entry) {
         if (!entry.error.empty()) {
             post({_request.generation, Kind::Failed, entry.info, nullptr, entry.error, entry.unsupported, nullptr});
+
+            return;
+        }
+
+        if (entry.streamed) {
+            if (entry.store != nullptr) {
+                post({_request.generation, Kind::Full, entry.info, nullptr, {}, false, nullptr, entry.store});
+            } else {
+                _progress.store(0.0F, std::memory_order_relaxed);
+                post({_request.generation, Kind::Building, entry.info, nullptr, {}, false, nullptr, nullptr});
+            }
 
             return;
         }

@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <ranges>
@@ -1589,6 +1590,73 @@ namespace tiv {
             }
 
             *out = std::move(held);
+
+            return true;
+        } catch (const vips::VError &) {
+            if (abort != nullptr) {
+                abort->disarm();
+            }
+
+            fail(error, file, vips_error());
+
+            return false;
+        }
+    }
+
+    bool Decode::stream(const std::filesystem::path &file, const int rows, const Begin &begin, const Take &take, std::string *error, Abort *abort) {
+        ensure_vips();
+
+        try {
+            // Sequential, so each band decodes as it is asked for and nothing above it stays.
+            VImage image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
+            const bool alpha = image.has_alpha();
+
+            image = to_rgba(image);
+
+            const int width = image.width();
+            const int height = image.height();
+
+            if (!begin(width, height, alpha)) {
+                fail(error, file, "stopped");
+
+                return false;
+            }
+
+            Bitmap band = Bitmap::allocate(width, std::min(rows, height));
+
+            for (int y = 0; y < height; y += rows) {
+                if (aborted(abort)) {
+                    fail(error, file, "aborted");
+
+                    return false;
+                }
+
+                const int count = std::min(rows, height - y);
+                const std::size_t bytes = band.pitch() * static_cast<std::size_t>(count);
+                const VImage target = VImage::new_from_memory(band.data(), bytes, width, count, Bitmap::CHANNELS, VIPS_FORMAT_UCHAR);
+
+                if (abort != nullptr) {
+                    abort->arm(image.get_image());
+                }
+
+                const bool written = vips_image_write(image.crop(0, y, width, count).get_image(), target.get_image()) == 0;
+
+                if (abort != nullptr) {
+                    abort->disarm();
+                }
+
+                if (!written) {
+                    fail(error, file, vips_error());
+
+                    return false;
+                }
+
+                if (!take(y, count, band.all().first(bytes))) {
+                    fail(error, file, "stopped");
+
+                    return false;
+                }
+            }
 
             return true;
         } catch (const vips::VError &) {

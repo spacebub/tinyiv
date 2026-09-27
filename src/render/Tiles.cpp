@@ -45,6 +45,16 @@ namespace tiv {
     Tiles::Tiles(SDL_Renderer *renderer, const int maxTexture, std::shared_ptr<const Bitmap> bitmap)
         : _renderer(renderer), _width(bitmap->width()), _height(bitmap->height()), _size(std::min(SIZE, maxTexture)),
           _columns((_width + _size - 1) / _size), _rows((_height + _size - 1) / _size), _bitmap(std::move(bitmap)) {
+        lay_out();
+    }
+
+    Tiles::Tiles(SDL_Renderer *renderer, std::shared_ptr<const Store> store, const int level)
+        : _renderer(renderer), _width(store->levels()[static_cast<std::size_t>(level)].width), _height(store->levels()[static_cast<std::size_t>(level)].height),
+          _size(Store::TILE), _columns((_width + _size - 1) / _size), _rows((_height + _size - 1) / _size), _store(std::move(store)), _level(level) {
+        lay_out();
+    }
+
+    void Tiles::lay_out() {
         _tiles.reserve(static_cast<std::size_t>(_columns) * static_cast<std::size_t>(_rows));
 
         for (int row = 0; row < _rows; ++row) {
@@ -120,9 +130,11 @@ namespace tiv {
         return {first, last};
     }
 
-    std::size_t Tiles::upload(const Rect &area, const std::size_t budget, const std::uint64_t stamp) {
+    std::vector<std::pair<int, int>> Tiles::wanting(const Rect &area) const {
+        std::vector<std::pair<int, int>> held;
+
         if (_tiles.empty() || area.width <= 0.0 || area.height <= 0.0) {
-            return 0;
+            return held;
         }
 
         const Span cols = columns(area);
@@ -154,15 +166,34 @@ namespace tiv {
         }
 
         std::ranges::sort(wants, {}, &Want::distance);
-
-        std::size_t spent = 0;
+        held.reserve(wants.size());
 
         for (const Want &want : wants) {
+            held.emplace_back(want.column, want.row);
+        }
+
+        return held;
+    }
+
+    std::size_t Tiles::upload(const Rect &area, const std::size_t budget, const std::uint64_t stamp) {
+        std::size_t spent = 0;
+
+        for (const auto &[column, row] : wanting(area)) {
             if (spent >= budget) {
                 break;
             }
 
-            Tile &tile = at(want.column, want.row);
+            Tile &tile = at(column, row);
+            std::shared_ptr<const Bitmap> pixels;
+
+            // A tile on disk waits until the store has read it.
+            if (_store != nullptr) {
+                pixels = _store->find({_level, column, row});
+
+                if (pixels == nullptr) {
+                    continue;
+                }
+            }
 
             tile.texture = SDL_CreateTexture(_renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, tile.area.w, tile.area.h);
 
@@ -170,7 +201,12 @@ namespace tiv {
                 break;
             }
 
-            fill(tile);
+            if (pixels != nullptr) {
+                SDL_UpdateTexture(tile.texture, nullptr, pixels->data(), static_cast<int>(pixels->pitch()));
+            } else {
+                fill(tile);
+            }
+
             SDL_SetTextureScaleMode(tile.texture, SDL_SCALEMODE_PIXELART);
             SDL_SetTextureBlendMode(tile.texture, SDL_BLENDMODE_BLEND);
 
@@ -200,6 +236,24 @@ namespace tiv {
         }
 
         return true;
+    }
+
+    bool Tiles::uploadable(const Rect &area) const {
+        if (_store == nullptr) {
+            return !covered(area);
+        }
+
+        return std::ranges::any_of(wanting(area), [&](const std::pair<int, int> &tile) { return _store->find({_level, tile.first, tile.second}) != nullptr; });
+    }
+
+    void Tiles::missing(const Rect &area, std::vector<Store::Key> *out) const {
+        if (_store == nullptr) {
+            return;
+        }
+
+        for (const auto &[column, row] : wanting(area)) {
+            out->push_back({_level, column, row});
+        }
     }
 
     void Tiles::draw(const Rect &area, const Rect &shown, const int orientation, const std::uint64_t stamp, const Missing &missing) {

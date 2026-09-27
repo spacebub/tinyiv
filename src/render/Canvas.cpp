@@ -97,7 +97,7 @@ namespace tiv {
 
             sheet.scale = static_cast<double>(level->width()) / held.width;
 
-            if (previous.image == image) {
+            if (previous.image == image && previous.store == nullptr) {
                 const auto same = std::ranges::find_if(previous.sheets, [&](const Sheet &old) {
                     return old.tiles != nullptr && old.tiles->width() == level->width() && old.tiles->height() == level->height();
                 });
@@ -118,43 +118,126 @@ namespace tiv {
         return held;
     }
 
-    void Canvas::show(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height, const int orientation) {
-        if (pyramid == nullptr || pyramid->empty()) {
-            return;
+    Canvas::Held Canvas::build(std::shared_ptr<const Store> store, const std::uint64_t image, const int width, const int height, const int orientation, Held previous) const {
+        // The same store again keeps every tile it has on the GPU.
+        if (previous.image == image && previous.store == store) {
+            previous.orientation = orientation;
+
+            return previous;
         }
 
+        Held held;
+
+        held.image = image;
+        held.width = std::max(width, 1);
+        held.height = std::max(height, 1);
+        held.orientation = orientation;
+        held.store = std::move(store);
+
+        const std::span<const Store::Level> levels = held.store->levels();
+
+        for (std::size_t index = levels.size(); index-- > 0;) {
+            Sheet sheet;
+
+            sheet.scale = static_cast<double>(levels[index].width) / held.width;
+            sheet.tiles = std::make_unique<Tiles>(_renderer, held.store, static_cast<int>(index));
+            held.sheets.push_back(std::move(sheet));
+        }
+
+        return held;
+    }
+
+    Canvas::Held Canvas::take_previous(const std::uint64_t image) {
         if (image != _current.image) {
             _detail = {};
         }
 
         Held previous = std::move(_current);
 
-        // A neighbour already on the GPU is the whole point of keeping it warm.
-        if (previous.image != image) {
-            if (const auto warm = std::ranges::find(_warm, image, &Held::image); warm != _warm.end()) {
-                Held promoted = std::move(*warm);
+        _current = {};
 
-                _warm.erase(warm);
-
-                if (!previous.sheets.empty()) {
-                    _warm.push_back(std::move(previous));
-                }
-
-                previous = std::move(promoted);
-            } else if (!previous.sheets.empty()) {
-                _warm.push_back(std::move(previous));
-                previous = {};
-            }
+        if (previous.image == image) {
+            return previous;
         }
 
-        _current = build(std::move(pyramid), image, width, height, orientation, std::move(previous));
+        // An image on disk would never finish uploading warm, so it is let go.
+        if (previous.store != nullptr) {
+            previous = {};
+        }
 
-        // The coarsest level is what every missing tile falls back to, so it is never missing.
+        // A neighbour already on the GPU is the whole point of keeping it warm.
+        if (const auto warm = std::ranges::find(_warm, image, &Held::image); warm != _warm.end()) {
+            Held promoted = std::move(*warm);
+
+            _warm.erase(warm);
+
+            if (!previous.sheets.empty()) {
+                _warm.push_back(std::move(previous));
+            }
+
+            return promoted;
+        }
+
+        if (!previous.sheets.empty()) {
+            _warm.push_back(std::move(previous));
+        }
+
+        return {};
+    }
+
+    void Canvas::settle() {
         if (!_current.sheets.empty()) {
             Tiles &coarsest = *_current.sheets.front().tiles;
 
             coarsest.upload(whole(coarsest), ~std::size_t{0}, _frame);
         }
+    }
+
+    void Canvas::show(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height, const int orientation) {
+        if (pyramid == nullptr || pyramid->empty()) {
+            return;
+        }
+
+        Held previous = take_previous(image);
+
+        _current = build(std::move(pyramid), image, width, height, orientation, std::move(previous));
+        settle();
+    }
+
+    void Canvas::show(std::shared_ptr<const Store> store, const std::uint64_t image, const int width, const int height, const int orientation) {
+        if (store == nullptr) {
+            return;
+        }
+
+        Held previous = take_previous(image);
+
+        _current = build(std::move(store), image, width, height, orientation, std::move(previous));
+        settle();
+    }
+
+    void Canvas::fetch(const Viewport &viewport) {
+        if (_current.store == nullptr || _current.sheets.empty()) {
+            return;
+        }
+
+        const Rect image = viewport.image_rect();
+        const Rect visible = intersect(image, {0.0, 0.0, viewport.area_width(), viewport.area_height()});
+        std::vector<Store::Key> keys;
+
+        if (visible.width > 0.0 && visible.height > 0.0) {
+            const std::size_t sheet = wanted(_current, viewport.zoom());
+            const Tiles &tiles = *_current.sheets.at(sheet).tiles;
+            const Rect area = area_of(_current, sheet, visible, image);
+
+            if (sheet > 0) {
+                _current.sheets.at(sheet - 1).tiles->missing(area_of(_current, sheet - 1, visible, image), &keys);
+            }
+
+            tiles.missing(area, &keys);
+            tiles.missing(grow(area, Tiles::SIZE), &keys);
+        }
+
+        _current.store->want(keys);
     }
 
     void Canvas::replace(std::shared_ptr<const Pyramid> pyramid) {
@@ -274,7 +357,7 @@ namespace tiv {
         const Rect visible = intersect(image, {0.0, 0.0, viewport.area_width(), viewport.area_height()});
         const std::size_t sheet = wanted(_current, viewport.zoom());
 
-        if (visible.width > 0.0 && !_current.sheets.at(sheet).tiles->covered(area_of(_current, sheet, visible, image))) {
+        if (visible.width > 0.0 && _current.sheets.at(sheet).tiles->uploadable(area_of(_current, sheet, visible, image))) {
             return true;
         }
 

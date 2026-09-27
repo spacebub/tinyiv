@@ -77,6 +77,8 @@ namespace tiv {
         void turn(int by);
         // Writes how the image is turned into its file, when it is turned.
         void save();
+        // Switches streaming mode, where every still image shows from a pyramid on disk.
+        void toggle_stream();
         // How the image on screen is drawn, from how it is stored.
         [[nodiscard]] int orientation() const;
         // The size of the image on screen as stored, and as shown.
@@ -91,7 +93,10 @@ namespace tiv {
         [[nodiscard]] int wait_ms() const;
         [[nodiscard]] Rect play_bar() const;
 
-        [[nodiscard]] std::string bar_left() const;
+        // Tagged leads with the streaming mode when it is on.
+        [[nodiscard]] std::string bar_left(bool tagged = true) const;
+        // Fullscreen shows the streaming mode for a moment after it switches.
+        [[nodiscard]] bool flashing() const;
         [[nodiscard]] std::string bar_right() const;
 
         // What was last sent to the refiner, so a request that failed is not repeated.
@@ -110,6 +115,8 @@ namespace tiv {
         SDL_Renderer *_renderer = nullptr;
         std::uint32_t _loaderEvent = 0;
         std::uint32_t _refinerEvent = 0;
+        // A store read a tile the view asked for.
+        std::uint32_t _storeEvent = 0;
 
         Folder _folder;
         Viewport _viewport;
@@ -135,6 +142,10 @@ namespace tiv {
         // Something of the current image is still on its way: its first pixels, or the whole
         // image behind a preview.
         bool _loading = false;
+        // The image is too large for memory, and its tiles are being written to disk.
+        bool _building = false;
+        // The image shows from disk.
+        bool _streamed = false;
         int _direction = 1;
         // Shown in place of an image that could not be opened.
         std::string _failure;
@@ -142,6 +153,8 @@ namespace tiv {
         bool _seeking = false;
 
         std::uint64_t _movedAt = 0;
+        // When streaming mode last switched, zero before it ever has.
+        std::uint64_t _switchedAt = 0;
         // Moved and not yet looked at by refine().
         bool _settling = false;
         Ask _asked;

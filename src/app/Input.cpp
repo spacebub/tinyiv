@@ -129,7 +129,7 @@ namespace tiv {
             case SDLK_APOSTROPHE:
                 return Action::FlipHorizontal;
             case SDLK_S:
-                return (event.mod & SDL_KMOD_CTRL) != 0 ? Action::Save : Action::None;
+                return (event.mod & SDL_KMOD_CTRL) != 0 ? Action::Save : Action::ToggleStream;
             case SDLK_H:
                 return (event.mod & SDL_KMOD_CTRL) != 0 ? Action::ToggleHelp : Action::None;
             case SDLK_SPACE:

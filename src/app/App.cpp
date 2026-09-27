@@ -60,12 +60,14 @@ namespace tiv {
         constexpr int PREFETCH_AHEAD = 6;
         constexpr int PREFETCH_BEHIND = 2;
         constexpr double BADGE_MARGIN = 12.0;
+        // How long fullscreen shows the streaming mode after it switches.
+        constexpr std::uint64_t MODE_FLASH_MS = 1500;
         // A scalable image renders this share of the view beyond each edge, so a short pan stays sharp.
         constexpr double REFINE_MARGIN = 0.25;
         constexpr SDL_Color BACKGROUND{0, 0, 0, 255};
 
         // Keys apart by two spaces, words within one by one.
-        constexpr std::array<StatusBar::Row, 15> HELP = {{
+        constexpr std::array<StatusBar::Row, 16> HELP = {{
                 {"Wheel  ←  →", "Previous, next image"},
                 {"Home  End", "First, last image"},
                 {"R", "Reload from disk"},
@@ -77,6 +79,7 @@ namespace tiv {
                 {"[  ]", "Turn left, right"},
                 {";  '", "Flip vertically, horizontally"},
                 {"Ctrl+S", "Save turns and flips"},
+                {"S", "Streaming mode on, off"},
                 {"Space", "Play, pause animation"},
                 {",  .", "Previous, next frame"},
                 {"Ctrl+H", "Show, hide this help"},
@@ -164,8 +167,9 @@ namespace tiv {
         }
 
         // The first decode starts before the window exists, so the two overlap.
-        _loaderEvent = SDL_RegisterEvents(2);
+        _loaderEvent = SDL_RegisterEvents(3);
         _refinerEvent = _loaderEvent + 1;
+        _storeEvent = _loaderEvent + 2;
         _loader = std::make_unique<Loader>(_loaderEvent);
         _refiner = std::make_unique<Refiner>(_refinerEvent);
 
@@ -272,6 +276,8 @@ namespace tiv {
         _turn = 1;
         _message.clear();
         _loading = true;
+        _building = false;
+        _streamed = false;
         _failure.clear();
         _seeking = false;
         _playback.stop();
@@ -298,6 +304,9 @@ namespace tiv {
     void App::run() {
         while (_running) {
             SDL_Event event{};
+            // Asks for the tiles on disk the view meets before deciding there is nothing to do.
+            _canvas->fetch(_viewport);
+
             const bool idle = !_canvas->pending(_viewport) && _repaints == 0;
 
             // Nothing to upload or repaint means nothing to do until something happens, except
@@ -336,8 +345,10 @@ namespace tiv {
 
             if (_dirty || _repaints > 0) {
                 frame();
+                // Presented from idle, a frame can land before the compositor has caught up and
+                // stay unseen until the next, so every change is drawn once more after it.
+                _repaints = _dirty ? std::max(_repaints - 1, 1) : std::max(_repaints - 1, 0);
                 _dirty = false;
-                _repaints = std::max(_repaints - 1, 0);
             }
         }
     }
@@ -351,6 +362,13 @@ namespace tiv {
 
         if (event.type == _refinerEvent) {
             deliver_detail();
+
+            return;
+        }
+
+        // The loop uploads it next.
+        if (event.type == _storeEvent) {
+            _dirty = true;
 
             return;
         }
@@ -422,6 +440,9 @@ namespace tiv {
                 break;
             case Input::Action::Save:
                 save();
+                break;
+            case Input::Action::ToggleStream:
+                toggle_stream();
                 break;
             case Input::Action::ToggleHelp:
                 _help = !_help;
@@ -572,11 +593,27 @@ namespace tiv {
                 continue;
             }
 
-            // The first result of a new image replaces the old one whole.
-            if (_shown != result.generation) {
+            // Nothing to draw until the tiles are on disk, so the old image goes and the view
+            // says how far they are.
+            if (result.kind == Loader::Kind::Building) {
                 _shown = result.generation;
                 _info = result.info;
                 _turn = 1;
+                _building = true;
+                _loading = true;
+                _canvas->clear();
+                _viewport.set_image(0, 0);
+                _dirty = true;
+
+                continue;
+            }
+
+            // The first result of a new image replaces the old one whole.
+            if (_shown != result.generation || _building) {
+                _shown = result.generation;
+                _info = result.info;
+                _turn = 1;
+                _building = false;
 
                 const Size size = shown();
 
@@ -589,8 +626,23 @@ namespace tiv {
             }
 
             const Size size = stored();
+            const auto image = static_cast<std::uint64_t>(_folder.index());
 
-            _canvas->show(result.pyramid, static_cast<std::uint64_t>(_folder.index()), size.width, size.height, orientation());
+            _streamed = result.store != nullptr;
+
+            if (_streamed) {
+                // Each tile read wakes the loop, which uploads it.
+                result.store->on_ready([event = _storeEvent] {
+                    SDL_Event ready{};
+
+                    ready.type = event;
+                    SDL_PushEvent(&ready);
+                });
+
+                _canvas->show(result.store, image, size.width, size.height, orientation());
+            } else {
+                _canvas->show(result.pyramid, image, size.width, size.height, orientation());
+            }
 
             if (result.animation != nullptr) {
                 _playback.start(result.animation, SDL_GetTicks());
@@ -607,6 +659,7 @@ namespace tiv {
                     // An animation is still loading until its frames arrive.
                     _loading = result.info.frames > 1 && result.animation == nullptr;
                     break;
+                case Loader::Kind::Building:
                 case Loader::Kind::Failed:
                     break;
             }
@@ -765,6 +818,27 @@ namespace tiv {
         _dirty = true;
     }
 
+    void App::toggle_stream() {
+        const bool on = !_loader->streaming_all();
+
+        _loader->stream_all(on);
+        // Tiles of the same image and size would be kept, so the canvas lets go of them first.
+        _canvas->clear();
+
+        if (_folder.count() == 0) {
+            return;
+        }
+
+        show(_folder.index(), _direction);
+        _switchedAt = SDL_GetTicks();
+
+        if (on) {
+            _message = "Streaming mode on";
+        } else {
+            _message = "Streaming mode off";
+        }
+    }
+
     void App::save() {
         if (_turn == 1 || _shown != _generation || _info.width == 0) {
             return;
@@ -830,6 +904,10 @@ namespace tiv {
             _canvas->draw(_viewport);
         } else if (!_failure.empty()) {
             StatusBar::notice(_renderer, {0.0, 0.0, _viewport.area_width(), _viewport.area_height()}, scale, _failure);
+        } else if (_building) {
+            const std::string notice = std::format("Writing tiles to disk: {:.0f}%", _loader->progress() * 100.0F);
+
+            StatusBar::notice(_renderer, {0.0, 0.0, _viewport.area_width(), _viewport.area_height()}, scale, notice);
         } else if (_folder.count() == 0) {
             StatusBar::notice(_renderer, {0.0, 0.0, _viewport.area_width(), _viewport.area_height()}, scale, "Drop an image here to open it");
         }
@@ -846,9 +924,12 @@ namespace tiv {
             const int bar = StatusBar::height(scale);
 
             StatusBar::draw(_renderer, {0.0, static_cast<double>(height - bar), static_cast<double>(width), static_cast<double>(bar)}, scale, bar_left(), bar_right(), _loading);
+        } else if (flashing()) {
+            // No bar to carry the mode, so switching it says so for a moment.
+            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, _loader->streaming_all() ? "Streaming mode on" : "Streaming mode off", false);
         } else if (_loading) {
             // Where the bar would be, for as long as something is still on its way.
-            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, bar_left(), true);
+            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, bar_left(false), true);
         }
 
         SDL_RenderPresent(_renderer);
@@ -872,6 +953,11 @@ namespace tiv {
             until(_movedAt + static_cast<std::uint64_t>(Refiner::REST_MS));
         }
 
+        // Wakes to take the badge away again.
+        if (flashing()) {
+            until(_switchedAt + MODE_FLASH_MS);
+        }
+
         // Past it, the next event or delivery gives memory back, and waking early would only spin.
         if (const std::uint64_t due = _shownAt + static_cast<std::uint64_t>(Loader::GIVE_BACK_MS); _giveBack && due > now) {
             until(due);
@@ -887,18 +973,31 @@ namespace tiv {
         return {0.0, _viewport.area_height() - height, _viewport.area_width(), height};
     }
 
-    std::string App::bar_left() const {
+    bool App::flashing() const {
+        return _switchedAt != 0 && SDL_GetTicks() - _switchedAt < MODE_FLASH_MS;
+    }
+
+    std::string App::bar_left(const bool tagged) const {
+        const char *tag = tagged && _loader->streaming_all() ? "STREAMING  " : "";
+
         if (_folder.count() == 0) {
-            return "tinyiv";
+            return std::format("{}tinyiv", tag);
         }
 
-        // Marked while turned or flipped and not saved.
-        return std::format("[{}/{}] {}{}", _folder.index() + 1, _folder.count(), _folder.current().filename().string(), _turn != 1 ? " *" : "");
+        // Marked while turned or flipped and not saved, and led by the mode while streaming.
+        return std::format("{}[{}/{}] {}{}", tag, _folder.index() + 1, _folder.count(), _folder.current().filename().string(), _turn != 1 ? " *" : "");
     }
 
     std::string App::bar_right() const {
         if (_folder.count() == 0) {
             return {};
+        }
+
+        const Size size = shown();
+
+        // Ahead of any message, which would hide how far it is.
+        if (_building && _info.width != 0) {
+            return std::format("{}x{}, {}, {}, writing tiles {:.0f}%", size.width, size.height, _info.format, human_size(_bytes), _loader->progress() * 100.0F);
         }
 
         if (!_message.empty()) {
@@ -909,12 +1008,10 @@ namespace tiv {
             return human_size(_bytes);
         }
 
-        const Size size = shown();
-
         if (_playback.active()) {
             return std::format("{}x{}, {} {}/{}, {}", size.width, size.height, _info.format, _playback.frame() + 1, _playback.frames(), human_size(_bytes));
         }
 
-        return std::format("{}x{}, {}, {}", size.width, size.height, _info.format, human_size(_bytes));
+        return std::format("{}x{}, {}, {}{}", size.width, size.height, _info.format, human_size(_bytes), _streamed && !_loader->streaming_all() ? ", from disk" : "");
     }
 }

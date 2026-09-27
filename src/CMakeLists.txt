@@ -15,6 +15,8 @@ add_executable(tinyiv
         image/Bitmap.h
         image/Bmp.cpp
         image/Bmp.h
+        image/Channels.cpp
+        image/Channels.h
         image/Decode.cpp
         image/Decode.h
         image/Exif.cpp
@@ -33,6 +35,8 @@ add_executable(tinyiv
         image/Shrink.h
         image/Simd.cpp
         image/Simd.h
+        image/Store.cpp
+        image/Store.h
         image/Svg.cpp
         image/Svg.h
 

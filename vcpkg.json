@@ -42,6 +42,7 @@
       "name": "pkgconf",
       "host": true
     },
-    "sdl3"
+    "sdl3",
+    "zstd"
   ]
 }

@@ -10,6 +10,7 @@
 #define TIV_SERVICES_LOADER_H
 
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -26,6 +27,7 @@
 #include "image/Animation.h"
 #include "image/Decode.h"
 #include "image/Pyramid.h"
+#include "image/Store.h"
 
 namespace tiv {
     // The threads that decode. Requests coalesce to the latest, the files around it decode
@@ -34,6 +36,7 @@ namespace tiv {
     // neighbours, screen sized pyramids for the rest and a few just passed, the farthest
     // evicted first. Once
     // navigation rests on an animation, its frames decode too, and stay while it is near.
+    // A still image too large for memory shows from a pyramid of tiles on disk instead.
     class Loader {
 
     public:
@@ -42,6 +45,9 @@ namespace tiv {
             Preview,
             // The whole image, up to the cap.
             Full,
+            // An image too large for memory, or asked to stream, whose tiles are being written to
+            // disk before it can show. See progress().
+            Building,
             Failed,
         };
 
@@ -55,6 +61,8 @@ namespace tiv {
             bool unsupported = false;
             // Every frame, once decoded, for an image whose info counts more than one.
             std::shared_ptr<const Animation> animation;
+            // Instead of the pyramid, for an image shown from disk.
+            std::shared_ptr<const Store> store;
         };
 
         // Full resolution is capped where the image's pyramid would take more than half the
@@ -112,6 +120,15 @@ namespace tiv {
         // No decode is running.
         [[nodiscard]] bool idle() const;
 
+        // S: streaming mode, where every still image shows from a pyramid on disk, not only
+        // those too large for memory. Everything decoded goes, so the next show() decodes the
+        // new way.
+        void stream_all(bool on);
+        [[nodiscard]] bool streaming_all() const;
+
+        // How far the tiles being written for the current image are, from 0 to 1.
+        [[nodiscard]] float progress() const { return _progress.load(std::memory_order_relaxed); }
+
         [[nodiscard]] std::size_t cached_bytes() const;
         [[nodiscard]] std::size_t cached_files() const;
         [[nodiscard]] int workers() const { return static_cast<int>(_workers.size()); }
@@ -133,6 +150,9 @@ namespace tiv {
             // The first level is the whole image, up to the cap. Off once trimmed to the screen.
             bool whole = false;
             std::shared_ptr<const Animation> animation;
+            // Shown from disk. The store is null until one is made, which only the current image does.
+            bool streamed = false;
+            std::shared_ptr<const Store> store;
             std::string error;
             bool unsupported = false;
             // The request that last wanted it.
@@ -147,6 +167,8 @@ namespace tiv {
             std::shared_ptr<Decode::Abort> abort;
             // Bytes the decode is expected to add, once known.
             std::size_t estimate = 0;
+            // Writing tiles to disk, which stops once the file is no longer the current one.
+            bool streaming = false;
         };
 
         static constexpr int FAR = 1 << 20;
@@ -162,6 +184,7 @@ namespace tiv {
         [[nodiscard]] bool wants_job(const std::filesystem::path &file, bool *whole, bool *frames, bool *later) const;
         void decode(Job &job);
         void decode_frames(Job &job);
+        void decode_stream(Job &job, Entry entry);
         bool admit(const Job &job, std::size_t estimate);
         bool finish(const std::filesystem::path &file);
         void store(const std::filesystem::path &file, Entry entry);
@@ -197,6 +220,10 @@ namespace tiv {
         std::vector<std::shared_ptr<const void>> _trash;
         // Memory was freed since it was last given back.
         bool _freed = false;
+
+        // Streaming mode.
+        bool _streamAll = false;
+        std::atomic<float> _progress = 0.0F;
 
         int _screenWidth = 3840;
         int _screenHeight = 2160;

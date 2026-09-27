@@ -19,6 +19,7 @@
 #include <SDL3/SDL.h>
 
 #include "image/Pyramid.h"
+#include "image/Store.h"
 #include "render/Tiles.h"
 #include "view/Viewport.h"
 
@@ -36,6 +37,14 @@ namespace tiv {
         // may be smaller than, and the orientation is how it is shown. Levels the same size as
         // before, of the same image, keep their tiles.
         void show(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height, int orientation);
+
+        // The image from a pyramid on disk. Its tiles come as the store reads them, the
+        // coarser levels standing in until they do.
+        void show(std::shared_ptr<const Store> store, std::uint64_t image, int width, int height, int orientation);
+
+        // Asks the store of the image shown for the tiles the view needs, the level below
+        // first, since that one fills the screen soonest. Nothing for an image in memory.
+        void fetch(const Viewport &viewport);
 
         // Shows the image drawn another way round. The tiles stay as they are.
         void orient(int orientation);
@@ -62,7 +71,8 @@ namespace tiv {
 
         [[nodiscard]] bool has_image() const { return !_current.sheets.empty(); }
 
-        // Visible tiles missing, or warm ones still to come.
+        // Visible tiles missing that could upload now, or warm ones still to come. A tile on
+        // disk the store is still reading waits for it, and the store says when it has come.
         [[nodiscard]] bool pending(const Viewport &viewport) const;
 
         // Visible tiles first, then a margin around them, then the level below, then the
@@ -95,12 +105,22 @@ namespace tiv {
             int height = 0;
             int orientation = 1;
             std::shared_ptr<const Pyramid> pyramid;
+            // Instead of the pyramid, for an image on disk.
+            std::shared_ptr<const Store> store;
             // Ascending by scale, so the coarsest first.
             std::vector<Sheet> sheets;
         };
 
         // Sheets for the pyramid, reusing those of the previous of the same size.
         [[nodiscard]] Held build(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height, int orientation, Held previous) const;
+        [[nodiscard]] Held build(std::shared_ptr<const Store> store, std::uint64_t image, int width, int height, int orientation, Held previous) const;
+
+        // What was shown, to reuse for the image if it is the same one or a warm neighbour.
+        // Anything else goes warm, but for an image on disk, which is never kept warm.
+        [[nodiscard]] Held take_previous(std::uint64_t image);
+
+        // The coarsest level is what every missing tile falls back to, so it is never missing.
+        void settle();
 
         // The smallest sheet with a texel per screen pixel, else the finest there is.
         [[nodiscard]] static std::size_t wanted(const Held &held, double zoom);

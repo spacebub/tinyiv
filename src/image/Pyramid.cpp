@@ -129,27 +129,34 @@ namespace tiv {
 #endif
         }
 
+        void halve_pair(const std::uint8_t *top, const std::uint8_t *bottom, std::uint8_t *out, const int width, const RowKernel kernel) {
+            const int pairs = width / 2;
+
+            kernel(top, bottom, out, pairs);
+
+            if ((width & 1) != 0) {
+                const std::size_t at = static_cast<std::size_t>(pairs) * 4;
+
+                for (int c = 0; c < Bitmap::CHANNELS; ++c) {
+                    out[at + c] = static_cast<std::uint8_t>((top[(at * 2) + c] + bottom[(at * 2) + c] + 1) >> 1);
+                }
+            }
+        }
+
         void halve_rows(const Bitmap &source, Bitmap &target, const RowKernel kernel, const int from, const int to) {
             const int lastY = source.height() - 1;
-            const int pairs = source.width() / 2;
-            const bool oddColumn = (source.width() & 1) != 0;
 
             for (int y = from; y < to; ++y) {
                 const std::uint8_t *top = source.row(std::min(2 * y, lastY)).data();
                 const std::uint8_t *bottom = source.row(std::min((2 * y) + 1, lastY)).data();
-                std::uint8_t *out = target.row(y).data();
 
-                kernel(top, bottom, out, pairs);
-
-                if (oddColumn) {
-                    const std::size_t at = static_cast<std::size_t>(pairs) * 4;
-
-                    for (int c = 0; c < Bitmap::CHANNELS; ++c) {
-                        out[at + c] = static_cast<std::uint8_t>((top[(at * 2) + c] + bottom[(at * 2) + c] + 1) >> 1);
-                    }
-                }
+                halve_pair(top, bottom, target.row(y).data(), source.width(), kernel);
             }
         }
+    }
+
+    void Pyramid::halve_row(const std::uint8_t *top, const std::uint8_t *bottom, std::uint8_t *out, const int width, const Kernel kernel) {
+        halve_pair(top, bottom, out, width, pick(kernel));
     }
 
     Pyramid Pyramid::build(Bitmap base, const int thumbWidth, const int thumbHeight) {
