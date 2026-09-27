@@ -56,7 +56,7 @@ namespace tiv::Decode {
         // More than one for an animated GIF or WebP.
         int frames = 1;
 
-        [[nodiscard]] long pixels() const { return static_cast<long>(width) * height; }
+        [[nodiscard]] std::int64_t pixels() const { return static_cast<std::int64_t>(width) * height; }
     };
 
     // Lets another thread cut a decode short. Once requested, every load using it fails

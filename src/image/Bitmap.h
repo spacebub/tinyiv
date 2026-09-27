@@ -35,7 +35,7 @@ namespace tiv {
 
         [[nodiscard]] std::size_t pitch() const { return static_cast<std::size_t>(_width) * CHANNELS; }
         [[nodiscard]] std::size_t bytes() const { return pitch() * static_cast<std::size_t>(_height); }
-        [[nodiscard]] long pixels() const { return static_cast<long>(_width) * _height; }
+        [[nodiscard]] std::int64_t pixels() const { return static_cast<std::int64_t>(_width) * _height; }
 
         [[nodiscard]] const std::uint8_t *data() const { return _pixels.get(); }
         [[nodiscard]] std::uint8_t *data() { return _pixels.get(); }

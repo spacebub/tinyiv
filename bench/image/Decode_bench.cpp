@@ -29,16 +29,16 @@ namespace bench {
 
         // The box the app uses for an image over the cap.
         std::pair<int, int> capped(const tiv::Decode::Info &info) {
-            if (info.pixels() <= tiv::Loader::MAX_PIXELS) {
+            if (info.pixels() <= tiv::Loader::max_pixels()) {
                 return {info.width, info.height};
             }
 
-            const double shrink = std::sqrt(static_cast<double>(tiv::Loader::MAX_PIXELS) / static_cast<double>(info.pixels()));
+            const double shrink = std::sqrt(static_cast<double>(tiv::Loader::max_pixels()) / static_cast<double>(info.pixels()));
 
             return {static_cast<int>(info.width * shrink), static_cast<int>(info.height * shrink)};
         }
 
-        void report(benchmark::State &state, const std::filesystem::path &file, const long pixels) {
+        void report(benchmark::State &state, const std::filesystem::path &file, const std::int64_t pixels) {
             state.SetBytesProcessed(static_cast<std::int64_t>(std::filesystem::file_size(file)) * state.iterations());
             state.counters["MP/s"] = benchmark::Counter(static_cast<double>(pixels) / 1e6, benchmark::Counter::kIsIterationInvariantRate);
             Memory::report_peak(state);
@@ -69,7 +69,7 @@ namespace bench {
             }
 
             const auto [boxWidth, boxHeight] = capped(info);
-            const tiv::Decode::Fit fit = info.pixels() > tiv::Loader::MAX_PIXELS ? tiv::Decode::Fit::Force : tiv::Decode::Fit::Cheap;
+            const tiv::Decode::Fit fit = info.pixels() > tiv::Loader::max_pixels() ? tiv::Decode::Fit::Force : tiv::Decode::Fit::Cheap;
 
             Memory::reset_peak();
 
@@ -100,7 +100,7 @@ namespace bench {
                 return;
             }
 
-            const bool over = info.pixels() > tiv::Loader::MAX_PIXELS;
+            const bool over = info.pixels() > tiv::Loader::max_pixels();
             const auto [boxWidth, boxHeight] = over ? capped(info) : std::pair{SCREEN_WIDTH, SCREEN_HEIGHT};
             const tiv::Decode::Fit fit = over ? tiv::Decode::Fit::Force : tiv::Decode::Fit::Cheap;
 

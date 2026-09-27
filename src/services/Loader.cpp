@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <span>
 #include <string>
 #include <thread>
@@ -44,12 +45,12 @@ namespace tiv {
             int height = 0;
         };
 
-        Box capped(const Decode::Info &info) {
-            if (info.pixels() <= Loader::MAX_PIXELS) {
+        Box capped(const Decode::Info &info, const std::int64_t limit = Loader::max_pixels()) {
+            if (info.pixels() <= limit) {
                 return {info.width, info.height};
             }
 
-            const double shrink = std::sqrt(static_cast<double>(Loader::MAX_PIXELS) / static_cast<double>(info.pixels()));
+            const double shrink = std::sqrt(static_cast<double>(limit) / static_cast<double>(info.pixels()));
 
             return {std::max(static_cast<int>(std::floor(info.width * shrink)), 1), std::max(static_cast<int>(std::floor(info.height * shrink)), 1)};
         }
@@ -82,6 +83,18 @@ namespace tiv {
         std::size_t pyramid_bytes(const Box box) {
             return static_cast<std::size_t>(box.width) * static_cast<std::size_t>(box.height) * Bitmap::CHANNELS * 4 / 3;
         }
+    }
+
+    std::int64_t Loader::max_pixels() {
+        static const std::int64_t held = [] {
+            // SDL counts whole mebibytes.
+            const std::int64_t half = static_cast<std::int64_t>(SDL_GetSystemRAM()) * 1024 * 1024 / 2;
+
+            // A pyramid is four bytes a pixel and a third again.
+            return std::max(half * 3 / (Bitmap::CHANNELS * 4), MIN_PIXELS);
+        }();
+
+        return held;
     }
 
     Loader::Loader(const std::uint32_t eventType, const std::size_t cacheBytes, const int workers) : _event(eventType), _budget(cacheBytes) {
@@ -488,7 +501,7 @@ namespace tiv {
 
         const bool scalable = Decode::scalable(entry.info.kind);
         const bool cheap = Decode::scales_cheaply(entry.info.kind);
-        const bool over = entry.info.pixels() > MAX_PIXELS;
+        bool over = entry.info.pixels() > max_pixels();
         const std::size_t nativeBytes = static_cast<std::size_t>(entry.info.pixels()) * Bitmap::CHANNELS;
         // WebP and JXL have no cheaper decode than the native size, which is halved down after,
         // as long as the transient bitmap fits the budget.
@@ -520,9 +533,51 @@ namespace tiv {
             return;
         }
 
-        Bitmap decoded;
+        bool starved = false;
 
-        if (!Decode::load(job.file, box.width, box.height, &decoded, &entry.error, &abort, fit)) {
+        const auto produce = [&](const Box at, const Decode::Fit how, const std::int64_t limit) {
+            try {
+                Bitmap decoded;
+
+                if (!Decode::load(job.file, at.width, at.height, &decoded, &entry.error, &abort, how)) {
+                    return false;
+                }
+
+                while (decoded.pixels() > limit) {
+                    decoded = Pyramid::halve(decoded);
+                }
+
+                // A cheap preview of an image the screen holds is the whole image.
+                if (!whole && decoded.pixels() >= entry.info.pixels()) {
+                    whole = true;
+                }
+
+                if (!over && whole && !scalable && entry.info.kind != Decode::Format::Other) {
+                    take_size(decoded, &entry.info);
+                }
+
+                entry.pyramid = std::make_shared<const Pyramid>(Pyramid::build(std::move(decoded), screenWidth / THUMB_DIVISOR, screenHeight / THUMB_DIVISOR));
+
+                return true;
+            } catch (const std::bad_alloc &) {
+                starved = true;
+                entry.error = "not enough memory";
+
+                return false;
+            }
+        };
+
+        bool loaded = produce(box, fit, max_pixels());
+
+        // The system had too little left for the whole image, so it streams down to the size
+        // every machine is expected to hold.
+        if (!loaded && starved && whole && !scalable && !abort.requested()) {
+            over = true;
+            entry.error.clear();
+            loaded = produce(capped(entry.info, MIN_PIXELS), Decode::Fit::Force, MIN_PIXELS);
+        }
+
+        if (!loaded) {
             if (abort.requested()) {
                 drop();
             } else {
@@ -532,20 +587,6 @@ namespace tiv {
             return;
         }
 
-        while (decoded.pixels() > MAX_PIXELS) {
-            decoded = Pyramid::halve(decoded);
-        }
-
-        // A cheap preview of an image the screen holds is the whole image.
-        if (!whole && decoded.pixels() >= entry.info.pixels()) {
-            whole = true;
-        }
-
-        if (!over && whole && !scalable && entry.info.kind != Decode::Format::Other) {
-            take_size(decoded, &entry.info);
-        }
-
-        entry.pyramid = std::make_shared<const Pyramid>(Pyramid::build(std::move(decoded), screenWidth / THUMB_DIVISOR, screenHeight / THUMB_DIVISOR));
         entry.whole = whole;
 
         if (abort.requested()) {

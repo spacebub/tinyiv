@@ -57,8 +57,13 @@ namespace tiv {
             std::shared_ptr<const Animation> animation;
         };
 
-        // Full resolution is capped here, so one image never takes more than this many pixels.
-        static constexpr long MAX_PIXELS = 128L * 1000 * 1000;
+        // Full resolution is capped where the image's pyramid would take more than half the
+        // machine's memory, and never below this. It is also what an image falls back to when
+        // the system has too little left for the whole of it.
+        static constexpr std::int64_t MIN_PIXELS = std::int64_t{128} * 1000 * 1000;
+
+        // The most pixels one image decodes to. An image beyond it streams down to fit.
+        [[nodiscard]] static std::int64_t max_pixels();
 
         // Navigation has to be still this long before a format that already gave a cheap
         // preview is decoded whole.
@@ -74,7 +79,7 @@ namespace tiv {
         // The smallest level is the screen divided by this.
         static constexpr int THUMB_DIVISOR = 4;
 
-        static constexpr std::size_t DEFAULT_CACHE_BYTES = std::size_t{1024} * 1024 * 1024;
+        static constexpr std::size_t DEFAULT_CACHE_BYTES = std::size_t{2048} * 1024 * 1024;
         static constexpr int MAX_WORKERS = 4;
 
         // Zero workers means as many as the machine warrants.

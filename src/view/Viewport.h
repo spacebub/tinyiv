@@ -29,6 +29,9 @@ namespace tiv {
         // How far either side of fit the zoom may go.
         static constexpr double ZOOM_RANGE = 64.0;
 
+        // However large the image, zoom reaches this many screen pixels per image pixel.
+        static constexpr double MIN_MAX_ZOOM = 32.0;
+
         void set_area(double width, double height);
         void set_image(int width, int height);
 

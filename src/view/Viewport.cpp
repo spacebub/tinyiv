@@ -79,7 +79,7 @@ namespace tiv {
 
     void Viewport::zoom_by(const double factor) {
         const double lowest = _fitZoom / ZOOM_RANGE;
-        const double highest = _fitZoom * ZOOM_RANGE;
+        const double highest = std::max(_fitZoom * ZOOM_RANGE, MIN_MAX_ZOOM);
 
         _zoom = std::clamp(_anchorZoom * factor, lowest, highest);
         _x = _anchorX - (_anchorImageX * _zoom);
