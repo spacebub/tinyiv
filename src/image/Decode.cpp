@@ -37,6 +37,7 @@
 #include "image/Exif.h"
 #include "image/Mapped.h"
 #include "image/Orient.h"
+#include "image/Shrink.h"
 #include "image/Svg.h"
 
 namespace tiv {
@@ -804,19 +805,13 @@ namespace tiv {
             return true;
         }
 
-        // Rows stream through a box filter of factor by factor into the target, so an image of
-        // any size costs its shrunk size plus two rows. Only for images that are not interlaced.
-        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access): the inner loop runs over gigapixels.
+        // Rows stream through a box filter into the target, so an image of any size costs its
+        // shrunk size plus two rows. Only for images that are not interlaced.
         bool png_read_shrunk(PngHandle &handle, Bitmap &target, const int factor, const Decode::Abort *abort) {
             const auto width = static_cast<int>(png_get_image_width(handle.png, handle.info));
             const auto height = static_cast<int>(png_get_image_height(handle.png, handle.info));
             std::vector<std::uint8_t> row(static_cast<std::size_t>(width) * Bitmap::CHANNELS);
-            std::vector<std::uint32_t> sums(target.pitch());
-            std::vector<std::uint32_t> counts(static_cast<std::size_t>(target.width()));
-
-            for (int x = 0; x < width; ++x) {
-                ++counts[static_cast<std::size_t>(x / factor)];
-            }
+            BoxShrink shrink(width, height, factor, &target);
 
             // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp): libpng reports errors by longjmp only.
             if (setjmp(png_jmpbuf(handle.png)) != 0) {
@@ -829,53 +824,22 @@ namespace tiv {
                 return false;
             }
 
-            int gathered = 0;
-            int outY = 0;
-
             for (int y = 0; y < height; ++y) {
                 if (y % ABORT_ROWS == 0 && aborted(abort)) {
                     return false;
                 }
 
                 png_read_row(handle.png, row.data(), nullptr);
-
-                for (int x = 0; x < width; ++x) {
-                    const std::size_t in = static_cast<std::size_t>(x) * Bitmap::CHANNELS;
-                    const std::size_t at = static_cast<std::size_t>(x / factor) * Bitmap::CHANNELS;
-
-                    sums[at] += row[in];
-                    sums[at + 1] += row[in + 1];
-                    sums[at + 2] += row[in + 2];
-                    sums[at + 3] += row[in + 3];
-                }
-
-                ++gathered;
-
-                if (gathered == factor || y == height - 1) {
-                    const std::span<std::uint8_t> out = target.row(outY++);
-
-                    for (int x = 0; x < target.width(); ++x) {
-                        const std::uint32_t count = counts[static_cast<std::size_t>(x)] * static_cast<std::uint32_t>(gathered);
-                        const std::size_t at = static_cast<std::size_t>(x) * Bitmap::CHANNELS;
-
-                        for (std::size_t c = 0; c < Bitmap::CHANNELS; ++c) {
-                            out[at + c] = static_cast<std::uint8_t>((sums[at + c] + (count / 2)) / count);
-                        }
-                    }
-
-                    std::ranges::fill(sums, 0U);
-                    gathered = 0;
-                }
+                shrink.push(row);
             }
 
             png_read_end(handle.png, nullptr);
 
             return true;
         }
-        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
         bool probe_png(const std::span<const std::uint8_t> data, Decode::Info *info) {
-            // Width and height sit at fixed offsets in IHDR, the first chunk.
+            // Width and height sit at fixed offsets in IHDR, the first chunk: https://www.w3.org/TR/png-3/#11IHDR
             constexpr std::size_t IHDR = 16;
 
             if (data.size() < IHDR + 8) {
