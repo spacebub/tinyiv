@@ -11,18 +11,7 @@ largest icon. SVG and PDF render again at the zoom on screen once the view rests
 stay sharp at any zoom. Animated GIF and WebP play in a loop, with a bar along the bottom to
 pause and seek. A file nothing can read says so in place of the image.
 
-## Building
-
-Needs a C++23 compiler, CMake 3.25, SDL3, libvips, libjpeg, libpng, libwebp and libjxl.
-
-```
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-build/bin/tinyiv photo.jpg
-```
-
-`cmake --install build --prefix ~/.local` puts the binary in `bin`, and on Linux the desktop
-entry and the icons under `share`.
+Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 
 ## Keys
 

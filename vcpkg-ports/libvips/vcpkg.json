@@ -1,0 +1,150 @@
+{
+  "$comment": "The upstream port at the tinyiv baseline, plus features for the meson options it has none for. The portfile turns off every option not named as a feature, which takes out the built-in GIF, PPM, Analyze and Radiance loaders and the PDF, JPEG XL, HEIF, OpenEXR, JPEG 2000 and highway support.",
+  "name": "libvips",
+  "version": "8.18.5",
+  "description": "libvips is a demand-driven, horizontally threaded image processing library.",
+  "homepage": "https://github.com/libvips/libvips",
+  "license": "LGPL-2.1-or-later",
+  "dependencies": [
+    "expat",
+    "glib",
+    {
+      "name": "glib",
+      "host": true
+    },
+    {
+      "name": "vcpkg-tool-meson",
+      "host": true
+    }
+  ],
+  "features": {
+    "analyze": {
+      "description": "Build the built-in Analyze loader."
+    },
+    "cplusplus": {
+      "description": "Build C++ API."
+    },
+    "deprecated": {
+      "description": "Build deprecated components."
+    },
+    "exif": {
+      "description": "Build with exif support.",
+      "dependencies": [
+        "libexif"
+      ]
+    },
+    "fontconfig": {
+      "description": "Build with fontconfig support.",
+      "dependencies": [
+        "fontconfig",
+        "pango"
+      ]
+    },
+    "heif": {
+      "description": "Build with HEIF and AVIF support through libheif.",
+      "dependencies": [
+        {
+          "name": "libheif",
+          "default-features": false,
+          "features": [
+            "aom"
+          ]
+        }
+      ]
+    },
+    "highway": {
+      "description": "Build with highway SIMD support.",
+      "dependencies": [
+        "highway"
+      ]
+    },
+    "jpeg": {
+      "description": "Build with jpeg support.",
+      "dependencies": [
+        "libjpeg-turbo"
+      ]
+    },
+    "jpeg-xl": {
+      "description": "Build with JPEG XL support.",
+      "dependencies": [
+        "libjxl"
+      ]
+    },
+    "lcms": {
+      "description": "Build with lcms support.",
+      "dependencies": [
+        "lcms"
+      ]
+    },
+    "nsgif": {
+      "description": "Build the built-in GIF loader."
+    },
+    "openexr": {
+      "description": "Build with OpenEXR support.",
+      "dependencies": [
+        "openexr"
+      ]
+    },
+    "openjpeg": {
+      "description": "Build with JPEG 2000 support.",
+      "dependencies": [
+        "openjpeg"
+      ]
+    },
+    "pangocairo": {
+      "description": "Build with pangocairo support.",
+      "dependencies": [
+        "cairo",
+        "pango"
+      ]
+    },
+    "png": {
+      "description": "Build with png support.",
+      "dependencies": [
+        "libpng"
+      ]
+    },
+    "poppler": {
+      "description": "Build with PDF support through poppler.",
+      "dependencies": [
+        "cairo",
+        {
+          "name": "poppler",
+          "features": [
+            "glib"
+          ]
+        }
+      ]
+    },
+    "ppm": {
+      "description": "Build the built-in PPM loader."
+    },
+    "radiance": {
+      "description": "Build the built-in Radiance loader."
+    },
+    "rsvg": {
+      "description": "Build with rsvg support.",
+      "dependencies": [
+        "librsvg"
+      ]
+    },
+    "tiff": {
+      "description": "Build with tiff support.",
+      "dependencies": [
+        "tiff"
+      ]
+    },
+    "webp": {
+      "description": "Build with WebP support.",
+      "dependencies": [
+        "libwebp"
+      ]
+    },
+    "zlib": {
+      "description": "Build with zlib support.",
+      "dependencies": [
+        "zlib-ng"
+      ]
+    }
+  }
+}

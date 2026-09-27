@@ -89,7 +89,62 @@ endif ()
 
 include(GNUInstallDirs)
 
-install(TARGETS tinyiv RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# vcpkg copies the DLLs beside the executable as it builds, so the install takes them from there.
+if (WIN32)
+    # Matches the exclusions against paths with forward slashes, as CMake 4.1 and later can.
+    if (POLICY CMP0207)
+        cmake_policy(SET CMP0207 NEW)
+    endif ()
+
+    install(TARGETS tinyiv RUNTIME_DEPENDENCY_SET tiv_runtime RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    install(RUNTIME_DEPENDENCY_SET tiv_runtime
+            PRE_EXCLUDE_REGEXES "^api-ms-" "^ext-ms-"
+            POST_EXCLUDE_REGEXES "[/\\\\][Ss]ystem32[/\\\\]"
+            DIRECTORIES $<TARGET_FILE_DIR:tinyiv>
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    # The Visual C++ runtime goes beside the executable, as a per user install cannot run the
+    # redistributable, which needs elevation.
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION ${CMAKE_INSTALL_BINDIR})
+    include(InstallRequiredSystemLibraries)
+
+    # librsvg loads fontconfig, which reads its configuration from etc\fonts beside the bin
+    # directory holding its DLL, or beside the DLL itself. Text draws through Windows fonts.
+    set(TIV_FONTCONFIG_DIR "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/etc/fonts")
+
+    if (EXISTS ${TIV_FONTCONFIG_DIR})
+        install(DIRECTORY ${TIV_FONTCONFIG_DIR} DESTINATION etc)
+    endif ()
+
+    set(TIV_STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
+    file(TO_NATIVE_PATH ${CMAKE_SOURCE_DIR} TIV_ISS_SOURCE_DIR)
+    file(TO_NATIVE_PATH ${TIV_STAGE_DIR} TIV_ISS_STAGE_DIR)
+    file(TO_NATIVE_PATH ${CMAKE_BINARY_DIR} TIV_ISS_OUTPUT_DIR)
+    configure_file(${CMAKE_SOURCE_DIR}/packaging/windows/tinyiv.iss.in ${CMAKE_BINARY_DIR}/tinyiv.iss @ONLY)
+
+    set(program_files_x86 "ProgramFiles(x86)")
+    find_program(TIV_ISCC ISCC
+            PATHS
+            "$ENV{LOCALAPPDATA}/Programs/Inno Setup 7"
+            "$ENV{ProgramFiles}/Inno Setup 7"
+            "$ENV{LOCALAPPDATA}/Programs/Inno Setup 6"
+            "$ENV{${program_files_x86}}/Inno Setup 6"
+            DOC "Inno Setup's command line compiler, for the installer target")
+
+    # Stages a fresh install and compiles the setup from it into the build tree.
+    if (TIV_ISCC)
+        add_custom_target(installer
+                COMMAND ${CMAKE_COMMAND} -E rm -rf ${TIV_STAGE_DIR}
+                COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR} --config $<CONFIG> --prefix ${TIV_STAGE_DIR}
+                COMMAND ${TIV_ISCC} /Q ${CMAKE_BINARY_DIR}/tinyiv.iss
+                DEPENDS tinyiv
+                COMMENT "Compiling the setup"
+                VERBATIM)
+    endif ()
+else ()
+    install(TARGETS tinyiv RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif ()
 
 # The Windows resources carry their own icon.
 if (UNIX AND NOT APPLE)

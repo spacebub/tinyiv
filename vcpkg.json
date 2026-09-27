@@ -1,0 +1,47 @@
+{
+  "name": "tinyiv",
+  "version": "1.0.0",
+  "description": "A tiny, fast image viewer",
+  "license": "GPL-3.0-or-later",
+  "builtin-baseline": "07f4812200df3d3c931c0c8a6081d3b21fe2bf9f",
+  "dependencies": [
+    {
+      "$comment": "Listed only to turn off its default x265 encoder, which vcpkg keeps unless the top level manifest says otherwise.",
+      "name": "libheif",
+      "default-features": false
+    },
+    "libjpeg-turbo",
+    "libjxl",
+    "libpng",
+    {
+      "name": "libvips",
+      "features": [
+        "analyze",
+        "cplusplus",
+        "exif",
+        "heif",
+        "highway",
+        "jpeg",
+        "jpeg-xl",
+        "lcms",
+        "nsgif",
+        "openexr",
+        "openjpeg",
+        "png",
+        "poppler",
+        "ppm",
+        "radiance",
+        "rsvg",
+        "tiff",
+        "webp",
+        "zlib"
+      ]
+    },
+    "libwebp",
+    {
+      "name": "pkgconf",
+      "host": true
+    },
+    "sdl3"
+  ]
+}

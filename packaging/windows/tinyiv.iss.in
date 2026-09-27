@@ -1,0 +1,76 @@
+; Inno Setup script for a per user install of tinyiv. CMake configures it into the build tree,
+; and the installer target stages the install and compiles it.
+
+#define AppName "tinyiv"
+#define AppVersion "@PROJECT_VERSION@"
+#define AppExe "tinyiv.exe"
+#define ProgId "tinyiv.image"
+#define SourceDir "@TIV_ISS_SOURCE_DIR@"
+#define StageDir "@TIV_ISS_STAGE_DIR@"
+#define OutputDir "@TIV_ISS_OUTPUT_DIR@"
+
+; What libvips loads in the vcpkg build, less the Analyze .img, which is as often a disk image.
+#dim Extensions[29] { \
+    ".avif", ".bmp", ".dib", ".exr", ".gif", ".hdr", ".heic", ".heif", ".icns", ".ico", ".j2k", \
+    ".jfif", ".jp2", ".jpe", ".jpeg", ".jpg", ".jxl", ".pbm", ".pdf", ".pfm", ".pgm", ".png", \
+    ".pnm", ".ppm", ".svg", ".svgz", ".tif", ".tiff", ".webp" }
+
+[Setup]
+; The project's identity to Windows. Changing it makes an update install beside the old copy.
+AppId={{4F2EAC9D-8A7C-4A8A-991E-C6922118A9B1}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppVerName={#AppName} {#AppVersion}
+AppPublisher=spacebub
+; Per user, so nothing asks for elevation and {autopf} is %LOCALAPPDATA%\Programs.
+PrivilegesRequired=lowest
+DefaultDirName={autopf}\{#AppName}
+DisableProgramGroupPage=yes
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+MinVersion=10.0
+ChangesAssociations=yes
+SetupIconFile={#SourceDir}\src\resources\Win32\tinyiv.ico
+UninstallDisplayIcon={app}\{#AppExe}
+OutputDir={#OutputDir}
+OutputBaseFilename={#AppName}-{#AppVersion}-setup
+Compression=lzma2/ultra64
+SolidCompression=yes
+WizardStyle=modern
+
+[Tasks]
+Name: associate; Description: "Offer {#AppName} for images in Open with and Default apps"
+Name: desktopicon; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+; The executable, the DLLs vcpkg built and the Visual C++ runtime, as the install laid them out,
+; and fontconfig's configuration, which it finds in etc\fonts beside its DLL.
+Source: "{#StageDir}\bin\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#StageDir}\etc\*"; DestDir: "{app}\etc"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+Source: "{#SourceDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+
+; Windows lets no installer choose the default app for a type. These put tinyiv in each type's
+; Open with list and under Default apps, where the user makes it the default.
+[Registry]
+Root: HKA; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueName: ""; ValueData: "{#AppName} image"; Flags: uninsdeletekey; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExe},0"; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: associate
+
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#AppName}"; Flags: uninsdeletekey; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: associate
+
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"; Flags: uninsdeletekey; Tasks: associate
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "A tiny, fast image viewer"; Tasks: associate
+Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#AppName}"; ValueData: "Software\{#AppName}\Capabilities"; Flags: uninsdeletevalue; Tasks: associate
+
+#define i
+#sub Associate
+Root: HKA; Subkey: "Software\Classes\{#Extensions[i]}\OpenWithProgids"; ValueType: string; ValueName: "{#ProgId}"; ValueData: ""; Flags: uninsdeletevalue; Tasks: associate
+Root: HKA; Subkey: "Software\Classes\Applications\{#AppExe}\SupportedTypes"; ValueType: string; ValueName: "{#Extensions[i]}"; ValueData: ""; Tasks: associate
+Root: HKA; Subkey: "Software\{#AppName}\Capabilities\FileAssociations"; ValueType: string; ValueName: "{#Extensions[i]}"; ValueData: "{#ProgId}"; Tasks: associate
+#endsub
+#for {i = 0; i < DimOf(Extensions); i++} Associate
