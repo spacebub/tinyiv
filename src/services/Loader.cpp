@@ -969,7 +969,7 @@ namespace tiv {
 
     void Loader::post_cached(const Entry &entry) {
         if (!entry.error.empty()) {
-            post({_request.generation, Kind::Failed, entry.info, nullptr, entry.error, entry.unsupported, nullptr});
+            post({_request.generation, Kind::Failed, entry.info, nullptr, entry.error, entry.unsupported, nullptr, nullptr});
 
             return;
         }
@@ -987,7 +987,7 @@ namespace tiv {
 
         const bool full = entry.whole || Decode::scalable(entry.info.kind);
 
-        post({_request.generation, full ? Kind::Full : Kind::Preview, entry.info, entry.pyramid, {}, false, entry.animation});
+        post({_request.generation, full ? Kind::Full : Kind::Preview, entry.info, entry.pyramid, {}, false, entry.animation, nullptr});
     }
 
     void Loader::post(Result result) {

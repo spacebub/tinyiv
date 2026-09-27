@@ -318,7 +318,8 @@ namespace tiv {
 
                 if (wait < 0 ? SDL_WaitEvent(&event) : SDL_WaitEventTimeout(&event, wait)) {
                     handle(event);
-                } else if (_loading) {
+                } else {
+                    // Every timeout is a deadline that changes the frame, such as the badge going away.
                     _dirty = true;
                 }
             }
@@ -824,13 +825,14 @@ namespace tiv {
         _loader->stream_all(on);
         // Tiles of the same image and size would be kept, so the canvas lets go of them first.
         _canvas->clear();
+        _switchedAt = SDL_GetTicks();
+        _dirty = true;
 
         if (_folder.count() == 0) {
             return;
         }
 
         show(_folder.index(), _direction);
-        _switchedAt = SDL_GetTicks();
 
         if (on) {
             _message = "Streaming mode on";
