@@ -11,6 +11,7 @@ largest icon. SVG and PDF render again at the zoom on screen once the view rests
 stay sharp at any zoom. Animated GIF and WebP play in a loop, with a bar along the bottom to
 pause and seek. A file nothing can read says so in place of the image.
 
+Runs on x86-64-v3 CPUs (AVX2, BMI2), such as Intel Haswell and AMD Excavator or newer.
 Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 
 ## Keys

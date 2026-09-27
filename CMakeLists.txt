@@ -36,6 +36,7 @@ if (MSVC)
             "/WX"
             "/MP"
             "/GS"
+            "/arch:AVX2"
             # jmp_buf is 16 byte aligned on x64, which pads the libjpeg error struct around it.
             "/wd4324"
             # libjpeg and libpng report errors by longjmp only, which unwinds on x64 MSVC.
@@ -51,6 +52,7 @@ else ()
             "-Wpedantic"
             "-fstack-protector-strong"
             "-fno-plt"
+            "-march=x86-64-v3"
             "$<$<CONFIG:DEBUG>:-Og>"
             "$<$<CONFIG:RELEASE>:-O2;-ffunction-sections;-fdata-sections;-fvisibility=hidden>")
 
