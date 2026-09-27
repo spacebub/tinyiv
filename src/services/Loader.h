@@ -94,6 +94,12 @@ namespace tiv {
         // What is decoded and cached for the file, if anything, for warming the GPU ahead of a step.
         bool cached(const std::filesystem::path &file, Decode::Info *info, std::shared_ptr<const Pyramid> *pyramid) const;
 
+        // The file changed on disk, so what is decoded of it goes and decodes of it stop.
+        void forget(const std::filesystem::path &file);
+
+        // The file now says this orientation. Decodes of it still running read the old one, so they stop.
+        void reoriented(const std::filesystem::path &file, int orientation);
+
         [[nodiscard]] std::size_t cached_bytes() const;
         [[nodiscard]] std::size_t cached_files() const;
         [[nodiscard]] int workers() const { return static_cast<int>(_workers.size()); }
@@ -145,8 +151,9 @@ namespace tiv {
         void decode(Job &job);
         void decode_frames(Job &job);
         bool admit(const Job &job, std::size_t estimate);
-        void finish(const std::filesystem::path &file);
+        bool finish(const std::filesystem::path &file);
         void store(const std::filesystem::path &file, Entry entry);
+        void insert(const std::filesystem::path &file, Entry entry);
         // A null animation means the frames failed, and the image stays still.
         void store_frames(const std::filesystem::path &file, std::shared_ptr<const Animation> animation);
         void release(Entry &entry);

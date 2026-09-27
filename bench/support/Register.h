@@ -16,7 +16,6 @@ namespace bench {
     void register_bitmap();
     void register_bmp();
     void register_decode();
-    void register_orient();
     void register_pyramid();
     void register_upload();
     void register_loader();

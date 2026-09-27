@@ -32,23 +32,27 @@ namespace tiv {
 
         Canvas(SDL_Renderer *renderer, int maxTexture, std::size_t vramBudget = DEFAULT_VRAM_BUDGET);
 
-        // The image to draw. Width and height are the image's own, which the pyramid may be
-        // smaller than. Levels the same size as before, of the same image, keep their tiles.
-        void show(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height);
+        // The image to draw. Width and height are the image's own as stored, which the pyramid
+        // may be smaller than, and the orientation is how it is shown. Levels the same size as
+        // before, of the same image, keep their tiles.
+        void show(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height, int orientation);
+
+        // Shows the image drawn another way round. The tiles stay as they are.
+        void orient(int orientation);
 
         // Another frame of the image shown. Levels the same size as the shown ones keep their
         // textures, rewritten in place.
         void replace(std::shared_ptr<const Pyramid> pyramid);
 
         // A neighbour to have ready: its levels up to the screen stay resident.
-        void warm(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height);
+        void warm(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height, int orientation);
 
         // A sharper rendering of part of the image shown, at the scale given, x and y being
-        // where the bitmap sits in the image at that scale. It is drawn wherever it is nearer
+        // where the bitmap sits in the image as stored at that scale. It is drawn wherever it is nearer
         // the zoom than the levels are, and goes when another image is shown.
         void refine(std::shared_ptr<const Bitmap> bitmap, double scale, int x, int y);
 
-        // True when the rendering is at this zoom and covers the area, in image pixels.
+        // True when the rendering is at this zoom and covers the area, in pixels of the image as stored.
         [[nodiscard]] bool refined(double zoom, const Rect &area) const;
 
         // Forgets every image but the one shown and the ones listed.
@@ -79,22 +83,24 @@ namespace tiv {
         struct Detail {
             std::uint64_t image = 0;
             double scale = 1.0;
-            // In image pixels.
+            // In pixels of the image as stored.
             Rect area;
             std::unique_ptr<Tiles> tiles;
         };
 
         struct Held {
             std::uint64_t image = 0;
+            // As stored.
             int width = 0;
             int height = 0;
+            int orientation = 1;
             std::shared_ptr<const Pyramid> pyramid;
             // Ascending by scale, so the coarsest first.
             std::vector<Sheet> sheets;
         };
 
         // Sheets for the pyramid, reusing those of the previous of the same size.
-        [[nodiscard]] Held build(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height, Held previous) const;
+        [[nodiscard]] Held build(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height, int orientation, Held previous) const;
 
         // The smallest sheet with a texel per screen pixel, else the finest there is.
         [[nodiscard]] static std::size_t wanted(const Held &held, double zoom);

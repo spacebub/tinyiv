@@ -131,10 +131,12 @@ namespace bench {
 
             settle(loader);
 
+            // As the app asks in a folder of two, the other file ahead.
             for ([[maybe_unused]] auto step : state) {
                 const std::filesystem::path &file = files[generation % 2];
+                const std::filesystem::path &other = files[(generation + 1) % 2];
 
-                loader.show(++generation, file, {}, {});
+                loader.show(++generation, file, {other}, {});
 
                 if (!wait_for(loader, generation, &result)) {
                     state.SkipWithError("no result");

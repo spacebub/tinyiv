@@ -7,9 +7,11 @@
  *	spacebub <spacebubs@proton.me>
  */
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -136,5 +138,123 @@ namespace tiv {
         const double y = area.y + ((area.height + (HEIGHT * scale)) / 2.0);
 
         badge(renderer, std::max(x, area.x), y, scale, text, false);
+    }
+
+    namespace {
+        constexpr float TABLE_LINE = 1.75F;
+        constexpr std::size_t TABLE_GAP = 3;
+
+        // The debug font has ASCII only, so U+2190 to U+2193 are drawn: left, up, right, down.
+        constexpr std::string_view ARROW_LEAD = "\xE2\x86";
+        constexpr unsigned char ARROW_FIRST = 0x90;
+        constexpr std::size_t ARROW_BYTES = 3;
+
+        // Quarter turns clockwise from pointing right, or -1 for anything else.
+        int arrow_at(const std::string_view text, const std::size_t at) {
+            if (text.substr(at, ARROW_LEAD.size()) != ARROW_LEAD || at + ARROW_BYTES > text.size()) {
+                return -1;
+            }
+
+            constexpr std::array<int, 4> TURNS = {2, 3, 0, 1};
+            const int which = static_cast<unsigned char>(text.at(at + 2)) - ARROW_FIRST;
+
+            return which >= 0 && which < 4 ? TURNS.at(static_cast<std::size_t>(which)) : -1;
+        }
+
+        // Characters, not bytes.
+        std::size_t length(const std::string_view text) {
+            return static_cast<std::size_t>(std::ranges::count_if(text, [](const char c) { return (static_cast<unsigned char>(c) & 0xC0) != 0x80; }));
+        }
+
+        // A shaft and a head filling the glyph cell at (x, y), turned from pointing right.
+        void arrow(SDL_Renderer *renderer, const float x, const float y, const float size, const int quarters) {
+            // As thick as a stroke of the font, which is one of its eight pixels.
+            constexpr float SHAFT = 1.0F / 16.0F;
+            // In cells from the centre, pointing right: the head, then the shaft as two triangles.
+            constexpr std::array<SDL_FPoint, 9> SHAPE = {{
+                    {0.4F, 0.0F}, {0.0F, -0.3F}, {0.0F, 0.3F},
+                    {-0.4F, -SHAFT}, {0.05F, -SHAFT}, {0.05F, SHAFT},
+                    {-0.4F, -SHAFT}, {0.05F, SHAFT}, {-0.4F, SHAFT},
+            }};
+            const float half = size / 2.0F;
+            std::array<SDL_Vertex, 9> vertices{};
+            const SDL_FColor colour{TEXT.r / 255.0F, TEXT.g / 255.0F, TEXT.b / 255.0F, TEXT.a / 255.0F};
+
+            for (std::size_t i = 0; i < SHAPE.size(); ++i) {
+                SDL_FPoint p = SHAPE.at(i);
+
+                for (int turn = 0; turn < quarters; ++turn) {
+                    p = {-p.y, p.x};
+                }
+
+                vertices.at(i) = {{x + half + (p.x * size), y + half + (p.y * size)}, colour, {0.0F, 0.0F}};
+            }
+
+            SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), nullptr, 0);
+        }
+
+        // Like text_at(), with the arrows drawn where they fall.
+        void symbols_at(SDL_Renderer *renderer, const float x, const float y, const float scale, const std::string_view text) {
+            std::size_t run = 0;
+            float at = x;
+
+            for (std::size_t i = 0; i < text.size();) {
+                const int quarters = arrow_at(text, i);
+
+                if (quarters < 0) {
+                    i += 1;
+
+                    continue;
+                }
+
+                text_at(renderer, at, y, scale, std::string(text.substr(run, i - run)));
+                at += static_cast<float>(length(text.substr(run, i - run))) * glyph(scale);
+                arrow(renderer, at, y, glyph(scale), quarters);
+                at += glyph(scale);
+                i += ARROW_BYTES;
+                run = i;
+            }
+
+            text_at(renderer, at, y, scale, std::string(text.substr(run)));
+        }
+
+        std::size_t column(const std::span<const StatusBar::Row> rows, std::string_view StatusBar::Row::*side) {
+            std::size_t widest = 0;
+
+            for (const StatusBar::Row &row : rows) {
+                widest = std::max(widest, length(row.*side));
+            }
+
+            return widest;
+        }
+    }
+
+    Rect StatusBar::table_box(const Rect &area, const float scale, const std::span<const Row> rows) {
+        const double padding = 2.0 * PADDING * scale;
+        const double line = glyph(scale) * TABLE_LINE;
+        const double width = (static_cast<double>(column(rows, &Row::left) + TABLE_GAP + column(rows, &Row::right)) * glyph(scale)) + (2.0 * padding);
+        const double height = (static_cast<double>(rows.size()) * line) + (2.0 * padding) - (line - glyph(scale));
+
+        return {area.x + ((area.width - width) / 2.0), area.y + ((area.height - height) / 2.0), width, height};
+    }
+
+    void StatusBar::table(SDL_Renderer *renderer, const Rect &area, const float scale, const std::span<const Row> rows) {
+        const Rect placed = table_box(area, scale, rows);
+        const SDL_FRect box{static_cast<float>(placed.x), static_cast<float>(placed.y), static_cast<float>(placed.width), static_cast<float>(placed.height)};
+        const float padding = 2.0F * PADDING * scale;
+        const float right = static_cast<float>(column(rows, &Row::left) + TABLE_GAP) * glyph(scale);
+
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, BADGE.r, BADGE.g, BADGE.b, BADGE.a);
+        SDL_RenderFillRect(renderer, &box);
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+        float y = box.y + padding;
+
+        for (const Row &row : rows) {
+            symbols_at(renderer, box.x + padding, y, scale, row.left);
+            symbols_at(renderer, box.x + padding + right, y, scale, row.right);
+            y += glyph(scale) * TABLE_LINE;
+        }
     }
 }

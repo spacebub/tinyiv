@@ -20,34 +20,7 @@ namespace tiv {
                 return Action::Quit;
 
             case SDL_EVENT_KEY_DOWN:
-                switch (event.key.key) {
-                    case SDLK_ESCAPE:
-                    case SDLK_Q:
-                        return Action::Quit;
-                    case SDLK_F:
-                    case SDLK_F11:
-                        return Action::ToggleFullscreen;
-                    case SDLK_LEFT:
-                        --_wheel;
-
-                        return Action::Scroll;
-                    case SDLK_RIGHT:
-                        ++_wheel;
-
-                        return Action::Scroll;
-                    case SDLK_HOME:
-                        return Action::First;
-                    case SDLK_END:
-                        return Action::Last;
-                    case SDLK_SPACE:
-                        return Action::TogglePlay;
-                    case SDLK_LEFTBRACKET:
-                        return Action::FrameBack;
-                    case SDLK_RIGHTBRACKET:
-                        return Action::FrameForward;
-                    default:
-                        return Action::None;
-                }
+                return key(event.key, viewport);
 
             case SDL_EVENT_MOUSE_BUTTON_DOWN: {
                 const double x = event.button.x * density;
@@ -102,6 +75,69 @@ namespace tiv {
                 return _wheel != 0 ? Action::Scroll : Action::None;
             }
 
+            default:
+                return Action::None;
+        }
+    }
+
+    Input::Action Input::key(const SDL_KeyboardEvent &event, Viewport &viewport) {
+        switch (event.key) {
+            case SDLK_ESCAPE:
+            case SDLK_Q:
+                return Action::Quit;
+            case SDLK_D:
+                return (event.mod & SDL_KMOD_CTRL) != 0 ? Action::Quit : Action::None;
+            case SDLK_UP:
+                viewport.zoom_centred(ZOOM_STEP);
+
+                return Action::Redraw;
+            case SDLK_DOWN:
+                viewport.zoom_centred(1.0 / ZOOM_STEP);
+
+                return Action::Redraw;
+            case SDLK_1:
+                viewport.fit();
+
+                return Action::Redraw;
+            case SDLK_2:
+                viewport.zoom_to(1.0);
+
+                return Action::Redraw;
+            case SDLK_F:
+            case SDLK_F11:
+                return Action::ToggleFullscreen;
+            case SDLK_LEFT:
+                --_wheel;
+
+                return Action::Scroll;
+            case SDLK_RIGHT:
+                ++_wheel;
+
+                return Action::Scroll;
+            case SDLK_R:
+                return Action::Reload;
+            case SDLK_HOME:
+                return Action::First;
+            case SDLK_END:
+                return Action::Last;
+            case SDLK_LEFTBRACKET:
+                return Action::TurnLeft;
+            case SDLK_RIGHTBRACKET:
+                return Action::TurnRight;
+            case SDLK_SEMICOLON:
+                return Action::FlipVertical;
+            case SDLK_APOSTROPHE:
+                return Action::FlipHorizontal;
+            case SDLK_S:
+                return (event.mod & SDL_KMOD_CTRL) != 0 ? Action::Save : Action::None;
+            case SDLK_H:
+                return (event.mod & SDL_KMOD_CTRL) != 0 ? Action::ToggleHelp : Action::None;
+            case SDLK_SPACE:
+                return Action::TogglePlay;
+            case SDLK_COMMA:
+                return Action::FrameBack;
+            case SDLK_PERIOD:
+                return Action::FrameForward;
             default:
                 return Action::None;
         }

@@ -27,6 +27,8 @@ add_executable(tinyiv
         image/Orient.h
         image/Pyramid.cpp
         image/Pyramid.h
+        image/Reorient.cpp
+        image/Reorient.h
         image/Shrink.cpp
         image/Shrink.h
         image/Simd.cpp

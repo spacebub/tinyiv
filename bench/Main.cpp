@@ -36,7 +36,6 @@ int main(int argc, char **argv) {
     bench::register_bitmap();
     bench::register_bmp();
     bench::register_decode();
-    bench::register_orient();
     bench::register_pyramid();
     bench::register_upload();
     bench::register_loader();

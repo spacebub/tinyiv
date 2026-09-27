@@ -7,6 +7,7 @@
  *	spacebub <spacebubs@proton.me>
  */
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,8 @@
 #include "gallery/Folder.h"
 #include "image/Bitmap.h"
 #include "image/Decode.h"
+#include "image/Orient.h"
+#include "image/Reorient.h"
 #include "render/Canvas.h"
 #include "render/PlayBar.h"
 #include "render/StatusBar.h"
@@ -59,6 +62,25 @@ namespace tiv {
         // A scalable image renders this share of the view beyond each edge, so a short pan stays sharp.
         constexpr double REFINE_MARGIN = 0.25;
         constexpr SDL_Color BACKGROUND{0, 0, 0, 255};
+
+        // Keys apart by two spaces, words within one by one.
+        constexpr std::array<StatusBar::Row, 15> HELP = {{
+                {"Wheel  ←  →", "Previous, next image"},
+                {"Home  End", "First, last image"},
+                {"R", "Reload from disk"},
+                {"Left drag", "Pan"},
+                {"Right drag ↑ ↓", "Zoom in, out"},
+                {"↑  ↓", "Zoom in, out a step"},
+                {"1  2", "Fit, actual size"},
+                {"F  F11  Double click", "Fullscreen"},
+                {"[  ]", "Turn left, right"},
+                {";  '", "Flip vertically, horizontally"},
+                {"Ctrl+S", "Save turns and flips"},
+                {"Space", "Play, pause animation"},
+                {",  .", "Previous, next frame"},
+                {"Ctrl+H", "Show, hide this help"},
+                {"Esc  Q  Ctrl+D", "Quit"},
+        }};
 
 #ifndef _WIN32
         SDL_Surface *icon_surface(Bitmap &icon) {
@@ -246,6 +268,8 @@ namespace tiv {
 
         _bytes = std::filesystem::file_size(_folder.current(), failure);
         _info = {};
+        _turn = 1;
+        _message.clear();
         _loading = true;
         _failure.clear();
         _seeking = false;
@@ -333,7 +357,7 @@ namespace tiv {
             return;
         }
 
-        if (handle_play_bar(event)) {
+        if (handle_help(event) || handle_play_bar(event)) {
             return;
         }
 
@@ -350,7 +374,15 @@ namespace tiv {
             return;
         }
 
-        switch (_input.handle(event, SDL_GetWindowPixelDensity(_window), _viewport)) {
+        const Input::Action action = _input.handle(event, SDL_GetWindowPixelDensity(_window), _viewport);
+
+        // Doing anything the help lists puts the help away.
+        if (_help && action != Input::Action::None && action != Input::Action::ToggleHelp) {
+            _help = false;
+            _dirty = true;
+        }
+
+        switch (action) {
             case Input::Action::Quit:
                 _running = false;
                 break;
@@ -369,6 +401,28 @@ namespace tiv {
             case Input::Action::Last:
                 show(_folder.count() - 1, -1);
                 break;
+            case Input::Action::Reload:
+                reload();
+                break;
+            case Input::Action::TurnLeft:
+                turn(Orient::TURN_LEFT);
+                break;
+            case Input::Action::TurnRight:
+                turn(Orient::TURN_RIGHT);
+                break;
+            case Input::Action::FlipVertical:
+                turn(Orient::FLIP_VERTICAL);
+                break;
+            case Input::Action::FlipHorizontal:
+                turn(Orient::FLIP_HORIZONTAL);
+                break;
+            case Input::Action::Save:
+                save();
+                break;
+            case Input::Action::ToggleHelp:
+                _help = !_help;
+                _dirty = true;
+                break;
             case Input::Action::TogglePlay:
                 _playback.toggle(SDL_GetTicks());
                 _dirty = true;
@@ -386,6 +440,42 @@ namespace tiv {
             case Input::Action::None:
                 break;
         }
+    }
+
+    // While the help is up, Escape and clicks outside it put it away instead of acting, and
+    // clicks inside it do nothing. True when the event went to it.
+    bool App::handle_help(const SDL_Event &event) {
+        if (!_help) {
+            return false;
+        }
+
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
+            _help = false;
+            _dirty = true;
+
+            return true;
+        }
+
+        if (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN) {
+            return false;
+        }
+
+        int width = 0;
+        int height = 0;
+
+        SDL_GetWindowSizeInPixels(_window, &width, &height);
+
+        const float density = SDL_GetWindowPixelDensity(_window);
+        const Rect box = StatusBar::table_box({0.0, 0.0, static_cast<double>(width), static_cast<double>(height)}, SDL_GetWindowDisplayScale(_window), HELP);
+        const double x = event.button.x * density;
+        const double y = event.button.y * density;
+
+        if (x < box.x || y < box.y || x > box.x + box.width || y > box.y + box.height) {
+            _help = false;
+            _dirty = true;
+        }
+
+        return true;
     }
 
     // Clicks and drags on the play bar, which the view never sees. True when the event was one.
@@ -482,7 +572,11 @@ namespace tiv {
             if (_shown != result.generation) {
                 _shown = result.generation;
                 _info = result.info;
-                _viewport.set_image(_info.width, _info.height);
+                _turn = 1;
+
+                const Size size = shown();
+
+                _viewport.set_image(size.width, size.height);
                 moved();
             }
 
@@ -490,7 +584,9 @@ namespace tiv {
                 continue;
             }
 
-            _canvas->show(result.pyramid, static_cast<std::uint64_t>(_folder.index()), _info.width, _info.height);
+            const Size size = stored();
+
+            _canvas->show(result.pyramid, static_cast<std::uint64_t>(_folder.index()), size.width, size.height, orientation());
 
             if (result.animation != nullptr) {
                 _playback.start(result.animation, SDL_GetTicks());
@@ -545,34 +641,50 @@ namespace tiv {
             return;
         }
 
-        // In pixels of the image at the zoom.
         const Rect image = _viewport.image_rect();
-        const double left = std::max(-image.x, 0.0);
-        const double top = std::max(-image.y, 0.0);
-        const double right = std::min(_viewport.area_width() - image.x, image.width);
-        const double bottom = std::min(_viewport.area_height() - image.y, image.height);
+        const double left = std::max(image.x, 0.0);
+        const double top = std::max(image.y, 0.0);
+        const double right = std::min(image.x + image.width, _viewport.area_width());
+        const double bottom = std::min(image.y + image.height, _viewport.area_height());
 
         if (right <= left || bottom <= top) {
             return;
         }
 
         const double zoom = _viewport.zoom();
+        const Size size = stored();
+        const int back = Orient::inverse(orientation());
 
-        if (_canvas->refined(zoom, {left / zoom, top / zoom, (right - left) / zoom, (bottom - top) / zoom})) {
+        // A rect on screen as a share of the image as stored, within the image.
+        const auto unit = [&](const double x0, const double y0, const double x1, const double y1) {
+            const double cx0 = std::clamp((x0 - image.x) / image.width, 0.0, 1.0);
+            const double cy0 = std::clamp((y0 - image.y) / image.height, 0.0, 1.0);
+            const double cx1 = std::clamp((x1 - image.x) / image.width, 0.0, 1.0);
+            const double cy1 = std::clamp((y1 - image.y) / image.height, 0.0, 1.0);
+
+            return oriented({cx0, cy0, cx1 - cx0, cy1 - cy0}, back);
+        };
+
+        const Rect seen = unit(left, top, right, bottom);
+
+        if (_canvas->refined(zoom, {seen.x * size.width, seen.y * size.height, seen.width * size.width, seen.height * size.height})) {
             return;
         }
 
         const double marginX = _viewport.area_width() * REFINE_MARGIN;
         const double marginY = _viewport.area_height() * REFINE_MARGIN;
-        const auto x = static_cast<int>(std::floor(std::max(left - marginX, 0.0)));
-        const auto y = static_cast<int>(std::floor(std::max(top - marginY, 0.0)));
+        const Rect wide = unit(left - marginX, top - marginY, right + marginX, bottom + marginY);
+        const double scaledWidth = size.width * zoom;
+        const double scaledHeight = size.height * zoom;
+        const auto x = static_cast<int>(std::floor(wide.x * scaledWidth));
+        const auto y = static_cast<int>(std::floor(wide.y * scaledHeight));
         const Ask ask{
                 _generation,
                 zoom,
                 x,
                 y,
-                static_cast<int>(std::ceil(std::min(right + marginX, image.width))) - x,
-                static_cast<int>(std::ceil(std::min(bottom + marginY, image.height))) - y,
+                static_cast<int>(std::ceil((wide.x + wide.width) * scaledWidth)) - x,
+                static_cast<int>(std::ceil((wide.y + wide.height) * scaledHeight)) - y,
         };
 
         if (ask == _asked) {
@@ -604,11 +716,89 @@ namespace tiv {
             std::shared_ptr<const Pyramid> pyramid;
 
             if (_loader->cached(_folder.at(index), &info, &pyramid) && pyramid != nullptr) {
-                _canvas->warm(std::move(pyramid), static_cast<std::uint64_t>(index), info.width, info.height);
+                const bool swapped = Orient::swaps(info.orientation);
+
+                _canvas->warm(std::move(pyramid), static_cast<std::uint64_t>(index), swapped ? info.height : info.width, swapped ? info.width : info.height, info.orientation);
             }
         }
 
         _canvas->keep(keep);
+    }
+
+    // Tiles of the same image and size would be kept, so the canvas lets go of them first.
+    void App::reload() {
+        if (_folder.count() == 0) {
+            return;
+        }
+
+        _loader->forget(_folder.current());
+        _canvas->clear();
+        show(_folder.index(), _direction);
+    }
+
+    void App::turn(const int by) {
+        if (!_viewport.has_image()) {
+            return;
+        }
+
+        _turn = Orient::compose(by, _turn);
+        _message.clear();
+        _canvas->orient(orientation());
+
+        const Size size = shown();
+
+        _viewport.set_image(size.width, size.height);
+        moved();
+        _dirty = true;
+    }
+
+    void App::save() {
+        if (_turn == 1 || _shown != _generation || _info.width == 0) {
+            return;
+        }
+
+        _dirty = true;
+
+        if (!Reorient::supported(_info.kind)) {
+            _message = std::format("{} files keep no orientation, not saved", _info.format);
+
+            return;
+        }
+
+        const int target = orientation();
+        std::string error;
+
+        if (!Reorient::write(_folder.current(), target, &error)) {
+            std::println(stderr, "tinyiv: {}", error);
+            _message = "Could not save";
+
+            return;
+        }
+
+        _loader->reoriented(_folder.current(), target);
+
+        if (Orient::swaps(_turn)) {
+            std::swap(_info.width, _info.height);
+        }
+
+        std::error_code failure;
+
+        _info.orientation = target;
+        _turn = 1;
+        _bytes = std::filesystem::file_size(_folder.current(), failure);
+        _message = "Saved";
+    }
+
+    int App::orientation() const {
+        return Orient::compose(_turn, _info.orientation);
+    }
+
+    App::Size App::stored() const {
+        return Orient::swaps(_info.orientation) ? Size{_info.height, _info.width} : Size{_info.width, _info.height};
+    }
+
+    App::Size App::shown() const {
+        return Orient::swaps(_turn) ? Size{_info.height, _info.width} : Size{_info.width, _info.height};
     }
 
     void App::frame() {
@@ -633,6 +823,10 @@ namespace tiv {
 
         if (_playback.active()) {
             PlayBar::draw(_renderer, play_bar(), scale, _playback.playing(), _playback.progress());
+        }
+
+        if (_help) {
+            StatusBar::table(_renderer, {0.0, 0.0, static_cast<double>(width), static_cast<double>(height)}, scale, HELP);
         }
 
         if (!_fullscreen) {
@@ -680,7 +874,8 @@ namespace tiv {
             return "tinyiv";
         }
 
-        return std::format("[{}/{}] {}", _folder.index() + 1, _folder.count(), _folder.current().filename().string());
+        // Marked while turned or flipped and not saved.
+        return std::format("[{}/{}] {}{}", _folder.index() + 1, _folder.count(), _folder.current().filename().string(), _turn != 1 ? " *" : "");
     }
 
     std::string App::bar_right() const {
@@ -688,14 +883,20 @@ namespace tiv {
             return {};
         }
 
+        if (!_message.empty()) {
+            return _message;
+        }
+
         if (_info.width == 0) {
             return human_size(_bytes);
         }
 
+        const Size size = shown();
+
         if (_playback.active()) {
-            return std::format("{}x{}, {} {}/{}, {}", _info.width, _info.height, _info.format, _playback.frame() + 1, _playback.frames(), human_size(_bytes));
+            return std::format("{}x{}, {} {}/{}, {}", size.width, size.height, _info.format, _playback.frame() + 1, _playback.frames(), human_size(_bytes));
         }
 
-        return std::format("{}x{}, {}, {}", _info.width, _info.height, _info.format, human_size(_bytes));
+        return std::format("{}x{}, {}, {}", size.width, size.height, _info.format, human_size(_bytes));
     }
 }

@@ -51,6 +51,11 @@ namespace tiv {
         void run();
 
     private:
+        struct Size {
+            int width = 0;
+            int height = 0;
+        };
+
         bool open_window(std::string *error);
         void layout();
         void set_fullscreen(bool on);
@@ -59,11 +64,23 @@ namespace tiv {
         void show(int index, int direction);
         void handle(const SDL_Event &event);
         bool handle_play_bar(const SDL_Event &event);
+        bool handle_help(const SDL_Event &event);
         void seek_to(double x);
         void step_frame(int delta);
         void deliver();
         void deliver_detail();
         void warm_neighbours();
+        // Reads the image from disk again, dropping any turn not saved.
+        void reload();
+        // Composes a turn or flip with how the image is shown.
+        void turn(int by);
+        // Writes how the image is turned into its file, when it is turned.
+        void save();
+        // How the image on screen is drawn, from how it is stored.
+        [[nodiscard]] int orientation() const;
+        // The size of the image on screen as stored, and as shown.
+        [[nodiscard]] Size stored() const;
+        [[nodiscard]] Size shown() const;
         // The view changed, so the part on screen may want rendering again once it rests.
         void moved();
         void refine();
@@ -102,6 +119,11 @@ namespace tiv {
         std::unique_ptr<Refiner> _refiner;
 
         Decode::Info _info;
+        // Turns and flips on top of the orientation the file says, until saved.
+        int _turn = 1;
+        // Replaces the image details in the status bar until the next image or turn.
+        std::string _message;
+        bool _help = false;
         std::uintmax_t _bytes = 0;
         std::uint64_t _generation = 0;
         // Whose levels the canvas holds.

@@ -7,10 +7,34 @@
  *	spacebub <spacebubs@proton.me>
  */
 #include <algorithm>
+#include <cmath>
+#include <utility>
 
+#include "image/Orient.h"
 #include "view/Viewport.h"
 
 namespace tiv {
+    Rect oriented(const Rect &unit, const int orientation) {
+        double x0 = unit.x;
+        double y0 = unit.y;
+        double x1 = unit.x + unit.width;
+        double y1 = unit.y + unit.height;
+
+        if (Orient::mirrors(orientation)) {
+            x0 = 1.0 - x0;
+            x1 = 1.0 - x1;
+        }
+
+        for (int turn = 0; turn < Orient::quarters(orientation); ++turn) {
+            x0 = std::exchange(y0, x0);
+            x1 = std::exchange(y1, x1);
+            x0 = 1.0 - x0;
+            x1 = 1.0 - x1;
+        }
+
+        return {std::min(x0, x1), std::min(y0, y1), std::abs(x1 - x0), std::abs(y1 - y0)};
+    }
+
     void Viewport::set_area(const double width, const double height) {
         if (width == _areaWidth && height == _areaHeight) {
             return;
@@ -60,6 +84,15 @@ namespace tiv {
         _zoom = std::clamp(_anchorZoom * factor, lowest, highest);
         _x = _anchorX - (_anchorImageX * _zoom);
         _y = _anchorY - (_anchorImageY * _zoom);
+    }
+
+    void Viewport::zoom_centred(const double factor) {
+        begin_zoom(_areaWidth / 2.0, _areaHeight / 2.0);
+        zoom_by(factor);
+    }
+
+    void Viewport::zoom_to(const double zoom) {
+        zoom_centred(zoom / _zoom);
     }
 
     Rect Viewport::image_rect() const {

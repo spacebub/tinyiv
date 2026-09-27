@@ -26,6 +26,7 @@
 #include "image/Animation.h"
 #include "image/Bitmap.h"
 #include "image/Decode.h"
+#include "image/Orient.h"
 #include "image/Pyramid.h"
 #include "services/Loader.h"
 
@@ -67,6 +68,13 @@ namespace tiv {
             const double scale = std::min(static_cast<double>(boxWidth) / info.width, static_cast<double>(boxHeight) / info.height);
 
             return {std::max(static_cast<int>(std::floor(info.width * scale)), 1), std::max(static_cast<int>(std::floor(info.height * scale)), 1)};
+        }
+
+        void take_size(const Bitmap &decoded, Decode::Info *info) {
+            const bool swapped = Orient::swaps(info->orientation);
+
+            info->width = swapped ? decoded.height() : decoded.width();
+            info->height = swapped ? decoded.width() : decoded.height();
         }
 
         // A pyramid is its base and a third again.
@@ -168,6 +176,41 @@ namespace tiv {
         *pyramid = found->second.pyramid;
 
         return true;
+    }
+
+    void Loader::forget(const std::filesystem::path &file) {
+        const std::scoped_lock hold(_guard);
+
+        for (const Job &job : _jobs) {
+            if (job.file == file) {
+                job.abort->request();
+            }
+        }
+
+        if (const auto found = _cache.find(file); found != _cache.end()) {
+            release(found->second);
+            _cache.erase(found);
+        }
+    }
+
+    void Loader::reoriented(const std::filesystem::path &file, const int orientation) {
+        const std::scoped_lock hold(_guard);
+
+        for (const Job &job : _jobs) {
+            if (job.file == file) {
+                job.abort->request();
+            }
+        }
+
+        if (const auto found = _cache.find(file); found != _cache.end()) {
+            Decode::Info &info = found->second.info;
+
+            if (Orient::swaps(info.orientation) != Orient::swaps(orientation)) {
+                std::swap(info.width, info.height);
+            }
+
+            info.orientation = orientation;
+        }
     }
 
     std::size_t Loader::cached_bytes() const {
@@ -369,11 +412,20 @@ namespace tiv {
     }
 
     // Forgets the job for the file and the memory it was expected to take. Under the lock.
-    void Loader::finish(const std::filesystem::path &file) {
-        if (const auto job = std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == file; }); job != _jobs.end()) {
-            _inflight -= std::min(_inflight, job->estimate);
-            _jobs.erase(job);
+    // True when the job had been told to stop.
+    bool Loader::finish(const std::filesystem::path &file) {
+        const auto job = std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == file; });
+
+        if (job == _jobs.end()) {
+            return false;
         }
+
+        const bool stopped = job->abort->requested();
+
+        _inflight -= std::min(_inflight, job->estimate);
+        _jobs.erase(job);
+
+        return stopped;
     }
 
     void Loader::decode(Job &job) {
@@ -440,8 +492,6 @@ namespace tiv {
             estimate += nativeBytes;
         }
 
-        estimate += entry.info.scratch;
-
         if (!admit(job, estimate)) {
             return;
         }
@@ -468,8 +518,7 @@ namespace tiv {
         }
 
         if (!over && whole && !scalable && entry.info.kind != Decode::Format::Other) {
-            entry.info.width = decoded.width();
-            entry.info.height = decoded.height();
+            take_size(decoded, &entry.info);
         }
 
         entry.pyramid = std::make_shared<const Pyramid>(Pyramid::build(std::move(decoded), screenWidth / THUMB_DIVISOR, screenHeight / THUMB_DIVISOR));
@@ -553,30 +602,40 @@ namespace tiv {
         {
             const std::scoped_lock hold(_guard);
 
-            finish(file);
-
-            if (const auto old = _cache.find(file); old != _cache.end()) {
-                release(old->second);
-                _cache.erase(old);
+            // Stopped too late to cut short, and it may have read what the file said before.
+            if (finish(file)) {
+                if (entry.pyramid != nullptr) {
+                    _trash.push_back(std::move(entry.pyramid));
+                }
+            } else {
+                insert(file, std::move(entry));
             }
-
-            entry.used = _request.sequence;
-
-            if (entry.pyramid != nullptr) {
-                _bytes += entry.pyramid->bytes();
-            }
-
-            const Entry &kept = _cache.emplace(file, std::move(entry)).first->second;
-
-            if (file == _request.current) {
-                post_cached(kept);
-            }
-
-            _starved = false;
-            trim();
         }
 
         _wake.notify_all();
+    }
+
+    // Under the lock.
+    void Loader::insert(const std::filesystem::path &file, Entry entry) {
+        if (const auto old = _cache.find(file); old != _cache.end()) {
+            release(old->second);
+            _cache.erase(old);
+        }
+
+        entry.used = _request.sequence;
+
+        if (entry.pyramid != nullptr) {
+            _bytes += entry.pyramid->bytes();
+        }
+
+        const Entry &kept = _cache.emplace(file, std::move(entry)).first->second;
+
+        if (file == _request.current) {
+            post_cached(kept);
+        }
+
+        _starved = false;
+        trim();
     }
 
     void Loader::store_frames(const std::filesystem::path &file, std::shared_ptr<const Animation> animation) {

@@ -10,7 +10,9 @@
 #define TIV_RENDER_STATUSBAR_H
 
 
+#include <span>
 #include <string>
+#include <string_view>
 
 #include <SDL3/SDL.h>
 
@@ -34,6 +36,17 @@ namespace tiv::StatusBar {
 
     // The badge, centred in the area, for a message in place of the image.
     void notice(SDL_Renderer *renderer, const Rect &area, float scale, const std::string &text);
+
+    struct Row {
+        std::string_view left;
+        std::string_view right;
+    };
+
+    // A dark box of two columns centred in the area, sized to what it holds.
+    void table(SDL_Renderer *renderer, const Rect &area, float scale, std::span<const Row> rows);
+
+    // Where table() puts its box.
+    [[nodiscard]] Rect table_box(const Rect &area, float scale, std::span<const Row> rows);
 
 }
 

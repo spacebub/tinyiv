@@ -11,15 +11,19 @@
 
 
 #include <cstdint>
+#include <numbers>
 
 #include <SDL3/SDL.h>
 
 #include "view/Viewport.h"
 
 namespace tiv {
-    // The fixed scheme: left drag pans, right drag zooms, the wheel and the arrow keys walk the
-    // folder, Home and End jump to its ends, Space plays or pauses an animation, [ and ] step
-    // it back and forward a frame.
+    // The fixed scheme: left drag pans, right drag zooms, Up and Down zoom a step, 1 fits and
+    // 2 shows the image at its own size, the wheel and Left and Right walk the folder, Home
+    // and End jump to its ends, R reads the image from disk again, [ and ] turn the image
+    // left and right, ; and ' flip it vertically and horizontally, Ctrl+S saves how it is
+    // turned, Space plays or pauses an animation, comma and period step it a frame, Ctrl+H
+    // shows all of this.
     class Input {
 
     public:
@@ -31,6 +35,13 @@ namespace tiv {
             Scroll,
             First,
             Last,
+            Reload,
+            TurnLeft,
+            TurnRight,
+            FlipVertical,
+            FlipHorizontal,
+            Save,
+            ToggleHelp,
             TogglePlay,
             FrameBack,
             FrameForward,
@@ -40,6 +51,9 @@ namespace tiv {
 
         // Pixels of drag per doubling of the zoom, roughly.
         static constexpr double ZOOM_PER_PIXEL = 0.005;
+
+        // Two key presses double the zoom.
+        static constexpr double ZOOM_STEP = std::numbers::sqrt2;
 
         // Mouse positions arrive in window units, density turns them into pixels.
         Action handle(const SDL_Event &event, float density, Viewport &viewport);
@@ -53,6 +67,8 @@ namespace tiv {
             Pan,
             Zoom,
         };
+
+        Action key(const SDL_KeyboardEvent &event, Viewport &viewport);
 
         Drag _drag = Drag::None;
         double _pressY = 0.0;

@@ -29,7 +29,7 @@ namespace tiv {
         // Small enough that a screenful is a handful of uploads, none of which stalls a frame.
         static constexpr int SIZE = 1024;
 
-        // Called for the parts of a drawn area that have no texture yet, in bitmap pixels.
+        // Called for the parts of a drawn area that have no texture yet, with where they land on screen.
         using Missing = std::function<void(const Rect &)>;
 
         Tiles(SDL_Renderer *renderer, int maxTexture, std::shared_ptr<const Bitmap> bitmap);
@@ -57,8 +57,9 @@ namespace tiv {
 
         [[nodiscard]] bool covered(const Rect &area) const;
 
-        // The area, in bitmap pixels, lands in dest. Tiles drawn are stamped as used.
-        void draw(const Rect &area, const Rect &dest, std::uint64_t stamp, const Missing &missing);
+        // The area, in bitmap pixels, of the bitmap shown whole in the screen rect with the
+        // orientation. Tiles drawn are stamped as used.
+        void draw(const Rect &area, const Rect &shown, int orientation, std::uint64_t stamp, const Missing &missing);
 
         // Frees tiles last used before the stamp until the wanted bytes are freed. Returns what was freed.
         std::size_t evict(std::uint64_t before, std::size_t wanted);

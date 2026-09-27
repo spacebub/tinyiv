@@ -340,8 +340,10 @@ namespace tiv {
 
                 if (via == Via::Thumbnail || via == Via::Scaled) {
                     const VipsSize size = via == Via::Scaled ? VIPS_SIZE_BOTH : VIPS_SIZE_DOWN;
+                    const bool swapped = vips_image_get_orientation_swap(VImage::new_from_file(file.string().c_str()).get_image()) != 0;
 
-                    image = VImage::thumbnail(file.string().c_str(), boxWidth, VImage::option()->set("height", boxHeight)->set("size", size));
+                    image = VImage::thumbnail(file.string().c_str(), swapped ? boxHeight : boxWidth,
+                                              VImage::option()->set("height", swapped ? boxWidth : boxHeight)->set("size", size)->set("no_rotate", true));
                 } else {
                     image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
 
@@ -353,8 +355,6 @@ namespace tiv {
                             image = image.shrink(factor, factor);
                         }
                     }
-
-                    image = image.autorot();
                 }
 
                 if (!write_rgba(to_rgba(image), out, abort)) {
@@ -554,11 +554,14 @@ namespace tiv {
             JpegHandle &operator=(JpegHandle &&) = delete;
         };
 
+        // XMP travels in APP1 too, so the Exif one is looked for.
         int jpeg_orientation(const jpeg_decompress_struct &info) {
-            const jpeg_marker_struct *marker = info.marker_list;
+            for (const jpeg_marker_struct *marker = info.marker_list; marker != nullptr; marker = marker->next) {
+                const std::span<const std::uint8_t> data(marker->data, marker->data_length);
 
-            if (marker != nullptr && marker->marker == JPEG_APP0 + 1 && marker->data_length > 0) {
-                return Exif::orientation({marker->data, marker->data_length});
+                if (marker->marker == JPEG_APP0 + 1 && starts_with(data, std::string_view("Exif\0\0", 6))) {
+                    return Exif::orientation(data);
+                }
             }
 
             return 1;
@@ -713,7 +716,7 @@ namespace tiv {
                 return Direct::Failed;
             }
 
-            *out = Orient::apply(std::move(held), orientation);
+            *out = std::move(held);
 
             return Direct::Done;
         }
@@ -881,10 +884,30 @@ namespace tiv {
                                         | (static_cast<std::uint32_t>(data[at + 2]) << 8) | data[at + 3]);
             };
 
-            info->width = read(IHDR);
-            info->height = read(IHDR + 4);
+            const int width = read(IHDR);
+            const int height = read(IHDR + 4);
 
-            return info->width > 0 && info->height > 0;
+            // eXIf comes before the image data: https://www.w3.org/TR/png-3/#eXIf
+            for (std::size_t at = 8; at + 12 <= data.size() && !starts_with(data, "IDAT", at + 4);) {
+                const auto length = static_cast<std::size_t>(static_cast<std::uint32_t>(read(at)));
+
+                if (at + 12 + length > data.size()) {
+                    break;
+                }
+
+                if (starts_with(data, "eXIf", at + 4)) {
+                    info->orientation = Exif::orientation(data.subspan(at + 8, length));
+
+                    break;
+                }
+
+                at += 12 + length;
+            }
+
+            info->width = Orient::swaps(info->orientation) ? height : width;
+            info->height = Orient::swaps(info->orientation) ? width : height;
+
+            return width > 0 && height > 0;
         }
 
         Direct load_png(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit) {
@@ -915,7 +938,7 @@ namespace tiv {
                 return Direct::Failed;
             }
 
-            *out = Orient::apply(std::move(held), orientation);
+            *out = std::move(held);
 
             return Direct::Done;
         }
@@ -938,6 +961,28 @@ namespace tiv {
             WebPIncremental &operator=(WebPIncremental &&) = delete;
         };
 
+        // The EXIF chunk of an extended file: https://developers.google.com/speed/webp/docs/riff_container
+        int webp_orientation(const std::span<const std::uint8_t> data) {
+            constexpr std::size_t FIRST_CHUNK = 12;
+            constexpr std::size_t CHUNK_HEADER = 8;
+
+            for (std::size_t at = FIRST_CHUNK; at + CHUNK_HEADER <= data.size();) {
+                const std::size_t size = data[at + 4] | (data[at + 5] << 8) | (data[at + 6] << 16) | (static_cast<std::size_t>(data[at + 7]) << 24);
+
+                if (at + CHUNK_HEADER + size > data.size()) {
+                    break;
+                }
+
+                if (starts_with(data, "EXIF", at)) {
+                    return Exif::orientation(data.subspan(at + CHUNK_HEADER, size));
+                }
+
+                at += CHUNK_HEADER + size + (size & 1);
+            }
+
+            return 1;
+        }
+
         // An animation is left to libvips, which counts its frames.
         bool probe_webp(const std::span<const std::uint8_t> data, Decode::Info *info) {
             WebPBitstreamFeatures features;
@@ -946,13 +991,9 @@ namespace tiv {
                 return false;
             }
 
-            info->width = features.width;
-            info->height = features.height;
-
-            // Format 2 is lossless, whose decoder keeps every pixel as ARGB, since a back reference can reach any earlier one.
-            if (features.format == 2) {
-                info->scratch = static_cast<std::size_t>(info->pixels()) * sizeof(std::uint32_t);
-            }
+            info->orientation = webp_orientation(data);
+            info->width = Orient::swaps(info->orientation) ? features.height : features.width;
+            info->height = Orient::swaps(info->orientation) ? features.width : features.height;
 
             return true;
         }
@@ -1072,13 +1113,13 @@ namespace tiv {
             return true;
         }
 
-        // libjxl with its own thread pool, which libvips does not use, and it applies the
-        // orientation itself. Animation stays with libvips.
+        // libjxl with its own thread pool, which libvips does not use. Animation stays with libvips.
         Direct load_jxl(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out, std::string *error, const Decode::Abort *abort) {
             const JxlHandle handle;
 
             if (handle.decoder == nullptr || handle.runner == nullptr
                 || JxlDecoderSetParallelRunner(handle.decoder, JxlThreadParallelRunner, handle.runner) != JXL_DEC_SUCCESS
+                || JxlDecoderSetKeepOrientation(handle.decoder, JXL_TRUE) != JXL_DEC_SUCCESS
                 || JxlDecoderSubscribeEvents(handle.decoder, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS
                 || JxlDecoderSetInput(handle.decoder, data.data(), data.size()) != JXL_DEC_SUCCESS) {
                 return Direct::Skip;
@@ -1105,9 +1146,7 @@ namespace tiv {
                         return Direct::Skip;
                     }
 
-                    const Size size = jxl_size(info);
-
-                    held = Bitmap::allocate(size.width, size.height);
+                    held = Bitmap::allocate(static_cast<int>(info.xsize), static_cast<int>(info.ysize));
                 } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
                     std::size_t needed = 0;
 

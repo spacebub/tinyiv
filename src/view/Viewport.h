@@ -18,6 +18,10 @@ namespace tiv {
         double height = 0.0;
     };
 
+    // A rect in the unit square of the image as stored, and where it lands in the unit square
+    // of the image shown with the orientation.
+    [[nodiscard]] Rect oriented(const Rect &unit, int orientation);
+
     // Where the image sits on screen. Everything is in pixels, zoom is screen pixels per image pixel.
     class Viewport {
 
@@ -38,6 +42,10 @@ namespace tiv {
         // Later zoom_by() calls keep the image point under (x, y) fixed there.
         void begin_zoom(double x, double y);
         void zoom_by(double factor);
+
+        // Keeps the image point at the centre of the area where it is.
+        void zoom_centred(double factor);
+        void zoom_to(double zoom);
 
         [[nodiscard]] double zoom() const { return _zoom; }
         [[nodiscard]] double area_width() const { return _areaWidth; }

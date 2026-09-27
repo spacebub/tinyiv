@@ -18,6 +18,7 @@
 #include <SDL3/SDL.h>
 
 #include "image/Bitmap.h"
+#include "image/Orient.h"
 #include "render/Tiles.h"
 #include "view/Viewport.h"
 
@@ -201,15 +202,15 @@ namespace tiv {
         return true;
     }
 
-    void Tiles::draw(const Rect &area, const Rect &dest, const std::uint64_t stamp, const Missing &missing) {
+    void Tiles::draw(const Rect &area, const Rect &shown, const int orientation, const std::uint64_t stamp, const Missing &missing) {
         if (_tiles.empty() || area.width <= 0.0 || area.height <= 0.0) {
             return;
         }
 
-        const double scaleX = dest.width / area.width;
-        const double scaleY = dest.height / area.height;
         const Span cols = columns(area);
         const Span rws = rows(area);
+        const int quarters = Orient::quarters(orientation);
+        const SDL_FlipMode flip = Orient::mirrors(orientation) ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
 
         for (int row = rws.first; row <= rws.last; ++row) {
             for (int column = cols.first; column <= cols.last; ++column) {
@@ -220,8 +221,11 @@ namespace tiv {
                     continue;
                 }
 
+                const Rect unit = oriented({part.x / _width, part.y / _height, part.width / _width, part.height / _height}, orientation);
+                const Rect lands{shown.x + (unit.x * shown.width), shown.y + (unit.y * shown.height), unit.width * shown.width, unit.height * shown.height};
+
                 if (tile.texture == nullptr) {
-                    missing(part);
+                    missing(lands);
 
                     continue;
                 }
@@ -233,14 +237,18 @@ namespace tiv {
                         static_cast<float>(part.height),
                 };
 
+                // SDL turns the target about its centre, so a quarter turn starts from the rect on its side.
+                const bool across = quarters % 2 == 1;
+                const double width = across ? lands.height : lands.width;
+                const double height = across ? lands.width : lands.height;
                 const SDL_FRect target{
-                        static_cast<float>(dest.x + ((part.x - area.x) * scaleX)),
-                        static_cast<float>(dest.y + ((part.y - area.y) * scaleY)),
-                        static_cast<float>(part.width * scaleX),
-                        static_cast<float>(part.height * scaleY),
+                        static_cast<float>(lands.x + ((lands.width - width) / 2.0)),
+                        static_cast<float>(lands.y + ((lands.height - height) / 2.0)),
+                        static_cast<float>(width),
+                        static_cast<float>(height),
                 };
 
-                SDL_RenderTexture(_renderer, tile.texture, &source, &target);
+                SDL_RenderTextureRotated(_renderer, tile.texture, &source, &target, 90.0 * quarters, nullptr, flip);
                 tile.used = stamp;
             }
         }

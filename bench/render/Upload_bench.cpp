@@ -115,7 +115,7 @@ namespace bench {
 
             viewport.set_area(3840.0, 2160.0);
             viewport.set_image(6656, 4992);
-            canvas.show(pyramid, 1, 6656, 4992);
+            canvas.show(pyramid, 1, 6656, 4992, 1);
 
             while (canvas.pending(viewport)) {
                 canvas.upload(viewport, ~std::size_t{0});

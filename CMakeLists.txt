@@ -9,7 +9,7 @@ if (CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
 endif ()
 
 project(tinyiv
-        VERSION 1.0.0
+        VERSION 1.1.0
         DESCRIPTION "A tiny, fast image viewer"
         LANGUAGES C CXX)
 

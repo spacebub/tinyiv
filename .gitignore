@@ -12,6 +12,9 @@ install_manifest.txt
 # Sources fetched by CMake, shared by every build tree
 /.download-cache/
 
+# The benchmark corpus, written wherever tiv_bench runs
+/corpus/
+
 # clangd's index, and Rider's project files
 /.cache/
 /.idea/

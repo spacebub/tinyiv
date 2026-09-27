@@ -16,20 +16,31 @@ Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 
 ## Keys
 
-| Input                   | Action                     |
-|-------------------------|----------------------------|
-| Wheel, Left, Right      | Previous, next image       |
-| Home, End               | First, last image          |
-| Left drag               | Pan                        |
-| Right drag up, down     | Zoom in, out               |
-| Double click, F, F11    | Fullscreen                 |
-| Space                   | Play, pause animation      |
-| [, ]                    | Previous, next frame       |
-| Click, drag on play bar | Play, pause, seek          |
-| Escape, Q               | Quit                       |
+| Input                   | Action                        |
+|-------------------------|-------------------------------|
+| Wheel  ←  →             | Previous, next image          |
+| Home  End               | First, last image             |
+| R                       | Reload from disk              |
+| Left drag               | Pan                           |
+| Right drag ↑ ↓          | Zoom in, out                  |
+| ↑  ↓                    | Zoom in, out a step           |
+| 1  2                    | Fit, actual size              |
+| F  F11  Double click    | Fullscreen                    |
+| [  ]                    | Turn left, right              |
+| ;  '                    | Flip vertically, horizontally |
+| Ctrl+S                  | Save turns and flips          |
+| Space                   | Play, pause animation         |
+| ,  .                    | Previous, next frame          |
+| Click, drag on play bar | Play, pause, seek             |
+| Ctrl+H                  | Show, hide the keys           |
+| Esc  Q  Ctrl+D          | Quit                          |
 
 Dropping a file on the window opens its folder. Started without a file, the window waits
 for one. Stepping a frame pauses the animation.
+
+Turning and flipping only change how the image is drawn. Ctrl+S writes the result into the
+file's orientation tag, for JPEG, PNG, WebP and TIFF, and leaves the pixel data byte for
+byte: turning back and saving again gives back the identical file.
 
 ## License
 

@@ -20,6 +20,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "image/Orient.h"
 #include "image/Pyramid.h"
 #include "render/Canvas.h"
 #include "render/Tiles.h"
@@ -55,6 +56,16 @@ namespace tiv {
                    && inner.y + inner.height <= outer.y + outer.height + SLACK;
         }
 
+        // The rect as a share of the outer one, which is the unit square.
+        Rect within(const Rect &rect, const Rect &outer) {
+            return {(rect.x - outer.x) / outer.width, (rect.y - outer.y) / outer.height, rect.width / outer.width, rect.height / outer.height};
+        }
+
+        // A share of the outer rect back in the outer rect's own terms.
+        Rect at(const Rect &unit, const Rect &outer) {
+            return {outer.x + (unit.x * outer.width), outer.y + (unit.y * outer.height), unit.width * outer.width, unit.height * outer.height};
+        }
+
         // What is left of the outer rect around the inner one, which lies within it, as bands.
         std::array<Rect, 4> around(const Rect &outer, const Rect &inner) {
             const double right = inner.x + inner.width;
@@ -72,12 +83,13 @@ namespace tiv {
     Canvas::Canvas(SDL_Renderer *renderer, const int maxTexture, const std::size_t vramBudget) : _renderer(renderer), _maxTexture(maxTexture), _budget(vramBudget) {
     }
 
-    Canvas::Held Canvas::build(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height, Held previous) const {
+    Canvas::Held Canvas::build(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height, const int orientation, Held previous) const {
         Held held;
 
         held.image = image;
         held.width = std::max(width, 1);
         held.height = std::max(height, 1);
+        held.orientation = orientation;
         held.pyramid = std::move(pyramid);
 
         for (const std::shared_ptr<const Bitmap> &level : std::views::reverse(held.pyramid->levels)) {
@@ -106,7 +118,7 @@ namespace tiv {
         return held;
     }
 
-    void Canvas::show(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height) {
+    void Canvas::show(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height, const int orientation) {
         if (pyramid == nullptr || pyramid->empty()) {
             return;
         }
@@ -135,7 +147,7 @@ namespace tiv {
             }
         }
 
-        _current = build(std::move(pyramid), image, width, height, std::move(previous));
+        _current = build(std::move(pyramid), image, width, height, orientation, std::move(previous));
 
         // The coarsest level is what every missing tile falls back to, so it is never missing.
         if (!_current.sheets.empty()) {
@@ -156,7 +168,7 @@ namespace tiv {
         });
 
         if (!same) {
-            show(std::move(pyramid), _current.image, _current.width, _current.height);
+            show(std::move(pyramid), _current.image, _current.width, _current.height, _current.orientation);
 
             return;
         }
@@ -168,7 +180,11 @@ namespace tiv {
         _current.pyramid = std::move(pyramid);
     }
 
-    void Canvas::warm(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height) {
+    void Canvas::orient(const int orientation) {
+        _current.orientation = orientation;
+    }
+
+    void Canvas::warm(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height, const int orientation) {
         if (pyramid == nullptr || pyramid->empty() || image == _current.image) {
             return;
         }
@@ -177,18 +193,20 @@ namespace tiv {
 
         if (found != _warm.end()) {
             if (found->pyramid == pyramid) {
+                found->orientation = orientation;
+
                 return;
             }
 
             Held previous = std::move(*found);
 
             _warm.erase(found);
-            _warm.push_back(build(std::move(pyramid), image, width, height, std::move(previous)));
+            _warm.push_back(build(std::move(pyramid), image, width, height, orientation, std::move(previous)));
 
             return;
         }
 
-        _warm.push_back(build(std::move(pyramid), image, width, height, {}));
+        _warm.push_back(build(std::move(pyramid), image, width, height, orientation, {}));
     }
 
     void Canvas::refine(std::shared_ptr<const Bitmap> bitmap, const double scale, const int x, const int y) {
@@ -230,10 +248,9 @@ namespace tiv {
 
     Rect Canvas::area_of(const Held &held, const std::size_t sheet, const Rect &screen, const Rect &image) {
         const Tiles &tiles = *held.sheets.at(sheet).tiles;
-        const double perX = tiles.width() / image.width;
-        const double perY = tiles.height() / image.height;
+        const Rect unit = oriented(within(screen, image), Orient::inverse(held.orientation));
 
-        return {(screen.x - image.x) * perX, (screen.y - image.y) * perY, screen.width * perX, screen.height * perY};
+        return {unit.x * tiles.width(), unit.y * tiles.height(), unit.width * tiles.width(), unit.height * tiles.height()};
     }
 
     std::size_t Canvas::fit_sheet(const Held &held) const {
@@ -241,7 +258,11 @@ namespace tiv {
             return 0;
         }
 
-        return wanted(held, std::min(_areaWidth / held.width, _areaHeight / held.height));
+        const bool swapped = Orient::swaps(held.orientation);
+        const double shownWidth = swapped ? held.height : held.width;
+        const double shownHeight = swapped ? held.width : held.height;
+
+        return wanted(held, std::min(_areaWidth / shownWidth, _areaHeight / shownHeight));
     }
 
     bool Canvas::pending(const Viewport &viewport) const {
@@ -338,7 +359,8 @@ namespace tiv {
             return;
         }
 
-        const Rect placed{image.x + (_detail.area.x * viewport.zoom()), image.y + (_detail.area.y * viewport.zoom()), _detail.area.width * viewport.zoom(), _detail.area.height * viewport.zoom()};
+        const Rect stored{_detail.area.x / _current.width, _detail.area.y / _current.height, _detail.area.width / _current.width, _detail.area.height / _current.height};
+        const Rect placed = at(oriented(stored, _current.orientation), image);
         const Rect over = intersect(visible, placed);
 
         if (over.width <= 0.0 || over.height <= 0.0) {
@@ -355,11 +377,10 @@ namespace tiv {
         }
 
         Tiles &tiles = *_detail.tiles;
-        const double perX = tiles.width() / placed.width;
-        const double perY = tiles.height() / placed.height;
-        const Rect area{(over.x - placed.x) * perX, (over.y - placed.y) * perY, over.width * perX, over.height * perY};
+        const Rect unit = oriented(within(over, placed), Orient::inverse(_current.orientation));
+        const Rect area{unit.x * tiles.width(), unit.y * tiles.height(), unit.width * tiles.width(), unit.height * tiles.height()};
 
-        tiles.draw(area, over, _frame, [](const Rect &) {});
+        tiles.draw(area, placed, _current.orientation, _frame, [](const Rect &) {});
     }
 
     // Whichever is nearer the zoom, the rendering or the level, as a ratio either way.
@@ -373,19 +394,10 @@ namespace tiv {
 
     // Whatever the sheet is missing under the screen rect is drawn from the one below it.
     void Canvas::draw_sheet(Held &held, const std::size_t index, const Rect &screen, const Rect &image) {
-        Tiles &tiles = *held.sheets.at(index).tiles;
-        const Rect area = area_of(held, index, screen, image);
-        const double perX = tiles.width() / image.width;
-        const double perY = tiles.height() / image.height;
-
-        tiles.draw(area, screen, _frame, [&](const Rect &missing) {
-            if (index == 0) {
-                return;
+        held.sheets.at(index).tiles->draw(area_of(held, index, screen, image), image, held.orientation, _frame, [&](const Rect &missing) {
+            if (index > 0) {
+                draw_sheet(held, index - 1, missing, image);
             }
-
-            const Rect fallback{image.x + (missing.x / perX), image.y + (missing.y / perY), missing.width / perX, missing.height / perY};
-
-            draw_sheet(held, index - 1, fallback, image);
         });
     }
 

@@ -45,7 +45,7 @@ namespace tiv::Decode {
     };
 
     struct Info {
-        // As displayed, so orientation already applied.
+        // As shown, once the orientation is applied.
         int width = 0;
         int height = 0;
         // Short upper case name of the container: JPEG, PNG, WEBP.
@@ -55,8 +55,6 @@ namespace tiv::Decode {
         int orientation = 1;
         // More than one for an animated GIF or WebP.
         int frames = 1;
-        // Memory the decoder holds beside the bitmap until it is done, where that is more than a few rows.
-        std::size_t scratch = 0;
 
         [[nodiscard]] long pixels() const { return static_cast<long>(width) * height; }
     };
@@ -100,12 +98,13 @@ namespace tiv::Decode {
     // Reads the header only.
     bool probe(const std::filesystem::path &file, Info *info, std::string *error = nullptr);
 
-    // Decodes straight into an RGBA8 bitmap, oriented for display. A box smaller than the
-    // image asks for the size the image would have fitted into it: formats that scale
-    // cheaply deliver that size, every other one delivers the image whole and leaves the
-    // shrinking to the caller. Scalable formats render to fit the box, larger or smaller.
-    // Force makes every format deliver a size within the box without ever holding the image
-    // whole, for images too large for that.
+    // Decodes straight into an RGBA8 bitmap as stored, the orientation left for drawing. The
+    // box is in the image's shown orientation. A box smaller than the image asks for the
+    // size the image would have fitted into it: formats that scale cheaply deliver that
+    // size, every other one delivers the image whole and leaves the shrinking to the caller.
+    // Scalable formats render to fit the box, larger or smaller. Force makes every format
+    // deliver a size within the box without ever holding the image whole, for images too
+    // large for that.
     enum class Fit : std::uint8_t {
         Cheap,
         Force,

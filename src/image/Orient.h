@@ -10,16 +10,28 @@
 #define TIV_IMAGE_ORIENT_H
 
 
-#include "image/Bitmap.h"
-
 namespace tiv::Orient {
+
+    // Orientations are the eight EXIF values: how the image as stored turns and mirrors to be
+    // shown. Bitmaps stay as stored, and the orientation is applied when they are drawn.
+    // https://www.cipa.jp/std/documents/e/DC-008-Translation-2019-E.pdf, tag 0x0112.
+
+    // Turns and flips of the image as shown, to compose with the orientation it has.
+    constexpr int FLIP_HORIZONTAL = 2;
+    constexpr int FLIP_VERTICAL = 4;
+    constexpr int TURN_RIGHT = 6;
+    constexpr int TURN_LEFT = 8;
 
     // True for orientations 5 to 8, which swap width and height.
     [[nodiscard]] bool swaps(int orientation);
 
-    // The bitmap as the EXIF orientation says it should be displayed. Orientation 1 is
-    // handed back untouched.
-    [[nodiscard]] Bitmap apply(Bitmap source, int orientation);
+    // Drawing applies the mirror, left to right, first and then the quarter turns clockwise.
+    [[nodiscard]] bool mirrors(int orientation);
+    [[nodiscard]] int quarters(int orientation);
+
+    // Inner applied first, then outer.
+    [[nodiscard]] int compose(int outer, int inner);
+    [[nodiscard]] int inverse(int orientation);
 
 }
 
