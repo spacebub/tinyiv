@@ -23,6 +23,7 @@
 
 #include "image/Bitmap.h"
 #include "image/Pyramid.h"
+#include "image/Simd.h"
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast,portability-simd-intrinsics): the kernels walk rows with intrinsics.
 namespace tiv {
@@ -72,7 +73,7 @@ namespace tiv {
             halve_row_scalar(top + (static_cast<std::size_t>(x) * 8), bottom + (static_cast<std::size_t>(x) * 8), out + (static_cast<std::size_t>(x) * 4), pairs - x);
         }
 
-        __attribute__((target("avx2"))) void halve_row_avx2(const std::uint8_t *top, const std::uint8_t *bottom, std::uint8_t *out, const int pairs) {
+        TIV_AVX2 void halve_row_avx2(const std::uint8_t *top, const std::uint8_t *bottom, std::uint8_t *out, const int pairs) {
             // Per lane: RGBA RGBA RGBA RGBA becomes RR GG BB AA RR GG BB AA, so one multiply-add
             // by one sums each channel of a pixel pair.
             const __m256i gather = _mm256_setr_epi8(0, 4, 1, 5, 2, 6, 3, 7, 8, 12, 9, 13, 10, 14, 11, 15,
@@ -120,9 +121,7 @@ namespace tiv {
                     break;
             }
 
-            static const bool avx2 = __builtin_cpu_supports("avx2");
-
-            return avx2 ? halve_row_avx2 : halve_row_sse2;
+            return Simd::avx2() ? halve_row_avx2 : halve_row_sse2;
 #else
             (void) kernel;
 
@@ -198,7 +197,7 @@ namespace tiv {
 #if defined(__x86_64__) || defined(_M_X64)
         switch (kernel) {
             case Kernel::Avx2:
-                return __builtin_cpu_supports("avx2");
+                return Simd::avx2();
             case Kernel::Auto:
             case Kernel::Scalar:
             case Kernel::Sse2:

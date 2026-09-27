@@ -8,12 +8,14 @@
  */
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <format>
 #include <memory>
 #include <print>
+#include <span>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -24,6 +26,7 @@
 #include "app/App.h"
 #include "app/Input.h"
 #include "gallery/Folder.h"
+#include "image/Bitmap.h"
 #include "image/Decode.h"
 #include "render/Canvas.h"
 #include "render/PlayBar.h"
@@ -33,15 +36,59 @@
 #include "view/Playback.h"
 #include "view/Viewport.h"
 
+#ifndef _WIN32
+namespace Embedded {
+    // NOLINTBEGIN(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays): tiv_embed defines them as C arrays.
+    extern const unsigned char icon128[];
+    extern const std::size_t icon128Size;
+    extern const unsigned char icon256[];
+    extern const std::size_t icon256Size;
+    // NOLINTEND(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+}
+#endif
+
 namespace tiv {
     namespace {
         constexpr float WINDOW_SHARE = 0.8F;
+        // Room for the status bar to show a file name beside the size and format.
+        constexpr int MIN_WIDTH = 480;
+        constexpr int MIN_HEIGHT = 270;
         constexpr int PREFETCH_AHEAD = 6;
         constexpr int PREFETCH_BEHIND = 2;
         constexpr double BADGE_MARGIN = 12.0;
         // A scalable image renders this share of the view beyond each edge, so a short pan stays sharp.
         constexpr double REFINE_MARGIN = 0.25;
         constexpr SDL_Color BACKGROUND{0, 0, 0, 255};
+
+#ifndef _WIN32
+        SDL_Surface *icon_surface(Bitmap &icon) {
+            return SDL_CreateSurfaceFrom(icon.width(), icon.height(), SDL_PIXELFORMAT_RGBA32, icon.data(), static_cast<int>(icon.pitch()));
+        }
+
+        // The larger image is what a display at twice the density shows.
+        void set_icon(SDL_Window *window) {
+            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-array-to-pointer-decay): each size comes alongside its array.
+            const std::span<const std::uint8_t> smallPng(Embedded::icon128, Embedded::icon128Size);
+            const std::span<const std::uint8_t> largePng(Embedded::icon256, Embedded::icon256Size);
+            // NOLINTEND(cppcoreguidelines-pro-bounds-array-to-pointer-decay)
+            Bitmap small;
+            Bitmap large;
+
+            if (!Decode::load_png_memory(smallPng, &small) || !Decode::load_png_memory(largePng, &large)) {
+                return;
+            }
+
+            SDL_Surface *surface = icon_surface(small);
+            SDL_Surface *alternate = icon_surface(large);
+
+            if (surface != nullptr && alternate != nullptr && SDL_AddSurfaceAlternateImage(surface, alternate)) {
+                SDL_SetWindowIcon(window, surface);
+            }
+
+            SDL_DestroySurface(alternate);
+            SDL_DestroySurface(surface);
+        }
+#endif
 
         std::string human_size(const std::uintmax_t bytes) {
             constexpr double KIB = 1024.0;
@@ -89,7 +136,7 @@ namespace tiv {
     }
 
     bool App::start(const std::filesystem::path &file, std::string *error) {
-        if (!_folder.open(file, Decode::suffixes(), error)) {
+        if (!file.empty() && !_folder.open(file, Decode::suffixes(), error)) {
             return false;
         }
 
@@ -140,6 +187,13 @@ namespace tiv {
             return false;
         }
 
+        SDL_SetWindowMinimumSize(_window, MIN_WIDTH, MIN_HEIGHT);
+
+        // Windows takes the icon from the executable's resources.
+#ifndef _WIN32
+        set_icon(_window);
+#endif
+
         _renderer = SDL_CreateRenderer(_window, "gpu");
 
         if (_renderer == nullptr) {
@@ -181,6 +235,10 @@ namespace tiv {
     }
 
     void App::show(const int index, const int direction) {
+        if (_folder.count() == 0) {
+            return;
+        }
+
         _folder.step(_folder.wrap(index) - _folder.index());
         _direction = direction;
 
@@ -569,6 +627,8 @@ namespace tiv {
             _canvas->draw(_viewport);
         } else if (!_failure.empty()) {
             StatusBar::notice(_renderer, {0.0, 0.0, _viewport.area_width(), _viewport.area_height()}, scale, _failure);
+        } else if (_folder.count() == 0) {
+            StatusBar::notice(_renderer, {0.0, 0.0, _viewport.area_width(), _viewport.area_height()}, scale, "Drop an image here to open it");
         }
 
         if (_playback.active()) {
@@ -616,10 +676,18 @@ namespace tiv {
     }
 
     std::string App::bar_left() const {
+        if (_folder.count() == 0) {
+            return "tinyiv";
+        }
+
         return std::format("[{}/{}] {}", _folder.index() + 1, _folder.count(), _folder.current().filename().string());
     }
 
     std::string App::bar_right() const {
+        if (_folder.count() == 0) {
+            return {};
+        }
+
         if (_info.width == 0) {
             return human_size(_bytes);
         }

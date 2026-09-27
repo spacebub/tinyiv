@@ -21,6 +21,9 @@ cmake --build build
 build/bin/tinyiv photo.jpg
 ```
 
+`cmake --install build --prefix ~/.local` puts the binary in `bin`, and on Linux the desktop
+entry and the icons under `share`.
+
 ## Keys
 
 | Input                   | Action                     |
@@ -35,7 +38,8 @@ build/bin/tinyiv photo.jpg
 | Click, drag on play bar | Play, pause, seek          |
 | Escape, Q               | Quit                       |
 
-Dropping a file on the window opens its folder. Stepping a frame pauses the animation.
+Dropping a file on the window opens its folder. Started without a file, the window waits
+for one. Stepping a frame pauses the animation.
 
 ## License
 

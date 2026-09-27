@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <mutex>
 #include <ranges>
 #include <span>
@@ -267,7 +268,7 @@ namespace tiv {
             ensure_vips();
 
             try {
-                const VImage image = VImage::new_from_file(file.c_str());
+                const VImage image = VImage::new_from_file(file.string().c_str());
                 const bool swapped = vips_image_get_orientation_swap(image.get_image()) != 0;
 
                 info->width = swapped ? image.height() : image.width();
@@ -340,9 +341,9 @@ namespace tiv {
                 if (via == Via::Thumbnail || via == Via::Scaled) {
                     const VipsSize size = via == Via::Scaled ? VIPS_SIZE_BOTH : VIPS_SIZE_DOWN;
 
-                    image = VImage::thumbnail(file.c_str(), boxWidth, VImage::option()->set("height", boxHeight)->set("size", size));
+                    image = VImage::thumbnail(file.string().c_str(), boxWidth, VImage::option()->set("height", boxHeight)->set("size", size));
                 } else {
-                    image = VImage::new_from_file(file.c_str(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
+                    image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
 
                     if (via == Via::Shrink) {
                         const bool swapped = vips_image_get_orientation_swap(image.get_image()) != 0;
@@ -1349,7 +1350,7 @@ namespace tiv {
 
         ensure_vips();
 
-        const bool known = vips_foreign_find_load(file.c_str()) != nullptr;
+        const bool known = vips_foreign_find_load(file.string().c_str()) != nullptr;
 
         vips_error_clear();
 
@@ -1465,7 +1466,7 @@ namespace tiv {
         ensure_vips();
 
         try {
-            const VImage image = VImage::new_from_file(file.c_str(), VImage::option()->set("scale", scale));
+            const VImage image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("scale", scale));
             const int left = std::clamp(x, 0, image.width() - 1);
             const int top = std::clamp(y, 0, image.height() - 1);
             const int partWidth = std::clamp(width, 1, image.width() - left);
@@ -1508,7 +1509,7 @@ namespace tiv {
 
         try {
             // Sequential, so the frames stream through one by one instead of the whole strip decoding up front.
-            VImage strip = VImage::new_from_file(file.c_str(), VImage::option()->set("n", -1)->set("access", VIPS_ACCESS_SEQUENTIAL));
+            VImage strip = VImage::new_from_file(file.string().c_str(), VImage::option()->set("n", -1)->set("access", VIPS_ACCESS_SEQUENTIAL));
             const int height = vips_image_get_page_height(strip.get_image());
             const int frames = strip.height() / height;
             const std::vector<int> delays = strip.get_typeof("delay") != 0 ? strip.get_array_int("delay") : std::vector<int>{};
@@ -1555,6 +1556,12 @@ namespace tiv {
 
             return false;
         }
+    }
+
+    bool Decode::load_png_memory(const std::span<const std::uint8_t> data, Bitmap *out, std::string *error) {
+        constexpr int WHOLE = std::numeric_limits<int>::max();
+
+        return load_png("memory", data, WHOLE, WHOLE, out, error, nullptr, Fit::Cheap) == Direct::Done;
     }
 
     void Decode::shutdown() {

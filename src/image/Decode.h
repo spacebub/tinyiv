@@ -125,6 +125,9 @@ namespace tiv::Decode {
     // for all of them to fit in the bytes given.
     bool load_frames(const std::filesystem::path &file, std::size_t maxBytes, std::vector<Frame> *out, std::string *error = nullptr, Abort *abort = nullptr);
 
+    // A PNG held in memory, decoded whole.
+    bool load_png_memory(std::span<const std::uint8_t> data, Bitmap *out, std::string *error = nullptr);
+
     // libvips starts on first use. This frees it, once nothing decodes any more.
     void shutdown();
 

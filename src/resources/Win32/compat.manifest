@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!--The ID below indicates application support for Windows 10 and 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+
+  <!--
+  Paths reach libvips, SDL and std::filesystem as narrow strings. Without this they
+  are read in the machine's ANSI code page, and anything but plain ASCII is mangled.
+  -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

@@ -28,7 +28,8 @@ get_target_property(TIV_APP_DIR tinyiv SOURCE_DIR)
 set(TIV_APP_REUSED "")
 
 foreach (source IN LISTS TIV_APP_SOURCES)
-    if (NOT source MATCHES "\\.cpp$" OR source STREQUAL "tinyiv.cpp")
+    # Generated sources belong to the tinyiv build tree, so the bench makes its own.
+    if (NOT source MATCHES "\\.cpp$" OR source STREQUAL "tinyiv.cpp" OR IS_ABSOLUTE ${source})
         continue()
     endif ()
 
@@ -65,6 +66,11 @@ target_include_directories(tiv_bench PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_compile_options(tiv_bench PRIVATE ${TIV_COMPILE_FLAGS})
+
+if (NOT WIN32)
+    tiv_embed(tiv_bench icon128 ${CMAKE_SOURCE_DIR}/assets/tinyiv-128.png)
+    tiv_embed(tiv_bench icon256 ${CMAKE_SOURCE_DIR}/assets/tinyiv-256.png)
+endif ()
 target_compile_definitions(tiv_bench PRIVATE VIPS_DISABLE_COMPAT)
 target_link_libraries(tiv_bench PRIVATE SDL3::SDL3 PkgConfig::VIPS PkgConfig::CODECS benchmark::benchmark)
 

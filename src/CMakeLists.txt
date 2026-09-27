@@ -29,6 +29,8 @@ add_executable(tinyiv
         image/Pyramid.h
         image/Shrink.cpp
         image/Shrink.h
+        image/Simd.cpp
+        image/Simd.h
         image/Svg.cpp
         image/Svg.h
 
@@ -57,6 +59,23 @@ target_compile_options(tinyiv PRIVATE ${TIV_COMPILE_FLAGS})
 target_compile_definitions(tinyiv PRIVATE VIPS_DISABLE_COMPAT)
 target_link_libraries(tinyiv PRIVATE SDL3::SDL3 PkgConfig::VIPS PkgConfig::CODECS)
 
+set_target_properties(tinyiv PROPERTIES WIN32_EXECUTABLE ON)
+
+# Windows takes the window icon from the resources, everywhere else it is set on the window.
+if (WIN32)
+    target_sources(tinyiv PRIVATE
+            resources/Win32/tinyiv.rc
+            resources/Win32/compat.manifest)
+
+    # WIN32_EXECUTABLE expects WinMain. Nothing defines one.
+    if (MSVC)
+        target_link_options(tinyiv PRIVATE /ENTRY:mainCRTStartup)
+    endif ()
+else ()
+    tiv_embed(tinyiv icon128 ${CMAKE_SOURCE_DIR}/assets/tinyiv-128.png)
+    tiv_embed(tinyiv icon256 ${CMAKE_SOURCE_DIR}/assets/tinyiv-256.png)
+endif ()
+
 if (TIV_SANITIZE)
     # -Og folds frames, which misattributes sanitizer stacks.
     target_compile_options(tinyiv PRIVATE
@@ -66,4 +85,23 @@ if (TIV_SANITIZE)
             -g)
 
     target_link_options(tinyiv PRIVATE ${SANITIZER_FLAGS})
+endif ()
+
+include(GNUInstallDirs)
+
+install(TARGETS tinyiv RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# The Windows resources carry their own icon.
+if (UNIX AND NOT APPLE)
+    install(FILES ${CMAKE_SOURCE_DIR}/assets/tinyiv.desktop
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+
+    foreach (size IN ITEMS 16 24 32 48 64 128 256 512)
+        install(FILES ${CMAKE_SOURCE_DIR}/assets/tinyiv-${size}.png
+                DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/${size}x${size}/apps
+                RENAME tinyiv.png)
+    endforeach ()
+
+    install(FILES ${CMAKE_SOURCE_DIR}/assets/tinyiv.svg
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 endif ()

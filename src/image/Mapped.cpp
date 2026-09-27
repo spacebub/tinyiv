@@ -14,10 +14,16 @@
 #include <system_error>
 #include <utility>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 #include "image/Mapped.h"
 
@@ -30,7 +36,11 @@ namespace tiv {
         }
 
         std::string last_error() {
+#ifdef _WIN32
+            return std::error_code(static_cast<int>(GetLastError()), std::system_category()).message();
+#else
             return std::error_code(errno, std::generic_category()).message();
+#endif
         }
     }
 
@@ -54,14 +64,81 @@ namespace tiv {
 
     void Mapped::release() {
         if (_data != nullptr) {
+#ifdef _WIN32
+            UnmapViewOfFile(_data);
+#else
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast): munmap takes what mmap gave, minus the const.
             munmap(const_cast<std::uint8_t *>(_data), _size);
+#endif
         }
 
         _data = nullptr;
         _size = 0;
     }
 
+#ifdef _WIN32
+    bool Mapped::open(const std::filesystem::path &file, Mapped *out, std::string *error) {
+        // Shared for deleting too, so a file on screen can still be removed or renamed.
+        HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+
+        if (handle == INVALID_HANDLE_VALUE) {
+            fail(error, file, last_error());
+
+            return false;
+        }
+
+        LARGE_INTEGER length{};
+
+        if (GetFileType(handle) != FILE_TYPE_DISK || GetFileSizeEx(handle, &length) == 0) {
+            fail(error, file, "not a regular file");
+            CloseHandle(handle);
+
+            return false;
+        }
+
+        out->release();
+
+        if (length.QuadPart == 0) {
+            CloseHandle(handle);
+
+            return true;
+        }
+
+        const auto size = static_cast<std::size_t>(length.QuadPart);
+        HANDLE mapping = CreateFileMappingW(handle, nullptr, PAGE_READONLY, 0, 0, nullptr);
+        const std::string mappingError = mapping == nullptr ? last_error() : std::string();
+
+        CloseHandle(handle);
+
+        if (mapping == nullptr) {
+            fail(error, file, mappingError);
+
+            return false;
+        }
+
+        void *memory = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+        const std::string viewError = memory == nullptr ? last_error() : std::string();
+
+        // The view holds the mapping, and with it the file, open on its own.
+        CloseHandle(mapping);
+
+        if (memory == nullptr) {
+            fail(error, file, viewError);
+
+            return false;
+        }
+
+        // Decoders read front to back, and the read ahead hides the disk.
+        WIN32_MEMORY_RANGE_ENTRY range{memory, size};
+
+        PrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0);
+
+        out->_data = static_cast<const std::uint8_t *>(memory);
+        out->_size = size;
+
+        return true;
+    }
+#else
     bool Mapped::open(const std::filesystem::path &file, Mapped *out, std::string *error) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
         const int fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
@@ -110,4 +187,5 @@ namespace tiv {
 
         return true;
     }
+#endif
 }

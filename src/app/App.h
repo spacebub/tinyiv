@@ -46,6 +46,7 @@ namespace tiv {
         App &operator=(const App &) = delete;
         App &operator=(App &&) = delete;
 
+        // An empty file opens the window with nothing in it, until a file is dropped on it.
         bool start(const std::filesystem::path &file, std::string *error = nullptr);
         void run();
 

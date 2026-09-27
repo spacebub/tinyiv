@@ -11,6 +11,10 @@
 #include <cstdlib>
 #include <new>
 
+#ifdef _WIN32
+#include <malloc.h>
+#endif
+
 #ifdef __linux__
 #include <sys/mman.h>
 #endif
@@ -18,14 +22,20 @@
 #include "image/Bitmap.h"
 
 namespace tiv {
+#ifdef __linux__
     namespace {
         // Below this the kernel would not back the buffer with huge pages anyway.
         constexpr std::size_t HUGE_PAGE_WORTH = std::size_t{4} * 1024 * 1024;
     }
+#endif
 
     void Bitmap::Free::operator()(std::uint8_t *memory) const {
+#ifdef _WIN32
+        _aligned_free(memory);
+#else
         // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory): pairs with aligned_alloc.
         std::free(memory);
+#endif
     }
 
     Bitmap Bitmap::allocate(const int width, const int height) {
@@ -41,8 +51,13 @@ namespace tiv {
         }
 
         const std::size_t rounded = (wanted + ALIGNMENT - 1) / ALIGNMENT * ALIGNMENT;
+#ifdef _WIN32
+        // The Windows C runtime has no aligned_alloc, as its free could not release one.
+        auto *memory = static_cast<std::uint8_t *>(_aligned_malloc(rounded, ALIGNMENT));
+#else
         // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory): the bytes are raw pixels, freed by Free.
         auto *memory = static_cast<std::uint8_t *>(std::aligned_alloc(ALIGNMENT, rounded));
+#endif
 
         if (memory == nullptr) {
             throw std::bad_alloc();

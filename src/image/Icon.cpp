@@ -220,11 +220,17 @@ namespace tiv {
         std::string_view mask;
 
         each_chunk(file, [&](const std::size_t at, std::span<const std::uint8_t> data) {
-            const auto *const type = std::ranges::find_if(ICNS_TYPES, [&](const IcnsType &known) {
-                return tagged(file, at, known.tag);
-            });
+            const IcnsType *type = nullptr;
 
-            if (type == ICNS_TYPES.end()) {
+            for (const IcnsType &known : ICNS_TYPES) {
+                if (tagged(file, at, known.tag)) {
+                    type = &known;
+
+                    break;
+                }
+            }
+
+            if (type == nullptr) {
                 return;
             }
 

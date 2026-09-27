@@ -8,6 +8,7 @@
  */
 #include <cstdio>
 #include <exception>
+#include <filesystem>
 #include <print>
 #include <span>
 #include <string>
@@ -18,8 +19,8 @@
 
 namespace {
     int run(const std::span<char *> args) {
-        if (args.size() != 2) {
-            std::println(stderr, "usage: tinyiv <image>");
+        if (args.size() > 2) {
+            std::println(stderr, "usage: tinyiv [image]");
 
             return 2;
         }
@@ -30,7 +31,7 @@ namespace {
             tiv::App app;
             std::string error;
 
-            if (app.start(args.back(), &error)) {
+            if (app.start(args.size() == 2 ? args.back() : std::filesystem::path(), &error)) {
                 app.run();
             } else {
                 std::println(stderr, "tinyiv: {}", error);

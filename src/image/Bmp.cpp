@@ -27,6 +27,7 @@
 #include "image/Bmp.h"
 #include "image/Decode.h"
 #include "image/Shrink.h"
+#include "image/Simd.h"
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast,portability-simd-intrinsics): the kernels walk rows with intrinsics.
 namespace tiv {
@@ -111,7 +112,7 @@ namespace tiv {
 
 #if defined(__x86_64__) || defined(_M_X64)
         template<bool Stream>
-        __attribute__((target("avx2"))) void store_avx2(std::uint8_t *out, const __m256i pixels) {
+        TIV_AVX2 void store_avx2(std::uint8_t *out, const __m256i pixels) {
             if constexpr (Stream) {
                 _mm256_stream_si256(reinterpret_cast<__m256i *>(out), pixels);
             } else {
@@ -132,7 +133,7 @@ namespace tiv {
         }
 
         template<bool Stream>
-        __attribute__((target("avx2"))) void bgr_avx2(const std::uint8_t *in, std::uint8_t *out, const int width) {
+        TIV_AVX2 void bgr_avx2(const std::uint8_t *in, std::uint8_t *out, const int width) {
             // Each lane spreads four pixels from a load of its own, the alpha byte is ored in.
             const __m256i order = _mm256_setr_epi8(2, 1, 0, -1, 5, 4, 3, -1, 8, 7, 6, -1, 11, 10, 9, -1,
                                                    2, 1, 0, -1, 5, 4, 3, -1, 8, 7, 6, -1, 11, 10, 9, -1);
@@ -155,7 +156,7 @@ namespace tiv {
         }
 
         template<bool Opaque, bool Stream>
-        __attribute__((target("avx2"))) void bgra_avx2(const std::uint8_t *in, std::uint8_t *out, const int width) {
+        TIV_AVX2 void bgra_avx2(const std::uint8_t *in, std::uint8_t *out, const int width) {
             const __m256i order = _mm256_setr_epi8(2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15,
                                                    2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
             const __m256i opaque = _mm256_set1_epi32(Opaque ? static_cast<int>(ALPHA) : 0);
@@ -182,7 +183,7 @@ namespace tiv {
 
     bool Bmp::supports(const Kernel kernel) {
 #if defined(__x86_64__) || defined(_M_X64)
-        return kernel != Kernel::Avx2 || __builtin_cpu_supports("avx2");
+        return kernel != Kernel::Avx2 || Simd::avx2();
 #else
         return kernel != Kernel::Avx2;
 #endif
@@ -190,13 +191,13 @@ namespace tiv {
 
     Bmp::Image::Kernels Bmp::Image::pick(const Kernel kernel, const bool stream) {
 #if defined(__x86_64__) || defined(_M_X64)
-        static const bool avx2 = __builtin_cpu_supports("avx2");
+        const bool avx2 = kernel == Kernel::Avx2 || (kernel == Kernel::Auto && Simd::avx2());
 
-        if ((kernel == Kernel::Avx2 || (kernel == Kernel::Auto && avx2)) && stream) {
+        if (avx2 && stream) {
             return {bgr_avx2<true>, bgra_avx2<false, true>, bgra_avx2<true, true>};
         }
 
-        if (kernel == Kernel::Avx2 || (kernel == Kernel::Auto && avx2)) {
+        if (avx2) {
             return {bgr_avx2<false>, bgra_avx2<false, false>, bgra_avx2<true, false>};
         }
 #else
