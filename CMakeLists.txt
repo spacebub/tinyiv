@@ -21,6 +21,7 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 
 option(TIV_SANITIZE "Build with the address and undefined sanitizers" OFF)
 option(TIV_BENCHMARKS "Build the benchmark suite in bench/" OFF)
+option(TIV_RELEASE "Build as a release: no git revision beside the version" OFF)
 
 set(SANITIZER_FLAGS -fsanitize=address -fsanitize=undefined)
 
@@ -79,6 +80,7 @@ pkg_check_modules(CODECS REQUIRED IMPORTED_TARGET libwebp libjxl libjxl_threads 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 include(DownloadCache)
 include(Embed)
+include(GitRevision)
 
 add_subdirectory(src)
 

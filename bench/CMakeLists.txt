@@ -73,6 +73,11 @@ if (NOT WIN32)
 endif ()
 target_compile_definitions(tiv_bench PRIVATE VIPS_DISABLE_COMPAT)
 target_compile_definitions(tiv_bench PRIVATE TIV_VERSION="${PROJECT_VERSION}")
+
+# App.cpp includes the header tiv_git_revision writes for tinyiv.
+add_dependencies(tiv_bench tiv_revision)
+target_include_directories(tiv_bench PRIVATE ${CMAKE_BINARY_DIR}/generated)
+
 target_link_libraries(tiv_bench PRIVATE SDL3::SDL3 PkgConfig::VIPS PkgConfig::CODECS benchmark::benchmark)
 
 if (TIV_SANITIZE)

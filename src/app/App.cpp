@@ -37,6 +37,7 @@
 #include "services/Loader.h"
 #include "services/Memory.h"
 #include "services/Refiner.h"
+#include "tiv_git_revision.h"
 #include "view/Playback.h"
 #include "view/Viewport.h"
 
@@ -1144,6 +1145,10 @@ namespace tiv {
     std::string App::bar_right() const {
         // Opposite the name, while there is nothing else to say.
         if (_folder.count() == 0) {
+            if constexpr (*TIV_GIT_REVISION != '\0') {
+                return "v" TIV_VERSION " (" TIV_GIT_REVISION ")";
+            }
+
             return "v" TIV_VERSION;
         }
 

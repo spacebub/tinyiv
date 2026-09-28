@@ -13,6 +13,14 @@ cmake --build build
 build/bin/tinyiv photo.jpg
 ```
 
+Options:
+
+```
+-DTIV_RELEASE=ON       no git revision beside the version
+-DTIV_BENCHMARKS=ON    the benchmark suite in bench/
+-DTIV_SANITIZE=ON      address and undefined sanitizers
+```
+
 `cmake --install build --prefix ~/.local` puts the binary in `bin`, and the desktop entry and
 the icons under `share`.
 
