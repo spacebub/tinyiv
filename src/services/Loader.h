@@ -26,18 +26,14 @@
 
 #include "image/Animation.h"
 #include "image/Pyramid.h"
-#include "image/Store.h"
+#include "image/TileCache.h"
 #include "image/Tone.h"
 #include "image/decode/Decode.h"
 
 namespace tiv {
-    // The threads that decode. Requests coalesce to the latest, the files around it decode
-    // in parallel nearest first, whatever navigation has passed is aborted, and the cache
-    // stays within its budget: full resolution for the image on screen and its two
-    // neighbours, screen sized pyramids for the rest and a few just passed, the farthest
-    // evicted first. Once
-    // navigation rests on an animation, its frames decode too, and stay while it is near.
-    // A still image too large for memory shows from a pyramid of tiles on disk instead.
+    // Requests coalesce to the latest, the files around it decode in parallel nearest first, and whatever
+    // navigation has passed is aborted. The cache keeps full resolution for the image on screen and its two
+    // neighbours, screen sized pyramids for the rest and a few just passed, the farthest evicted first.
     class Loader {
 
     public:
@@ -63,7 +59,7 @@ namespace tiv {
             // Every frame, once decoded, for an image whose info counts more than one.
             std::shared_ptr<const Animation> animation;
             // Instead of the pyramid, for an image shown from disk.
-            std::shared_ptr<const Store> store;
+            std::shared_ptr<const TileCache> tileCache;
         };
 
         // Full resolution is capped where the image's pyramid would take more than half the
@@ -109,13 +105,15 @@ namespace tiv {
         void set_display(const Tone::Display &display);
 
         // The image to show, then the ones to have ready either side, nearest first.
-        void show(std::uint64_t generation, const std::filesystem::path &current, std::vector<std::filesystem::path> ahead, std::vector<std::filesystem::path> behind);
+        void show(std::uint64_t generation, const std::filesystem::path &current,
+                  std::vector<std::filesystem::path> ahead, std::vector<std::filesystem::path> behind);
 
         // Main thread. False once drained.
         bool take(Result *out);
 
         // What is decoded and cached for the file, if anything, for warming the GPU ahead of a step.
-        bool cached(const std::filesystem::path &file, Decode::Info *info, std::shared_ptr<const Pyramid> *pyramid) const;
+        bool cached(const std::filesystem::path &file, Decode::Info *info,
+                    std::shared_ptr<const Pyramid> *pyramid) const;
 
         // The file changed on disk, so what is decoded of it goes and decodes of it stop.
         void forget(const std::filesystem::path &file);
@@ -156,9 +154,9 @@ namespace tiv {
             // The first level is the whole image, up to the cap. Off once trimmed to the screen.
             bool whole = false;
             std::shared_ptr<const Animation> animation;
-            // Shown from disk. The store is null until one is made, which only the current image does.
+            // Shown from disk. The tile cache is null until one is made, which only the current image does.
             bool streamed = false;
-            std::shared_ptr<const Store> store;
+            std::shared_ptr<const TileCache> tileCache;
             std::string error;
             bool unsupported = false;
             // The request that last wanted it.
@@ -181,7 +179,7 @@ namespace tiv {
             Decode::Info info;
         };
 
-        static constexpr int FAR = 1 << 20;
+        static constexpr int FAR = 1U << 20U;
 
         // Distance in the window, 0 for the current image, FAR outside it.
         [[nodiscard]] int rank(const std::filesystem::path &file) const;
@@ -233,7 +231,6 @@ namespace tiv {
         // Memory was freed since it was last given back.
         bool _freed = false;
 
-        // Streaming mode.
         bool _streamAll = false;
         std::atomic<float> _progress = 0.0F;
 

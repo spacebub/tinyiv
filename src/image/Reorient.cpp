@@ -40,18 +40,22 @@ namespace tiv {
             std::string why;
         };
 
-        bool starts_with(const std::span<const std::uint8_t> data, const std::string_view magic, const std::size_t at = 0) {
-            return data.size() >= at + magic.size() && std::equal(magic.begin(), magic.end(), data.begin() + static_cast<std::ptrdiff_t>(at), [](const char a, const std::uint8_t b) {
-                       return static_cast<std::uint8_t>(a) == b;
-                   });
+        bool starts_with(const std::span<const std::uint8_t> data, const std::string_view magic,
+                         const std::size_t at = 0) {
+            return data.size() >= at + magic.size()
+                   && std::equal(magic.begin(), magic.end(), data.begin() + static_cast<std::ptrdiff_t>(at),
+                                 [](const char a, const std::uint8_t b) { return static_cast<std::uint8_t>(a) == b; });
         }
 
         std::uint32_t read_be32(const std::span<const std::uint8_t> data, const std::size_t at) {
-            return (static_cast<std::uint32_t>(data[at]) << 24) | (static_cast<std::uint32_t>(data[at + 1]) << 16) | (static_cast<std::uint32_t>(data[at + 2]) << 8) | data[at + 3];
+            return (static_cast<std::uint32_t>(data[at]) << 24U) | (static_cast<std::uint32_t>(data[at + 1]) << 16U)
+                   | (static_cast<std::uint32_t>(data[at + 2]) << 8U) | data[at + 3];
         }
 
         std::uint32_t read_le32(const std::span<const std::uint8_t> data, const std::size_t at) {
-            return data[at] | (static_cast<std::uint32_t>(data[at + 1]) << 8) | (static_cast<std::uint32_t>(data[at + 2]) << 16) | (static_cast<std::uint32_t>(data[at + 3]) << 24);
+            return data[at] | (static_cast<std::uint32_t>(data[at + 1]) << 8U)
+                   | (static_cast<std::uint32_t>(data[at + 2]) << 16U)
+                   | (static_cast<std::uint32_t>(data[at + 3]) << 24U);
         }
 
         void put(Bytes &out, const std::string_view text) {
@@ -64,13 +68,13 @@ namespace tiv {
 
         void put_be(Bytes &out, const std::uint32_t value, const int bytes) {
             for (int shift = (bytes - 1) * 8; shift >= 0; shift -= 8) {
-                out.push_back(static_cast<std::uint8_t>(value >> shift));
+                out.push_back(static_cast<std::uint8_t>(value >> static_cast<unsigned>(shift)));
             }
         }
 
         void put_le(Bytes &out, const std::uint32_t value, const int bytes) {
             for (int shift = 0; shift < bytes * 8; shift += 8) {
-                out.push_back(static_cast<std::uint8_t>(value >> shift));
+                out.push_back(static_cast<std::uint8_t>(value >> static_cast<unsigned>(shift)));
             }
         }
 
@@ -96,7 +100,7 @@ namespace tiv {
             return true;
         }
 
-        // --- JPEG: the Exif APP1 segment, https://www.cipa.jp/std/documents/e/DC-008-Translation-2019-E.pdf, 4.5.4 ---
+        // --- JPEG: the Exif APP1 segment, https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf, 4.5.4 ---
 
         Bytes jpeg_segment(const std::span<const std::uint8_t> block) {
             Bytes held = {0xFF, 0xE1};
@@ -145,7 +149,7 @@ namespace tiv {
                     break;
                 }
 
-                const std::size_t total = 2 + ((static_cast<std::size_t>(data[at + 2]) << 8) | data[at + 3]);
+                const std::size_t total = 2 + ((static_cast<std::size_t>(data[at + 2]) << 8U) | data[at + 3]);
 
                 if (total < 4 || at + total > data.size()) {
                     plan.why = "malformed JPEG";
@@ -160,7 +164,7 @@ namespace tiv {
                 }
 
                 if (marker == APP1 && !exif && starts_with(data, EXIF_PREFIX, at + 4)) {
-                    exif = Segment{at, total};
+                    exif = Segment{.at = at, .total = total};
                 }
 
                 at += total;
@@ -168,7 +172,8 @@ namespace tiv {
 
             if (!exif) {
                 if (orientation != 1) {
-                    plan.splices.push_back({insert, 0, jpeg_segment(Exif::minimal(orientation))});
+                    plan.splices.push_back(
+                            {.at = insert, .length = 0, .bytes = jpeg_segment(Exif::minimal(orientation))});
                 }
 
                 return plan;
@@ -180,11 +185,11 @@ namespace tiv {
             if (!edit(data.subspan(exif->at + header, exif->total - header), orientation, &edited)) {
                 plan.why = "unreadable Exif";
             } else if (edited.removable) {
-                plan.splices.push_back({exif->at, exif->total, {}});
+                plan.splices.push_back({.at = exif->at, .length = exif->total, .bytes = {}});
             } else if (edited.block.size() + header - 2 > SEGMENT_MAX) {
                 plan.why = "Exif too large for its segment";
             } else if (edited.changed) {
-                plan.splices.push_back({exif->at, exif->total, jpeg_segment(edited.block)});
+                plan.splices.push_back({.at = exif->at, .length = exif->total, .bytes = jpeg_segment(edited.block)});
             }
 
             return plan;
@@ -201,7 +206,7 @@ namespace tiv {
                     std::uint32_t c = n;
 
                     for (int k = 0; k < 8; ++k) {
-                        c = (c & 1) != 0 ? 0xEDB88320U ^ (c >> 1) : c >> 1;
+                        c = (c & 1U) != 0 ? 0xEDB88320U ^ (c >> 1U) : c >> 1U;
                     }
 
                     held.at(n) = c;
@@ -213,7 +218,7 @@ namespace tiv {
             std::uint32_t c = 0xFFFFFFFFU;
 
             for (const std::uint8_t byte : data) {
-                c = TABLE.at((c ^ byte) & 0xFF) ^ (c >> 8);
+                c = TABLE.at((c ^ byte) & 0xFFU) ^ (c >> 8U);
             }
 
             return c ^ 0xFFFFFFFFU;
@@ -255,9 +260,9 @@ namespace tiv {
                     if (!edit(data.subspan(at + 8, length), orientation, &edited)) {
                         plan.why = "unreadable eXIf";
                     } else if (edited.removable) {
-                        plan.splices.push_back({at, total, {}});
+                        plan.splices.push_back({.at = at, .length = total, .bytes = {}});
                     } else if (edited.changed) {
-                        plan.splices.push_back({at, total, png_chunk(edited.block)});
+                        plan.splices.push_back({.at = at, .length = total, .bytes = png_chunk(edited.block)});
                     }
 
                     return plan;
@@ -273,7 +278,8 @@ namespace tiv {
             if (afterHeader == 0) {
                 plan.why = "malformed PNG";
             } else if (orientation != 1) {
-                plan.splices.push_back({afterHeader, 0, png_chunk(Exif::minimal(orientation))});
+                plan.splices.push_back(
+                        {.at = afterHeader, .length = 0, .bytes = png_chunk(Exif::minimal(orientation))});
             }
 
             return plan;
@@ -301,7 +307,7 @@ namespace tiv {
             put_le(held, static_cast<std::uint32_t>(payload.size()), 4);
             put(held, payload);
 
-            if ((payload.size() & 1) != 0) {
+            if ((payload.size() & 1U) != 0) {
                 held.push_back(0);
             }
 
@@ -316,7 +322,12 @@ namespace tiv {
                 return {};
             }
 
-            Bytes payload = {static_cast<std::uint8_t>(FLAG_EXIF | (features.has_alpha != 0 ? FLAG_ALPHA : 0)), 0, 0, 0};
+            Bytes payload = {
+                    static_cast<std::uint8_t>(FLAG_EXIF | (features.has_alpha != 0 ? FLAG_ALPHA : std::uint8_t{0})),
+                    0,
+                    0,
+                    0,
+            };
 
             put_le(payload, static_cast<std::uint32_t>(features.width - 1), 3);
             put_le(payload, static_cast<std::uint32_t>(features.height - 1), 3);
@@ -335,7 +346,13 @@ namespace tiv {
                 }
 
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): a fourcc is four characters.
-                chunks.push_back({{reinterpret_cast<const char *>(data.subspan(at, 4).data()), 4}, at, size, CHUNK_HEADER + size + (size & 1)});
+                const std::string_view fourcc{reinterpret_cast<const char *>(data.subspan(at, 4).data()), 4};
+                chunks.push_back({
+                        .fourcc = fourcc,
+                        .at = at,
+                        .size = size,
+                        .total = CHUNK_HEADER + size + (size & 1U),
+                });
                 at += chunks.back().total;
             }
 
@@ -352,20 +369,28 @@ namespace tiv {
                 return;
             }
 
-            plan->splices.push_back({RIFF_HEADER, 0, extended});
-            plan->splices.push_back({data.size(), 0, webp_chunk("EXIF", Exif::minimal(orientation))});
+            plan->splices.push_back({.at = RIFF_HEADER, .length = 0, .bytes = extended});
+            plan->splices.push_back(
+                    {.at = data.size(), .length = 0, .bytes = webp_chunk("EXIF", Exif::minimal(orientation))});
         }
 
         // EXIF goes before XMP, the last chunk the container orders.
-        void webp_add(const std::span<const std::uint8_t> data, const std::vector<Chunk> &chunks, const int orientation, Plan *plan) {
+        void webp_add(const std::span<const std::uint8_t> data, const std::vector<Chunk> &chunks, const int orientation,
+                      Plan *plan) {
             const auto xmp = std::ranges::find(chunks, "XMP ", &Chunk::fourcc);
 
-            plan->splices.push_back({FLAGS_AT, 1, {static_cast<std::uint8_t>(data[FLAGS_AT] | FLAG_EXIF)}});
-            plan->splices.push_back({xmp != chunks.end() ? xmp->at : data.size(), 0, webp_chunk("EXIF", Exif::minimal(orientation))});
+            plan->splices.push_back(
+                    {.at = FLAGS_AT, .length = 1, .bytes = {static_cast<std::uint8_t>(data[FLAGS_AT] | FLAG_EXIF)}});
+            plan->splices.push_back({
+                    .at = xmp != chunks.end() ? xmp->at : data.size(),
+                    .length = 0,
+                    .bytes = webp_chunk("EXIF", Exif::minimal(orientation)),
+            });
         }
 
         // The EXIF chunk edited, or taken out again with the header webp_extend() added.
-        void webp_edit(const std::span<const std::uint8_t> data, const std::vector<Chunk> &chunks, const Chunk &exif, const int orientation, Plan *plan) {
+        void webp_edit(const std::span<const std::uint8_t> data, const std::vector<Chunk> &chunks, const Chunk &exif,
+                       const int orientation, Plan *plan) {
             // Some writers keep the JPEG prefix in the chunk.
             const std::span<const std::uint8_t> payload = data.subspan(exif.at + CHUNK_HEADER, exif.size);
             const std::size_t prefix = starts_with(payload, EXIF_PREFIX) ? EXIF_PREFIX.size() : 0;
@@ -379,20 +404,26 @@ namespace tiv {
 
             if (edited.removable && prefix == 0) {
                 const std::span<const std::uint8_t> header = data.subspan(RIFF_HEADER, chunks.front().total);
-                const bool added = chunks.size() == 3 && exif.at == chunks.at(2).at && std::ranges::equal(header, webp_extended(data.subspan(chunks.at(1).at, chunks.at(1).total)));
+                const bool added =
+                        chunks.size() == 3 && exif.at == chunks.at(2).at
+                        && std::ranges::equal(header, webp_extended(data.subspan(chunks.at(1).at, chunks.at(1).total)));
 
                 if (added) {
-                    plan->splices.push_back({RIFF_HEADER, chunks.front().total, {}});
+                    plan->splices.push_back({.at = RIFF_HEADER, .length = chunks.front().total, .bytes = {}});
                 } else {
-                    plan->splices.push_back({FLAGS_AT, 1, {static_cast<std::uint8_t>(data[FLAGS_AT] & ~FLAG_EXIF)}});
+                    plan->splices.push_back({
+                            .at = FLAGS_AT,
+                            .length = 1,
+                            .bytes = {static_cast<std::uint8_t>(data[FLAGS_AT] & ~static_cast<unsigned>(FLAG_EXIF))},
+                    });
                 }
 
-                plan->splices.push_back({exif.at, exif.total, {}});
+                plan->splices.push_back({.at = exif.at, .length = exif.total, .bytes = {}});
             } else if (edited.changed) {
                 Bytes rewritten(payload.begin(), payload.begin() + static_cast<std::ptrdiff_t>(prefix));
 
                 put(rewritten, edited.block);
-                plan->splices.push_back({exif.at, exif.total, webp_chunk("EXIF", rewritten)});
+                plan->splices.push_back({.at = exif.at, .length = exif.total, .bytes = webp_chunk("EXIF", rewritten)});
             }
         }
 
@@ -431,7 +462,7 @@ namespace tiv {
             Bytes riff;
 
             put_le(riff, static_cast<std::uint32_t>(size - CHUNK_HEADER), 4);
-            plan.splices.insert(plan.splices.begin(), {4, 4, riff});
+            plan.splices.insert(plan.splices.begin(), {.at = 4, .length = 4, .bytes = riff});
 
             return plan;
         }
@@ -456,12 +487,14 @@ namespace tiv {
 
         // Splices of the same length as what they replace are written in place, which keeps
         // the file's identity and links. Anything else is written beside it and renamed over.
-        bool commit(const std::filesystem::path &file, Mapped mapped, const std::vector<Splice> &splices, std::string *error) {
+        bool commit(const std::filesystem::path &file, Mapped mapped, const std::vector<Splice> &splices,
+                    std::string *error) {
             if (splices.empty()) {
                 return true;
             }
 
-            if (std::ranges::all_of(splices, [](const Splice &splice) { return splice.bytes.size() == splice.length; })) {
+            if (std::ranges::all_of(splices,
+                                    [](const Splice &splice) { return splice.bytes.size() == splice.length; })) {
                 mapped = {};
 
                 std::fstream out(file, std::ios::in | std::ios::out | std::ios::binary);
@@ -469,7 +502,8 @@ namespace tiv {
                 for (const Splice &splice : splices) {
                     out.seekp(static_cast<std::streamoff>(splice.at));
                     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): streams write chars.
-                    out.write(reinterpret_cast<const char *>(splice.bytes.data()), static_cast<std::streamsize>(splice.bytes.size()));
+                    out.write(reinterpret_cast<const char *>(splice.bytes.data()),
+                              static_cast<std::streamsize>(splice.bytes.size()));
                 }
 
                 out.flush();
@@ -553,7 +587,8 @@ namespace tiv {
     bool Reorient::write(const std::filesystem::path &file, const int orientation, std::string *error) {
         std::error_code failure;
         // A link stays a link, and what it points at changes.
-        const std::filesystem::path target = std::filesystem::is_symlink(file, failure) ? std::filesystem::canonical(file, failure) : file;
+        const std::filesystem::path target =
+                std::filesystem::is_symlink(file, failure) ? std::filesystem::canonical(file, failure) : file;
         Mapped mapped;
 
         if (failure) {

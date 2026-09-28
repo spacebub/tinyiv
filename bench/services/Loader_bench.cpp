@@ -40,7 +40,9 @@ namespace bench {
         Step step_at(const std::vector<std::filesystem::path> &files, const std::size_t index, const int direction) {
             Step held;
             const auto count = static_cast<long>(files.size());
-            const auto wrap = [&](const long i) { return files.at(static_cast<std::size_t>(((i % count) + count) % count)); };
+            const auto wrap = [&](const long i) {
+                return files.at(static_cast<std::size_t>(((i % count) + count) % count));
+            };
 
             held.current = files.at(index);
 
@@ -55,8 +57,8 @@ namespace bench {
             return held;
         }
 
-        // Blocks until the loader has something for the generation, or the timeout passes.
-        bool wait_for(tiv::Loader &loader, const std::uint64_t generation, tiv::Loader::Result *out, const std::chrono::seconds timeout = std::chrono::seconds(120)) {
+        bool wait_for(tiv::Loader &loader, const std::uint64_t generation, tiv::Loader::Result *out,
+                      const std::chrono::seconds timeout = std::chrono::seconds(120)) {
             const Clock::time_point until = Clock::now() + timeout;
 
             while (Clock::now() < until) {
@@ -72,7 +74,7 @@ namespace bench {
             return false;
         }
 
-        // Settles until nothing has changed for a while, so prefetch has run its course.
+        // Waits until the cache stops changing, so prefetch has run its course.
         void settle(tiv::Loader &loader) {
             std::size_t last = ~std::size_t{0};
             int still = 0;
@@ -188,7 +190,8 @@ namespace bench {
 
         // Walking a folder at a steady pace with prefetch running: the time each step waits
         // for its first pixels, averaged, and the memory the walk settles at.
-        void Loader_walk(benchmark::State &state, const std::vector<std::filesystem::path> &files, const int paceMs, const int steps) {
+        void Loader_walk(benchmark::State &state, const std::vector<std::filesystem::path> &files, const int paceMs,
+                         const int steps) {
             if (files.size() < 2) {
                 state.SkipWithMessage("no folder");
 
@@ -233,22 +236,34 @@ namespace bench {
 
             state.counters.insert_or_assign("wait_ms_avg", benchmark::Counter(waited / std::max(counted, 1)));
             state.counters.insert_or_assign("wait_ms_max", benchmark::Counter(worst));
-            state.counters.insert_or_assign("cache_mb", benchmark::Counter(static_cast<double>(loader.cached_bytes()) / (1024.0 * 1024.0)));
-            state.counters.insert_or_assign("cache_files", benchmark::Counter(static_cast<double>(loader.cached_files())));
+            state.counters.insert_or_assign(
+                    "cache_mb", benchmark::Counter(static_cast<double>(loader.cached_bytes()) / (1024.0 * 1024.0)));
+            state.counters.insert_or_assign("cache_files",
+                                            benchmark::Counter(static_cast<double>(loader.cached_files())));
             Memory::report_peak(state);
         }
     }
 
     void register_loader() {
         for (const Corpus::Spec &spec : Corpus::specs()) {
-            benchmark::RegisterBenchmark("Loader_open/" + std::string(spec.name), Loader_open, Corpus::file(spec.name))->Unit(benchmark::kMillisecond)->UseRealTime();
+            benchmark::RegisterBenchmark("Loader_open/" + std::string(spec.name), Loader_open, Corpus::file(spec.name))
+                    ->Unit(benchmark::kMillisecond)
+                    ->UseRealTime();
         }
 
-        benchmark::RegisterBenchmark("Loader_step_cached", Loader_step_cached)->Unit(benchmark::kMicrosecond)->UseRealTime();
+        benchmark::RegisterBenchmark("Loader_step_cached", Loader_step_cached)
+                ->Unit(benchmark::kMicrosecond)
+                ->UseRealTime();
 
         const std::vector<std::filesystem::path> corpus = Corpus::files();
 
-        benchmark::RegisterBenchmark("Loader_burst/corpus/20ms", Loader_burst, corpus, 20)->Unit(benchmark::kMillisecond)->UseManualTime()->Iterations(3);
-        benchmark::RegisterBenchmark("Loader_walk/corpus/500ms", Loader_walk, corpus, 500, 20)->Unit(benchmark::kMillisecond)->UseRealTime()->Iterations(1);
+        benchmark::RegisterBenchmark("Loader_burst/corpus/20ms", Loader_burst, corpus, 20)
+                ->Unit(benchmark::kMillisecond)
+                ->UseManualTime()
+                ->Iterations(3);
+        benchmark::RegisterBenchmark("Loader_walk/corpus/500ms", Loader_walk, corpus, 500, 20)
+                ->Unit(benchmark::kMillisecond)
+                ->UseRealTime()
+                ->Iterations(1);
     }
 }

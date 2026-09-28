@@ -29,8 +29,8 @@ add_executable(tinyiv
         image/Shrink.h
         image/Simd.cpp
         image/Simd.h
-        image/Store.cpp
-        image/Store.h
+        image/TileCache.cpp
+        image/TileCache.h
         image/Tone.cpp
         image/Tone.h
 
@@ -87,7 +87,6 @@ target_include_directories(tinyiv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(tinyiv PRIVATE ${TIV_COMPILE_FLAGS})
 # The libvips 7 compatibility macros rename plain identifiers such as error_exit, which libjpeg uses.
 target_compile_definitions(tinyiv PRIVATE VIPS_DISABLE_COMPAT)
-# Shown in the status bar while no image is open.
 target_compile_definitions(tinyiv PRIVATE TIV_VERSION="${PROJECT_VERSION}")
 tiv_git_revision(tinyiv)
 target_link_libraries(tinyiv PRIVATE SDL3::SDL3 PkgConfig::VIPS PkgConfig::CODECS)
@@ -123,8 +122,10 @@ endif ()
 include(GNUInstallDirs)
 
 # vcpkg copies the DLLs beside the executable as it builds, so the install takes them from there.
+# https://learn.microsoft.com/en-us/vcpkg/users/buildsystems/cmake-integration#vcpkg_applocal_deps
 if (WIN32)
-    # Matches the exclusions against paths with forward slashes, as CMake 4.1 and later can.
+    # Matches the exclusions against paths with forward slashes, as CMake 4.3 and later can.
+    # https://cmake.org/cmake/help/latest/policy/CMP0207.html
     if (POLICY CMP0207)
         cmake_policy(SET CMP0207 NEW)
     endif ()
@@ -156,6 +157,7 @@ if (WIN32)
     file(TO_NATIVE_PATH ${CMAKE_BINARY_DIR} TIV_ISS_OUTPUT_DIR)
     configure_file(${CMAKE_SOURCE_DIR}/packaging/windows/tinyiv.iss.in ${CMAKE_BINARY_DIR}/tinyiv.iss @ONLY)
 
+    # A variable reference cannot spell parentheses, so the name goes in through another variable.
     set(program_files_x86 "ProgramFiles(x86)")
     find_program(TIV_ISCC ISCC
             PATHS
@@ -165,7 +167,6 @@ if (WIN32)
             "$ENV{${program_files_x86}}/Inno Setup 6"
             DOC "Inno Setup's command line compiler, for the installer target")
 
-    # Stages a fresh install and compiles the setup from it into the build tree.
     if (TIV_ISCC)
         add_custom_target(installer
                 COMMAND ${CMAKE_COMMAND} -E rm -rf ${TIV_STAGE_DIR}

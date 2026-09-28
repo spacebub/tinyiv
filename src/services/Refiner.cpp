@@ -37,11 +37,20 @@ namespace tiv {
         _worker.join();
     }
 
-    void Refiner::render(const std::uint64_t generation, const std::filesystem::path &file, const double scale, const int x, const int y, const int width, const int height) {
+    void Refiner::render(const std::uint64_t generation, const std::filesystem::path &file, const double scale,
+                         const int x, const int y, const int width, const int height) {
         {
             const std::scoped_lock hold(_guard);
 
-            _request = Request{generation, file, scale, x, y, width, height};
+            _request = Request{
+                    .generation = generation,
+                    .file = file,
+                    .scale = scale,
+                    .x = x,
+                    .y = y,
+                    .width = width,
+                    .height = height,
+            };
 
             if (_abort != nullptr) {
                 _abort->request();
@@ -93,7 +102,8 @@ namespace tiv {
             hold.unlock();
 
             Bitmap bitmap;
-            const bool rendered = Decode::render(request.file, request.scale, request.x, request.y, request.width, request.height, &bitmap, nullptr, abort.get());
+            const bool rendered = Decode::render(request.file, request.scale, request.x, request.y, request.width,
+                                                 request.height, &bitmap, nullptr, abort.get());
             auto shared = rendered ? std::make_shared<const Bitmap>(std::move(bitmap)) : nullptr;
 
             hold.lock();
@@ -103,7 +113,13 @@ namespace tiv {
                 continue;
             }
 
-            _result = Result{request.generation, request.scale, request.x, request.y, std::move(shared)};
+            _result = Result{
+                    .generation = request.generation,
+                    .scale = request.scale,
+                    .x = request.x,
+                    .y = request.y,
+                    .bitmap = std::move(shared),
+            };
 
             SDL_Event event{};
 

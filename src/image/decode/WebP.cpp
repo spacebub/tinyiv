@@ -49,7 +49,9 @@ namespace tiv::Decode {
             constexpr std::size_t CHUNK_HEADER = 8;
 
             for (std::size_t at = FIRST_CHUNK; at + CHUNK_HEADER <= data.size();) {
-                const std::size_t size = data[at + 4] | (data[at + 5] << 8) | (data[at + 6] << 16) | (static_cast<std::size_t>(data[at + 7]) << 24);
+                const std::size_t size = data[at + 4] | (static_cast<std::size_t>(data[at + 5]) << 8U)
+                                         | (static_cast<std::size_t>(data[at + 6]) << 16U)
+                                         | (static_cast<std::size_t>(data[at + 7]) << 24U);
 
                 if (at + CHUNK_HEADER + size > data.size()) {
                     break;
@@ -59,14 +61,14 @@ namespace tiv::Decode {
                     return Exif::orientation(data.subspan(at + CHUNK_HEADER, size));
                 }
 
-                at += CHUNK_HEADER + size + (size & 1);
+                at += CHUNK_HEADER + size + (size & 1U);
             }
 
             return 1;
         }
     }
 
-    bool WebP::probe(const std::span<const std::uint8_t> data, Decode::Info *info) {
+    bool WebP::probe(const std::span<const std::uint8_t> data, Info *info) {
         WebPBitstreamFeatures features;
 
         if (WebPGetFeatures(data.data(), data.size(), &features) != VP8_STATUS_OK || features.has_animation != 0) {
@@ -80,10 +82,12 @@ namespace tiv::Decode {
         return true;
     }
 
-    Direct WebP::load(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out, std::string *error, const Decode::Abort *abort) {
+    Direct WebP::load(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out,
+                      std::string *error, const Abort *abort) {
         WebPDecoderConfig config;
 
-        if (WebPInitDecoderConfig(&config) == 0 || WebPGetFeatures(data.data(), data.size(), &config.input) != VP8_STATUS_OK
+        if (WebPInitDecoderConfig(&config) == 0
+            || WebPGetFeatures(data.data(), data.size(), &config.input) != VP8_STATUS_OK
             || config.input.has_animation != 0) {
             return Direct::Skip;
         }

@@ -65,32 +65,35 @@ namespace tiv {
         constexpr std::uint64_t MODE_FLASH_MS = 1500;
         // A scalable image renders this share of the view beyond each edge, so a short pan stays sharp.
         constexpr double REFINE_MARGIN = 0.25;
-        constexpr SDL_Color BACKGROUND{0, 0, 0, 255};
+        constexpr SDL_Color BACKGROUND{.r = 0, .g = 0, .b = 0, .a = 255};
 
-        // Keys apart by two spaces, words within one by one.
-        constexpr std::array<StatusBar::Row, 17> HELP = {{
-                {"Wheel  ←  →", "Previous, next image"},
-                {"Home  End", "First, last image"},
-                {"R", "Reload from disk"},
-                {"Left drag", "Pan"},
-                {"Right drag ↑ ↓", "Zoom in, out"},
-                {"↑  ↓", "Zoom in, out a step"},
-                {"0  1  2", "Centre, fit, actual size"},
-                {"F  F11  Double click", "Fullscreen"},
-                {"[  ]", "Turn left, right"},
-                {";  '", "Flip vertically, horizontally"},
-                {"Ctrl+S", "Save turns and flips"},
-                {"S", "Streaming mode on, off"},
-                {"I", "Status bar on, off"},
-                {"Space", "Play, pause animation"},
-                {",  .", "Previous, next frame"},
-                {"Ctrl+H", "Show, hide this help"},
-                {"Esc  Q  Ctrl+D", "Quit"},
-        }};
+        // Keys are two spaces apart, the words of one key a single space.
+        constexpr std::array<StatusBar::Row, 17> HELP = {
+                {
+                        {.left = "Wheel  ←  →", .right = "Previous, next image"},
+                        {.left = "Home  End", .right = "First, last image"},
+                        {.left = "R", .right = "Reload from disk"},
+                        {.left = "Left drag", .right = "Pan"},
+                        {.left = "Right drag ↑ ↓", .right = "Zoom in, out"},
+                        {.left = "↑  ↓", .right = "Zoom in, out a step"},
+                        {.left = "0  1  2", .right = "Centre, fit, actual size"},
+                        {.left = "F  F11  Double click", .right = "Fullscreen"},
+                        {.left = "[  ]", .right = "Turn left, right"},
+                        {.left = ";  '", .right = "Flip vertically, horizontally"},
+                        {.left = "Ctrl+S", .right = "Save turns and flips"},
+                        {.left = "S", .right = "Streaming mode on, off"},
+                        {.left = "I", .right = "Status bar on, off"},
+                        {.left = "Space", .right = "Play, pause animation"},
+                        {.left = ",  .", .right = "Previous, next frame"},
+                        {.left = "Ctrl+H", .right = "Show, hide this help"},
+                        {.left = "Esc  Q  Ctrl+D", .right = "Quit"},
+                },
+        };
 
 #ifndef _WIN32
         SDL_Surface *icon_surface(Bitmap &icon) {
-            return SDL_CreateSurfaceFrom(icon.width(), icon.height(), SDL_PIXELFORMAT_RGBA32, icon.data(), static_cast<int>(icon.pitch()));
+            return SDL_CreateSurfaceFrom(icon.width(), icon.height(), SDL_PIXELFORMAT_RGBA32, icon.data(),
+                                         static_cast<int>(icon.pitch()));
         }
 
         // The larger image is what a display at twice the density shows.
@@ -138,8 +141,6 @@ namespace tiv {
             return event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST;
         }
 
-        // Zero is mailbox on the gpu renderer, so each refresh shows the newest frame. Under FIFO a
-        // drag that starts from idle queues frames ahead of the display and stutters until it fills.
         // What the gpu renderer would make for itself, kept so a renderer made again for another
         // output skips making a device. The features are the ones it turns off:
         // https://github.com/libsdl-org/SDL/blob/release-3.4.x/src/render/gpu/SDL_render_gpu.c
@@ -149,10 +150,12 @@ namespace tiv {
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN, true);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN, true);
-            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_D3D12_ALLOW_FEWER_RESOURCE_SLOTS_BOOLEAN, true);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_D3D12_ALLOW_FEWER_RESOURCE_SLOTS_BOOLEAN,
+                                   true);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_CLIP_DISTANCE_BOOLEAN, false);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN, false);
-            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, false);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN,
+                                   false);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_ANISOTROPY_BOOLEAN, false);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_METAL_ALLOW_MACFAMILY1_BOOLEAN, false);
 
@@ -169,7 +172,8 @@ namespace tiv {
             SDL_SetPointerProperty(properties, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window);
             SDL_SetStringProperty(properties, SDL_PROP_RENDERER_CREATE_NAME_STRING, "gpu");
             SDL_SetPointerProperty(properties, SDL_PROP_RENDERER_CREATE_GPU_DEVICE_POINTER, device);
-            SDL_SetNumberProperty(properties, SDL_PROP_RENDERER_CREATE_OUTPUT_COLORSPACE_NUMBER, linear ? SDL_COLORSPACE_SRGB_LINEAR : SDL_COLORSPACE_SRGB);
+            SDL_SetNumberProperty(properties, SDL_PROP_RENDERER_CREATE_OUTPUT_COLORSPACE_NUMBER,
+                                  linear ? SDL_COLORSPACE_SRGB_LINEAR : SDL_COLORSPACE_SRGB);
 
             SDL_Renderer *renderer = SDL_CreateRendererWithProperties(properties);
 
@@ -178,10 +182,16 @@ namespace tiv {
             return renderer;
         }
 
+        // Zero is mailbox on the gpu renderer, see ChoosePresentMode in SDL_render_gpu.c, so each refresh
+        // shows the newest frame. Under FIFO a drag that starts from idle queues frames ahead of the display
+        // and stutters until it fills.
         int vsync_setting(SDL_Renderer *renderer, SDL_Window *window) {
-            auto *device = static_cast<SDL_GPUDevice *>(SDL_GetPointerProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_GPU_DEVICE_POINTER, nullptr));
+            auto *device = static_cast<SDL_GPUDevice *>(SDL_GetPointerProperty(
+                    SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_GPU_DEVICE_POINTER, nullptr));
 
-            return device != nullptr && SDL_WindowSupportsGPUPresentMode(device, window, SDL_GPU_PRESENTMODE_MAILBOX) ? 0 : 1;
+            return device != nullptr && SDL_WindowSupportsGPUPresentMode(device, window, SDL_GPU_PRESENTMODE_MAILBOX)
+                           ? 0
+                           : 1;
         }
     }
 
@@ -213,7 +223,7 @@ namespace tiv {
         // The first decode starts before the window exists, so the two overlap.
         _loaderEvent = SDL_RegisterEvents(3);
         _refinerEvent = _loaderEvent + 1;
-        _storeEvent = _loaderEvent + 2;
+        _tileCacheEvent = _loaderEvent + 2;
         _loader = std::make_unique<Loader>(_loaderEvent);
         _refiner = std::make_unique<Refiner>(_refinerEvent);
 
@@ -254,11 +264,12 @@ namespace tiv {
             return false;
         }
 
-        SDL_Rect usable{0, 0, 1280, 800};
+        SDL_Rect usable{.x = 0, .y = 0, .w = 1280, .h = 800};
 
         SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable);
 
-        _window = SDL_CreateWindow("tinyiv", scaled(usable.w, WINDOW_SHARE), scaled(usable.h, WINDOW_SHARE), SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+        _window = SDL_CreateWindow("tinyiv", scaled(usable.w, WINDOW_SHARE), scaled(usable.h, WINDOW_SHARE),
+                                   SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 
         if (_window == nullptr) {
             *error = SDL_GetError();
@@ -273,7 +284,7 @@ namespace tiv {
         set_icon(_window);
 #endif
 
-        // Only an HDR display ever switches output, so everywhere else the renderer is made as it always was.
+        // The device is kept to share between renderers, and only an HDR display ever makes a second one.
         if (SDL_GetBooleanProperty(SDL_GetWindowProperties(_window), SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false)) {
             _device = create_device();
         }
@@ -313,19 +324,20 @@ namespace tiv {
         _linear = linear;
         SDL_SetRenderVSync(_renderer, vsync_setting(_renderer, _window));
 
-        const auto maxTexture = static_cast<int>(SDL_GetNumberProperty(SDL_GetRendererProperties(_renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, Tiles::SIZE));
+        const auto maxTexture = static_cast<int>(SDL_GetNumberProperty(
+                SDL_GetRendererProperties(_renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, Tiles::SIZE));
         _canvas = std::make_unique<Canvas>(_renderer, maxTexture);
         _dirty = true;
 
         return true;
     }
 
-    // SDR images draw through the SDR output they always had, only PQ ones switch to linear.
+    // SDR images stay on the SDR output, only PQ ones switch to linear.
     void App::follow_output(const Loader::Result &result) {
         bool pq = false;
 
-        if (result.store != nullptr) {
-            pq = result.store->encoding() == Bitmap::Encoding::Pq;
+        if (result.tileCache != nullptr) {
+            pq = result.tileCache->encoding() == Bitmap::Encoding::Pq;
         } else if (result.pyramid != nullptr && !result.pyramid->empty()) {
             pq = result.pyramid->levels.front()->encoding() == Bitmap::Encoding::Pq;
         }
@@ -473,7 +485,7 @@ namespace tiv {
         }
 
         // The loop uploads it next.
-        if (event.type == _storeEvent) {
+        if (event.type == _tileCacheEvent) {
             _dirty = true;
 
             return;
@@ -601,7 +613,9 @@ namespace tiv {
         SDL_GetWindowSizeInPixels(_window, &width, &height);
 
         const float density = SDL_GetWindowPixelDensity(_window);
-        const Rect box = StatusBar::table_box({0.0, 0.0, static_cast<double>(width), static_cast<double>(height)}, SDL_GetWindowDisplayScale(_window), HELP);
+        const Rect box = StatusBar::table_box(
+                {.x = 0.0, .y = 0.0, .width = static_cast<double>(width), .height = static_cast<double>(height)},
+                SDL_GetWindowDisplayScale(_window), HELP);
         const double x = event.button.x * density;
         const double y = event.button.y * density;
 
@@ -738,19 +752,19 @@ namespace tiv {
             const Size size = stored();
             const auto image = static_cast<std::uint64_t>(_folder.index());
 
-            _streamed = result.store != nullptr;
+            _streamed = result.tileCache != nullptr;
             follow_output(result);
 
             if (_streamed) {
                 // Each tile read wakes the loop, which uploads it.
-                result.store->on_ready([event = _storeEvent] {
+                result.tileCache->on_ready([event = _tileCacheEvent] {
                     SDL_Event ready{};
 
                     ready.type = event;
                     SDL_PushEvent(&ready);
                 });
 
-                _canvas->show(result.store, image, size.width, size.height, orientation());
+                _canvas->show(result.tileCache, image, size.width, size.height, orientation());
             } else {
                 _canvas->show(result.pyramid, image, size.width, size.height, orientation());
             }
@@ -784,7 +798,8 @@ namespace tiv {
 
     // Once everything has arrived and navigation rests, what the old images held goes back to the system.
     void App::give_back() {
-        if (_giveBack && !_loading && SDL_GetTicks() - _shownAt >= static_cast<std::uint64_t>(Loader::GIVE_BACK_MS) && _loader->idle()) {
+        if (_giveBack && !_loading && SDL_GetTicks() - _shownAt >= static_cast<std::uint64_t>(Loader::GIVE_BACK_MS)
+            && _loader->idle()) {
             Memory::give_back();
             _giveBack = false;
         }
@@ -839,12 +854,18 @@ namespace tiv {
             const double cx1 = std::clamp((x1 - image.x) / image.width, 0.0, 1.0);
             const double cy1 = std::clamp((y1 - image.y) / image.height, 0.0, 1.0);
 
-            return oriented({cx0, cy0, cx1 - cx0, cy1 - cy0}, back);
+            return oriented({.x = cx0, .y = cy0, .width = cx1 - cx0, .height = cy1 - cy0}, back);
         };
 
         const Rect seen = unit(left, top, right, bottom);
+        const Rect seenPixels{
+                .x = seen.x * size.width,
+                .y = seen.y * size.height,
+                .width = seen.width * size.width,
+                .height = seen.height * size.height,
+        };
 
-        if (_canvas->refined(zoom, {seen.x * size.width, seen.y * size.height, seen.width * size.width, seen.height * size.height})) {
+        if (_canvas->refined(zoom, seenPixels)) {
             return;
         }
 
@@ -856,12 +877,12 @@ namespace tiv {
         const auto x = static_cast<int>(std::floor(wide.x * scaledWidth));
         const auto y = static_cast<int>(std::floor(wide.y * scaledHeight));
         const Ask ask{
-                _generation,
-                zoom,
-                x,
-                y,
-                static_cast<int>(std::ceil((wide.x + wide.width) * scaledWidth)) - x,
-                static_cast<int>(std::ceil((wide.y + wide.height) * scaledHeight)) - y,
+                .generation = _generation,
+                .scale = zoom,
+                .x = x,
+                .y = y,
+                .width = static_cast<int>(std::ceil((wide.x + wide.width) * scaledWidth)) - x,
+                .height = static_cast<int>(std::ceil((wide.y + wide.height) * scaledHeight)) - y,
         };
 
         if (ask == _asked) {
@@ -895,7 +916,8 @@ namespace tiv {
             if (_loader->cached(_folder.at(index), &info, &pyramid) && pyramid != nullptr) {
                 const bool swapped = Orient::swaps(info.orientation);
 
-                _canvas->warm(std::move(pyramid), static_cast<std::uint64_t>(index), swapped ? info.height : info.width, swapped ? info.width : info.height, info.orientation);
+                _canvas->warm(std::move(pyramid), static_cast<std::uint64_t>(index), swapped ? info.height : info.width,
+                              swapped ? info.width : info.height, info.orientation);
             }
         }
 
@@ -932,8 +954,10 @@ namespace tiv {
     // HDR images decode for the headroom the window has now, and show again once they have.
     void App::update_display() {
         const SDL_PropertiesID properties = SDL_GetWindowProperties(_window);
-        const bool hdr = _device != nullptr && SDL_GetBooleanProperty(properties, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
-        const float headroom = hdr ? std::max(SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0F), 1.0F) : 1.0F;
+        const bool hdr =
+                _device != nullptr && SDL_GetBooleanProperty(properties, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+        const float headroom =
+                hdr ? std::max(SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0F), 1.0F) : 1.0F;
 
         if (headroom == _display.headroom) {
             return;
@@ -1010,11 +1034,13 @@ namespace tiv {
     }
 
     App::Size App::stored() const {
-        return Orient::swaps(_info.orientation) ? Size{_info.height, _info.width} : Size{_info.width, _info.height};
+        return Orient::swaps(_info.orientation) ? Size{.width = _info.height, .height = _info.width}
+                                                : Size{.width = _info.width, .height = _info.height};
     }
 
     App::Size App::shown() const {
-        return Orient::swaps(_turn) ? Size{_info.height, _info.width} : Size{_info.width, _info.height};
+        return Orient::swaps(_turn) ? Size{.width = _info.height, .height = _info.width}
+                                    : Size{.width = _info.width, .height = _info.height};
     }
 
     void App::frame() {
@@ -1032,13 +1058,19 @@ namespace tiv {
         if (_viewport.has_image()) {
             _canvas->draw(_viewport);
         } else if (!_failure.empty()) {
-            StatusBar::notice(_renderer, {0.0, 0.0, _viewport.area_width(), _viewport.area_height()}, scale, _failure);
+            StatusBar::notice(_renderer,
+                              {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
+                              scale, _failure);
         } else if (_building) {
             const std::string notice = std::format("Writing tiles to disk: {:.0f}%", _loader->progress() * 100.0F);
 
-            StatusBar::notice(_renderer, {0.0, 0.0, _viewport.area_width(), _viewport.area_height()}, scale, notice);
+            StatusBar::notice(_renderer,
+                              {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
+                              scale, notice);
         } else if (_folder.count() == 0) {
-            StatusBar::notice(_renderer, {0.0, 0.0, _viewport.area_width(), _viewport.area_height()}, scale, "Drop an image here to open it");
+            StatusBar::notice(_renderer,
+                              {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
+                              scale, "Drop an image here to open it");
         }
 
         if (_playback.active()) {
@@ -1046,19 +1078,31 @@ namespace tiv {
         }
 
         if (_help) {
-            StatusBar::table(_renderer, {0.0, 0.0, static_cast<double>(width), static_cast<double>(height)}, scale, HELP);
+            StatusBar::table(
+                    _renderer,
+                    {.x = 0.0, .y = 0.0, .width = static_cast<double>(width), .height = static_cast<double>(height)},
+                    scale, HELP);
         }
 
         if (bar_shown()) {
             const int bar = StatusBar::height(scale);
 
-            StatusBar::draw(_renderer, {0.0, static_cast<double>(height - bar), static_cast<double>(width), static_cast<double>(bar)}, scale, bar_left(), bar_right(), _loading);
+            StatusBar::draw(_renderer,
+                            {
+                                    .x = 0.0,
+                                    .y = static_cast<double>(height - bar),
+                                    .width = static_cast<double>(width),
+                                    .height = static_cast<double>(bar),
+                            },
+                            scale, bar_left(), bar_right(), _loading);
         } else if (flashing()) {
             // No bar to carry the mode, so switching it says so for a moment.
-            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, mode_text(), false);
+            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, mode_text(),
+                             false);
         } else if (_loading) {
             // Where the bar would be, for as long as something is still on its way.
-            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, bar_left(false), true);
+            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, bar_left(false),
+                             true);
         }
 
         SDL_RenderPresent(_renderer);
@@ -1102,7 +1146,8 @@ namespace tiv {
         }
 
         // Past it, the next event or delivery gives memory back, and waking early would only spin.
-        if (const std::uint64_t due = _shownAt + static_cast<std::uint64_t>(Loader::GIVE_BACK_MS); _giveBack && due > now) {
+        if (const std::uint64_t due = _shownAt + static_cast<std::uint64_t>(Loader::GIVE_BACK_MS);
+            _giveBack && due > now) {
             until(due);
         }
 
@@ -1113,14 +1158,14 @@ namespace tiv {
     Rect App::play_bar() const {
         const auto height = static_cast<double>(PlayBar::height(SDL_GetWindowDisplayScale(_window)));
 
-        return {0.0, _viewport.area_height() - height, _viewport.area_width(), height};
+        return {.x = 0.0, .y = _viewport.area_height() - height, .width = _viewport.area_width(), .height = height};
     }
 
     bool App::flashing() const {
         return _switchedAt != 0 && SDL_GetTicks() - _switchedAt < MODE_FLASH_MS;
     }
 
-    // Why, where the error says it after the file's own name, as the loader's do.
+    // Loader errors lead with the file's path, which the text drops to keep only the reason.
     std::string App::failure_text(const std::string &error) const {
         const std::string prefix = _folder.count() > 0 ? _folder.current().string() + ": " : std::string();
 
@@ -1132,14 +1177,16 @@ namespace tiv {
     }
 
     std::string App::bar_left(const bool tagged) const {
-        const std::string tag = std::string(tagged && _loader->streaming_all() ? "STREAMING  " : "") + (tagged && _linear ? "HDR  " : "");
+        const std::string tag = std::string(tagged && _loader->streaming_all() ? "STREAMING  " : "")
+                                + (tagged && _linear ? "HDR  " : "");
 
         if (_folder.count() == 0) {
             return std::format("{}tinyiv", tag);
         }
 
         // Marked while turned or flipped and not saved, and led by the modes that are on.
-        return std::format("{}[{}/{}] {}{}", tag, _folder.index() + 1, _folder.count(), _folder.current().filename().string(), _turn != 1 ? " *" : "");
+        return std::format("{}[{}/{}] {}{}", tag, _folder.index() + 1, _folder.count(),
+                           _folder.current().filename().string(), _turn != 1 ? " *" : "");
     }
 
     std::string App::bar_right() const {
@@ -1157,7 +1204,8 @@ namespace tiv {
 
         // Ahead of any message, which would hide how far it is.
         if (_building && _info.width != 0) {
-            return std::format("{}x{}, {}, {}, writing tiles {:.0f}%", size.width, size.height, format, human_size(_bytes), _loader->progress() * 100.0F);
+            return std::format("{}x{}, {}, {}, writing tiles {:.0f}%", size.width, size.height, format,
+                               human_size(_bytes), _loader->progress() * 100.0F);
         }
 
         // Switching the mode says so for a moment, as the badge does in fullscreen.
@@ -1174,9 +1222,11 @@ namespace tiv {
         }
 
         if (_playback.active()) {
-            return std::format("{}x{}, {} {}/{}, {}", size.width, size.height, format, _playback.frame() + 1, _playback.frames(), human_size(_bytes));
+            return std::format("{}x{}, {} {}/{}, {}", size.width, size.height, format, _playback.frame() + 1,
+                               _playback.frames(), human_size(_bytes));
         }
 
-        return std::format("{}x{}, {}, {}{}", size.width, size.height, format, human_size(_bytes), _streamed && !_loader->streaming_all() ? ", streaming" : "");
+        return std::format("{}x{}, {}, {}{}", size.width, size.height, format, human_size(_bytes),
+                           _streamed && !_loader->streaming_all() ? ", streaming" : "");
     }
 }

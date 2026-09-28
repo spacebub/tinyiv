@@ -55,10 +55,10 @@ namespace tiv {
         constexpr std::uint32_t ALPHA = 0xFF000000;
 
         // Keeps every offset and size product well inside 64 bits.
-        constexpr std::int64_t MAX_SIDE = std::int64_t{1} << 20;
+        constexpr std::int64_t MAX_SIDE = 1U << 20U;
 
         // Run length coded files are small palette images, and a larger claim is a broken header.
-        constexpr std::int64_t MAX_RLE_PIXELS = std::int64_t{1} << 28;
+        constexpr std::int64_t MAX_RLE_PIXELS = 1U << 28U;
 
         // A target this large leaves the cache before anything reads it, so the kernels write
         // past the cache instead.
@@ -74,11 +74,11 @@ namespace tiv {
                 return 0;
             }
 
-            return static_cast<std::uint32_t>(data[at]) | (static_cast<std::uint32_t>(data[at + 1]) << 8);
+            return static_cast<std::uint32_t>(data[at]) | (static_cast<std::uint32_t>(data[at + 1]) << 8U);
         }
 
         std::uint32_t le32(const std::span<const std::uint8_t> data, const std::size_t at) {
-            return le16(data, at) | (le16(data, at + 2) << 16);
+            return le16(data, at) | (le16(data, at + 2) << 16U);
         }
 
         bool aborted(const Decode::Abort *abort) {
@@ -97,7 +97,7 @@ namespace tiv {
             }
         }
 
-        template<bool Opaque>
+        template <bool Opaque>
         void bgra_scalar(const std::uint8_t *in, std::uint8_t *out, const int width) {
             for (int x = 0; x < width; ++x) {
                 const std::uint8_t *from = in + (static_cast<std::size_t>(x) * 4);
@@ -111,7 +111,7 @@ namespace tiv {
         }
 
 #if defined(__x86_64__) || defined(_M_X64)
-        template<bool Stream>
+        template <bool Stream>
         TIV_AVX2 void store_avx2(std::uint8_t *out, const __m256i pixels) {
             if constexpr (Stream) {
                 _mm256_stream_si256(reinterpret_cast<__m256i *>(out), pixels);
@@ -121,7 +121,7 @@ namespace tiv {
         }
 
         // Pixels before the first 32 byte boundary of the row, which a streaming store needs.
-        template<bool Stream>
+        template <bool Stream>
         int unaligned(const std::uint8_t *out, const int width) {
             if constexpr (Stream) {
                 const auto misplaced = static_cast<int>(reinterpret_cast<std::uintptr_t>(out) % 32);
@@ -132,11 +132,13 @@ namespace tiv {
             }
         }
 
-        template<bool Stream>
+        template <bool Stream>
         TIV_AVX2 void bgr_avx2(const std::uint8_t *in, std::uint8_t *out, const int width) {
             // Each lane spreads four pixels from a load of its own, the alpha byte is ored in.
+            // clang-format off
             const __m256i order = _mm256_setr_epi8(2, 1, 0, -1, 5, 4, 3, -1, 8, 7, 6, -1, 11, 10, 9, -1,
                                                    2, 1, 0, -1, 5, 4, 3, -1, 8, 7, 6, -1, 11, 10, 9, -1);
+            // clang-format on
             const __m256i opaque = _mm256_set1_epi32(static_cast<int>(ALPHA));
             int x = unaligned<Stream>(out, width);
 
@@ -149,28 +151,34 @@ namespace tiv {
                 const __m128i high = _mm_loadu_si128(reinterpret_cast<const __m128i *>(from + 12));
                 const __m256i both = _mm256_inserti128_si256(_mm256_castsi128_si256(low), high, 1);
 
-                store_avx2<Stream>(out + (static_cast<std::size_t>(x) * 4), _mm256_or_si256(_mm256_shuffle_epi8(both, order), opaque));
+                store_avx2<Stream>(out + (static_cast<std::size_t>(x) * 4),
+                                   _mm256_or_si256(_mm256_shuffle_epi8(both, order), opaque));
             }
 
             bgr_scalar(in + (static_cast<std::size_t>(x) * 3), out + (static_cast<std::size_t>(x) * 4), width - x);
         }
 
-        template<bool Opaque, bool Stream>
+        template <bool Opaque, bool Stream>
         TIV_AVX2 void bgra_avx2(const std::uint8_t *in, std::uint8_t *out, const int width) {
+            // clang-format off
             const __m256i order = _mm256_setr_epi8(2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15,
                                                    2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
+            // clang-format on
             const __m256i opaque = _mm256_set1_epi32(Opaque ? static_cast<int>(ALPHA) : 0);
             int x = unaligned<Stream>(out, width);
 
             bgra_scalar<Opaque>(in, out, x);
 
             for (; x + 8 <= width; x += 8) {
-                const __m256i pixels = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(in + (static_cast<std::size_t>(x) * 4)));
+                const __m256i pixels =
+                        _mm256_loadu_si256(reinterpret_cast<const __m256i *>(in + (static_cast<std::size_t>(x) * 4)));
 
-                store_avx2<Stream>(out + (static_cast<std::size_t>(x) * 4), _mm256_or_si256(_mm256_shuffle_epi8(pixels, order), opaque));
+                store_avx2<Stream>(out + (static_cast<std::size_t>(x) * 4),
+                                   _mm256_or_si256(_mm256_shuffle_epi8(pixels, order), opaque));
             }
 
-            bgra_scalar<Opaque>(in + (static_cast<std::size_t>(x) * 4), out + (static_cast<std::size_t>(x) * 4), width - x);
+            bgra_scalar<Opaque>(in + (static_cast<std::size_t>(x) * 4), out + (static_cast<std::size_t>(x) * 4),
+                                width - x);
         }
 #endif
     }
@@ -194,18 +202,18 @@ namespace tiv {
         const bool avx2 = kernel == Kernel::Avx2 || (kernel == Kernel::Auto && Simd::avx2());
 
         if (avx2 && stream) {
-            return {bgr_avx2<true>, bgra_avx2<false, true>, bgra_avx2<true, true>};
+            return {.bgr = bgr_avx2<true>, .bgra = bgra_avx2<false, true>, .bgrx = bgra_avx2<true, true>};
         }
 
         if (avx2) {
-            return {bgr_avx2<false>, bgra_avx2<false, false>, bgra_avx2<true, false>};
+            return {.bgr = bgr_avx2<false>, .bgra = bgra_avx2<false, false>, .bgrx = bgra_avx2<true, false>};
         }
 #else
-        (void) kernel;
-        (void) stream;
+        (void)kernel;
+        (void)stream;
 #endif
 
-        return {bgr_scalar, bgra_scalar<false>, bgra_scalar<true>};
+        return {.bgr = bgr_scalar, .bgra = bgra_scalar<false>, .bgrx = bgra_scalar<true>};
     }
 
     bool Bmp::Image::open(const std::span<const std::uint8_t> file, Image *out) {
@@ -266,18 +274,29 @@ namespace tiv {
         }
 
         // The colour table moves along when the masks take its start.
-        std::array<std::uint32_t, 4> read_masks(const std::span<const std::uint8_t> data, const std::size_t header, const Fields &fields, std::size_t *palette) {
+        std::array<std::uint32_t, 4> read_masks(const std::span<const std::uint8_t> data, const std::size_t header,
+                                                const Fields &fields, std::size_t *palette) {
             if (fields.compression != BI_BITFIELDS && fields.compression != BI_ALPHABITFIELDS) {
                 return {};
             }
 
             if (fields.size >= V2_HEADER) {
-                return {le32(data, header + 40), le32(data, header + 44), le32(data, header + 48), fields.size >= V3_HEADER ? le32(data, header + 52) : 0};
+                return {
+                        le32(data, header + 40),
+                        le32(data, header + 44),
+                        le32(data, header + 48),
+                        fields.size >= V3_HEADER ? le32(data, header + 52) : 0,
+                };
             }
 
             // A plain info header leaves the masks to the start of the colour table.
             const bool alpha = fields.compression == BI_ALPHABITFIELDS;
-            const std::array<std::uint32_t, 4> masks = {le32(data, *palette), le32(data, *palette + 4), le32(data, *palette + 8), alpha ? le32(data, *palette + 12) : 0};
+            const std::array<std::uint32_t, 4> masks = {
+                    le32(data, *palette),
+                    le32(data, *palette + 4),
+                    le32(data, *palette + 8),
+                    alpha ? le32(data, *palette + 12) : 0,
+            };
 
             *palette += alpha ? 16 : 12;
 
@@ -285,7 +304,7 @@ namespace tiv {
         }
 
         std::uint32_t nibble(const std::uint8_t byte, const int i) {
-            return static_cast<std::uint32_t>(i % 2 == 0 ? byte >> 4 : byte & 0x0F);
+            return static_cast<std::uint32_t>(i % 2 == 0 ? byte >> 4U : byte & 0x0FU);
         }
 
         // Gathers the pixels of one row at a time for a run length coded image, and hands each
@@ -293,9 +312,10 @@ namespace tiv {
         class RleRows {
 
         public:
-            RleRows(const int width, const int height, const std::span<const std::uint8_t> palette, const std::function<void(std::span<const std::uint8_t>)> &emit)
-                : _palette(palette), _emit(&emit), _current(static_cast<std::size_t>(width) * Bitmap::CHANNELS), _width(width), _height(height) {
-            }
+            RleRows(const int width, const int height, const std::span<const std::uint8_t> palette,
+                    const std::function<void(std::span<const std::uint8_t>)> &emit)
+                : _palette(palette), _emit(&emit), _current(static_cast<std::size_t>(width) * Bitmap::CHANNELS),
+                  _width(width), _height(height) {}
 
             [[nodiscard]] bool done() const { return _line >= _height; }
 
@@ -307,7 +327,8 @@ namespace tiv {
 
             void literal(const std::span<const std::uint8_t> bytes, const int count, const bool nibbles) {
                 for (int i = 0; i < count; ++i) {
-                    put(nibbles ? nibble(bytes[static_cast<std::size_t>(i) / 2], i) : bytes[static_cast<std::size_t>(i)]);
+                    put(nibbles ? nibble(bytes[static_cast<std::size_t>(i) / 2], i)
+                                : bytes[static_cast<std::size_t>(i)]);
                 }
             }
 
@@ -340,7 +361,8 @@ namespace tiv {
         private:
             void put(const std::uint32_t index) {
                 if (_x < _width) {
-                    std::copy_n(_palette.subspan(static_cast<std::size_t>(index) * 4, 4).begin(), 4, _current.begin() + (static_cast<std::ptrdiff_t>(_x) * 4));
+                    std::copy_n(_palette.subspan(static_cast<std::size_t>(index) * 4, 4).begin(), 4,
+                                _current.begin() + (static_cast<std::ptrdiff_t>(_x) * 4));
                     _drawn = true;
                     ++_x;
                 }
@@ -368,7 +390,8 @@ namespace tiv {
         };
     }
 
-    bool Bmp::Image::read(const std::span<const std::uint8_t> data, const std::size_t header, std::size_t pixelsAt, const bool icon) {
+    bool Bmp::Image::read(const std::span<const std::uint8_t> data, const std::size_t header, std::size_t pixelsAt,
+                          const bool icon) {
         *this = Image{};
 
         Fields fields;
@@ -399,7 +422,6 @@ namespace tiv {
 
         const bool packed = _layout == Layout::Rle8 || _layout == Layout::Rle4;
 
-        // Run length coded files are small palette images, so a larger claim is a broken header.
         if (packed && (!_bottomUp || icon || fields.width * height > MAX_RLE_PIXELS)) {
             return false;
         }
@@ -440,7 +462,8 @@ namespace tiv {
         return true;
     }
 
-    bool Bmp::Image::choose_layout(const std::uint32_t compression, std::array<std::uint32_t, 4> &masks, bool &alphaInPixels) {
+    bool Bmp::Image::choose_layout(const std::uint32_t compression, std::array<std::uint32_t, 4> &masks,
+                                   bool &alphaInPixels) {
         if (compression == BI_RLE8 || compression == BI_RLE4) {
             _layout = compression == BI_RLE8 ? Layout::Rle8 : Layout::Rle4;
 
@@ -448,7 +471,8 @@ namespace tiv {
         }
 
         if (compression == BI_BITFIELDS || compression == BI_ALPHABITFIELDS) {
-            const bool standard = masks.at(0) == RED && masks.at(1) == GREEN && masks.at(2) == BLUE && (masks.at(3) == 0 || masks.at(3) == ALPHA);
+            const bool standard = masks.at(0) == RED && masks.at(1) == GREEN && masks.at(2) == BLUE
+                                  && (masks.at(3) == 0 || masks.at(3) == ALPHA);
 
             if (_depth == 16) {
                 _layout = Layout::Masked16;
@@ -490,8 +514,9 @@ namespace tiv {
         }
     }
 
-    std::size_t Bmp::Image::read_palette(const std::span<const std::uint8_t> data, const std::size_t palette, const std::size_t end, const std::size_t entry, const std::uint32_t used) {
-        const std::size_t most = std::size_t{1} << _depth;
+    std::size_t Bmp::Image::read_palette(const std::span<const std::uint8_t> data, const std::size_t palette,
+                                         const std::size_t end, const std::size_t entry, const std::uint32_t used) {
+        const std::size_t most = std::size_t{1} << static_cast<unsigned>(_depth);
         std::size_t count = used != 0 && used < most ? used : most;
 
         count = palette < end ? std::min(count, (end - palette) / entry) : 0;
@@ -563,7 +588,8 @@ namespace tiv {
             }
 
             for (int x = 0; x < _width; ++x) {
-                seen |= (wide ? le32(in, static_cast<std::size_t>(x) * 4) : le16(in, static_cast<std::size_t>(x) * 2)) & mask;
+                seen |= (wide ? le32(in, static_cast<std::size_t>(x) * 4) : le16(in, static_cast<std::size_t>(x) * 2))
+                        & mask;
             }
 
             if (seen != 0) {
@@ -617,10 +643,12 @@ namespace tiv {
         // Set bits in the mask of an ICO entry are the transparent pixels, per
         // https://learn.microsoft.com/en-us/previous-versions/ms997538(v=msdn.10)
         if (_alpha == Alpha::Mask) {
-            const std::span<const std::uint8_t> bits = _mask.subspan(static_cast<std::size_t>(_bottomUp ? _height - 1 - y : y) * _maskStride, _maskStride);
+            const std::span<const std::uint8_t> bits =
+                    _mask.subspan(static_cast<std::size_t>(_bottomUp ? _height - 1 - y : y) * _maskStride, _maskStride);
 
             for (int x = 0; x < _width; ++x) {
-                const bool clear = ((bits[static_cast<std::size_t>(x) / 8] >> (7 - (x % 8))) & 1) != 0;
+                const auto bit = static_cast<std::size_t>(x);
+                const bool clear = ((static_cast<unsigned>(bits[bit / 8]) >> (7U - (bit % 8U))) & 1U) != 0;
 
                 out[(static_cast<std::size_t>(x) * 4) + 3] = clear ? 0 : 0xFF;
             }
@@ -635,7 +663,8 @@ namespace tiv {
             const std::size_t bit = static_cast<std::size_t>(x) * depth;
             const std::uint32_t index = (static_cast<std::uint32_t>(in[bit / 8]) >> (8 - depth - (bit % 8))) & low;
 
-            std::ranges::copy(std::span(_palette).subspan(static_cast<std::size_t>(index) * 4, 4), out.subspan(static_cast<std::size_t>(x) * 4, 4).begin());
+            std::ranges::copy(std::span(_palette).subspan(static_cast<std::size_t>(index) * 4, 4),
+                              out.subspan(static_cast<std::size_t>(x) * 4, 4).begin());
         }
     }
 
@@ -645,7 +674,8 @@ namespace tiv {
         const Channel &opacity = _channels.at(3);
 
         for (int x = 0; x < _width; ++x) {
-            const std::uint32_t pixel = wide ? le32(in, static_cast<std::size_t>(x) * 4) : le16(in, static_cast<std::size_t>(x) * 2);
+            const std::uint32_t pixel =
+                    wide ? le32(in, static_cast<std::size_t>(x) * 4) : le16(in, static_cast<std::size_t>(x) * 2);
             const std::span<std::uint8_t> to = out.subspan(static_cast<std::size_t>(x) * 4, 4);
 
             for (std::size_t c = 0; c < 3; ++c) {
@@ -660,7 +690,8 @@ namespace tiv {
 
     // The run length schemes of https://learn.microsoft.com/en-us/windows/win32/gdi/bitmap-compression.
     // Pixels a run skips stay transparent, as Chromium's reader leaves them.
-    bool Bmp::Image::unpack_rle(const std::function<void(std::span<const std::uint8_t>)> &emit, const Decode::Abort *abort) const {
+    bool Bmp::Image::unpack_rle(const std::function<void(std::span<const std::uint8_t>)> &emit,
+                                const Decode::Abort *abort) const {
         const std::span<const std::uint8_t> data = _pixels;
         const bool nibbles = _layout == Layout::Rle4;
         RleRows rows(_width, _height, _palette, emit);
@@ -730,7 +761,8 @@ namespace tiv {
     }
 
     // A band is rows of the target, so the bands of a shrink never share a block.
-    void Bmp::Image::decode_band(const int from, const int to, const int factor, Bitmap &target, const Kernels &kernels, const Decode::Abort *abort, std::atomic<bool> &stopped) const {
+    void Bmp::Image::decode_band(const int from, const int to, const int factor, Bitmap &target, const Kernels &kernels,
+                                 const Decode::Abort *abort, std::atomic<bool> &stopped) const {
         const auto halted = [&](const int done) {
             if (done % ABORT_ROWS == 0 && aborted(abort)) {
                 stopped = true;

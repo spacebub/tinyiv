@@ -29,11 +29,11 @@ namespace tiv {
         };
 
         std::uint32_t u16(const std::span<const std::uint8_t> data, const std::size_t at) {
-            return at + 2 <= data.size() ? static_cast<std::uint32_t>((data[at] << 8) | data[at + 1]) : 0;
+            return at + 2 <= data.size() ? (static_cast<std::uint32_t>(data[at]) << 8U) | data[at + 1] : 0;
         }
 
         std::uint32_t u32(const std::span<const std::uint8_t> data, const std::size_t at) {
-            return at + 4 <= data.size() ? (u16(data, at) << 16) | u16(data, at + 2) : 0;
+            return at + 4 <= data.size() ? (u16(data, at) << 16U) | u16(data, at + 2) : 0;
         }
 
         std::string_view fourcc(const std::span<const std::uint8_t> data, const std::size_t at) {
@@ -48,10 +48,12 @@ namespace tiv {
         // Up to the terminating zero, or the end.
         std::string_view text(const std::span<const std::uint8_t> data) {
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the bytes are ASCII.
-            return {reinterpret_cast<const char *>(data.data()), static_cast<std::size_t>(std::ranges::find(data, 0) - data.begin())};
+            return {reinterpret_cast<const char *>(data.data()),
+                    static_cast<std::size_t>(std::ranges::find(data, 0) - data.begin())};
         }
 
         // The boxes one after another in the data, stopping at the first that does not fit.
+        // Spec: ISO/IEC 14496-12, section 4.2 (Box, with largesize and size 0 to the end).
         std::vector<Box> boxes(const std::span<const std::uint8_t> data) {
             std::vector<Box> held;
 
@@ -60,7 +62,7 @@ namespace tiv {
                 std::size_t header = HEADER;
 
                 if (size == 1) {
-                    size = (static_cast<std::uint64_t>(u32(data, at + HEADER)) << 32) | u32(data, at + HEADER + 4);
+                    size = (static_cast<std::uint64_t>(u32(data, at + HEADER)) << 32U) | u32(data, at + HEADER + 4);
                     header += 8;
                 } else if (size == 0) {
                     size = data.size() - at;
@@ -70,7 +72,10 @@ namespace tiv {
                     break;
                 }
 
-                held.push_back({fourcc(data, at + 4), data.subspan(at + header, static_cast<std::size_t>(size) - header)});
+                held.push_back({
+                        .type = fourcc(data, at + 4),
+                        .body = data.subspan(at + header, static_cast<std::size_t>(size) - header),
+                });
                 at += static_cast<std::size_t>(size);
             }
 
@@ -100,6 +105,7 @@ namespace tiv {
                 }
 
                 // The item ID, then a protection index of 16 bits, then the type.
+                // Spec: ISO/IEC 14496-12, ItemInfoEntry (infe), versions 2 and 3.
                 const std::size_t type = FULL_HEADER + (entry.body[0] == 2 ? 2 : 4) + 2;
 
                 return fourcc(entry.body, type) == "tmap";
@@ -107,6 +113,7 @@ namespace tiv {
         }
 
         // The 1 based indices into ipco of the properties the item has.
+        // Spec: ISO/IEC 23008-12, ItemPropertyAssociationBox (ipma).
         std::vector<std::uint32_t> associated(const std::span<const std::uint8_t> ipma, const std::uint32_t item) {
             std::vector<std::uint32_t> held;
 
@@ -115,7 +122,7 @@ namespace tiv {
             }
 
             const bool wideIds = ipma[0] >= 1;
-            const bool wideIndices = (ipma[3] & 1) != 0;
+            const bool wideIndices = (ipma[3] & 1U) != 0;
             const std::uint32_t entries = u32(ipma, FULL_HEADER);
             std::size_t at = FULL_HEADER + 4;
 
@@ -156,8 +163,10 @@ namespace tiv {
         const std::vector<Box> ipco = boxes(find(properties, "ipco"));
 
         held.gainMap = has_tmap(find(inside, "iinf")) || std::ranges::any_of(ipco, [](const Box &property) {
-            return property.type == "auxC" && text(property.body.subspan(std::min(FULL_HEADER, property.body.size()))) == APPLE_GAIN_MAP;
-        });
+                           return property.type == "auxC"
+                                  && text(property.body.subspan(std::min(FULL_HEADER, property.body.size())))
+                                             == APPLE_GAIN_MAP;
+                       });
 
         const std::uint32_t primary = primary_item(find(inside, "pitm"));
 
@@ -174,8 +183,10 @@ namespace tiv {
                 const Box &property = ipco.at(index - 1);
 
                 // colour_type, then primaries, transfer and matrix of 16 bits each.
+                // Spec: ISO/IEC 14496-12, ColourInformationBox (colr).
                 if (property.type == "colr" && fourcc(property.body, 0) == "nclx") {
-                    held.tone = Tone::from_cicp(static_cast<int>(u16(property.body, 4)), static_cast<int>(u16(property.body, 6)));
+                    held.tone = Tone::from_cicp(static_cast<int>(u16(property.body, 4)),
+                                                static_cast<int>(u16(property.body, 6)));
                 }
             }
         }

@@ -55,7 +55,8 @@ namespace tiv {
             return;
         }
 
-        const auto target = static_cast<long>(std::clamp(fraction, 0.0, 1.0) * static_cast<double>(_animation->duration()));
+        const auto target =
+                static_cast<long>(std::clamp(fraction, 0.0, 1.0) * static_cast<double>(_animation->duration()));
         long start = 0;
 
         _frame = 0;

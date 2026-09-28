@@ -25,8 +25,8 @@ namespace tiv::Decode::Jpeg {
     bool probe(std::span<const std::uint8_t> data, Info *info);
 
     // The base rendition, which an HDR display shows lifted by the gain map if there is one.
-    Direct load(const std::filesystem::path &file, std::span<const std::uint8_t> data, int boxWidth, int boxHeight, Bitmap *out, std::string *error, const Abort *abort, Fit fit,
-                const Tone::Display &display);
+    Direct load(const std::filesystem::path &file, std::span<const std::uint8_t> data, int boxWidth, int boxHeight,
+                Bitmap *out, std::string *error, const Abort *abort, Fit fit, const Tone::Display &display);
 
 }
 

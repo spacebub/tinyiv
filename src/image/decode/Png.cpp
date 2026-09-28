@@ -37,7 +37,7 @@
 namespace tiv::Decode {
     namespace {
         // What a band of wide PNG rows waiting for the tone mapper may take.
-        constexpr std::size_t PNG_BAND_BYTES = std::size_t{1} << 20;
+        constexpr std::size_t PNG_BAND_BYTES = std::size_t{1} << 20U;
 
         struct PngReader {
             std::span<const std::uint8_t> data;
@@ -68,9 +68,7 @@ namespace tiv::Decode {
 
             PngHandle() = default;
 
-            ~PngHandle() {
-                png_destroy_read_struct(&png, &info, nullptr);
-            }
+            ~PngHandle() { png_destroy_read_struct(&png, &info, nullptr); }
 
             PngHandle(const PngHandle &) = delete;
             PngHandle(PngHandle &&) = delete;
@@ -142,12 +140,14 @@ namespace tiv::Decode {
             using Landed = std::function<void(std::span<const std::uint8_t> row)>;
 
             PngRows(const Tone::Mapper *mapper, const int width, Landed landed = {})
-                : _mapper(mapper), _pitch(static_cast<std::size_t>(width) * Bitmap::CHANNELS), _landed(std::move(landed)) {
+                : _mapper(mapper), _pitch(static_cast<std::size_t>(width) * Bitmap::CHANNELS),
+                  _landed(std::move(landed)) {
                 if (_mapper == nullptr) {
                     return;
                 }
 
-                _rows = static_cast<int>(std::clamp<std::size_t>(PNG_BAND_BYTES / (_pitch * sizeof(std::uint16_t)), 1, ABORT_ROWS));
+                _rows = static_cast<int>(
+                        std::clamp<std::size_t>(PNG_BAND_BYTES / (_pitch * sizeof(std::uint16_t)), 1, ABORT_ROWS));
 
                 for (Band &band : _bands) {
                     band.wide.resize(_pitch * static_cast<std::size_t>(_rows));
@@ -168,7 +168,9 @@ namespace tiv::Decode {
 
             ~PngRows() { finish(); }
 
-            [[nodiscard]] std::size_t bytes() const { return _pitch * (_mapper != nullptr ? sizeof(std::uint16_t) : 1); }
+            [[nodiscard]] std::size_t bytes() const {
+                return _pitch * (_mapper != nullptr ? sizeof(std::uint16_t) : 1);
+            }
 
             // Into out, or through out to landed when there is one. Mapped rows arrive once their
             // band is done, which finish() waits for.
@@ -185,8 +187,9 @@ namespace tiv::Decode {
 
                 Band &band = _bands.at(_filling);
 
+                auto *row = std::span(band.wide).subspan(_pitch * static_cast<std::size_t>(band.rows), _pitch).data();
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): libpng writes the 16 bit samples as bytes.
-                png_read_row(png, reinterpret_cast<png_bytep>(std::span(band.wide).subspan(_pitch * static_cast<std::size_t>(band.rows), _pitch).data()), nullptr);
+                png_read_row(png, reinterpret_cast<png_bytep>(row), nullptr);
                 band.out.at(static_cast<std::size_t>(band.rows)) = out;
 
                 if (++band.rows == _rows) {
@@ -255,7 +258,8 @@ namespace tiv::Decode {
                         const auto at = static_cast<std::size_t>(row);
                         const std::span<std::uint8_t> out = _landed ? std::span(_scratch) : band.out.at(at);
 
-                        _mapper->map(std::span<const std::uint16_t>(band.wide).subspan(_pitch * at, _pitch), Bitmap::CHANNELS, out);
+                        _mapper->map(std::span<const std::uint16_t>(band.wide).subspan(_pitch * at, _pitch),
+                                     Bitmap::CHANNELS, out);
 
                         if (_landed) {
                             _landed(out);
@@ -287,7 +291,7 @@ namespace tiv::Decode {
         };
 
         // Wide rows only for images that are not interlaced, whose passes build on the rows before.
-        bool png_read(PngHandle &handle, Bitmap &target, const Tone::Mapper *mapper, const Decode::Abort *abort) {
+        bool png_read(PngHandle &handle, Bitmap &target, const Tone::Mapper *mapper, const Abort *abort) {
             PngRows rows(mapper, target.width());
 
             // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp): libpng reports errors by longjmp only.
@@ -299,7 +303,8 @@ namespace tiv::Decode {
 
             png_read_update_info(handle.png, handle.info);
 
-            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes() || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
+            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes()
+                || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
                 return false;
             }
 
@@ -321,7 +326,8 @@ namespace tiv::Decode {
 
         // Rows stream through a box filter into the target, so an image of any size costs its
         // shrunk size plus two rows. Only for images that are not interlaced.
-        bool png_read_shrunk(PngHandle &handle, Bitmap &target, const int factor, const Tone::Mapper *mapper, const Decode::Abort *abort) {
+        bool png_read_shrunk(PngHandle &handle, Bitmap &target, const int factor, const Tone::Mapper *mapper,
+                             const Abort *abort) {
             const auto width = static_cast<int>(png_get_image_width(handle.png, handle.info));
             const auto height = static_cast<int>(png_get_image_height(handle.png, handle.info));
             std::vector<std::uint8_t> row(static_cast<std::size_t>(width) * Bitmap::CHANNELS);
@@ -335,7 +341,8 @@ namespace tiv::Decode {
 
             png_read_update_info(handle.png, handle.info);
 
-            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes() || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
+            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes()
+                || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
                 return false;
             }
 
@@ -354,7 +361,8 @@ namespace tiv::Decode {
         }
 
         std::uint32_t png_u32(const std::span<const std::uint8_t> data, const std::size_t at) {
-            return (static_cast<std::uint32_t>(data[at]) << 24) | (static_cast<std::uint32_t>(data[at + 1]) << 16) | (static_cast<std::uint32_t>(data[at + 2]) << 8) | data[at + 3];
+            return (static_cast<std::uint32_t>(data[at]) << 24U) | (static_cast<std::uint32_t>(data[at + 1]) << 16U)
+                   | (static_cast<std::uint32_t>(data[at + 2]) << 8U) | data[at + 3];
         }
 
         // A chunk that comes before the image data, as eXIf and cICP do:
@@ -384,7 +392,7 @@ namespace tiv::Decode {
         return cicp.size() >= 2 ? Tone::from_cicp(cicp[0], cicp[1]) : Tone::Source{};
     }
 
-    bool Png::probe(const std::span<const std::uint8_t> data, Decode::Info *info) {
+    bool Png::probe(const std::span<const std::uint8_t> data, Info *info) {
         // Width and height sit at fixed offsets in IHDR, the first chunk: https://www.w3.org/TR/png-3/#11IHDR
         constexpr std::size_t IHDR = 16;
 
@@ -406,10 +414,11 @@ namespace tiv::Decode {
         return width > 0 && height > 0;
     }
 
-    Direct Png::load(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit,
+    Direct Png::load(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth,
+                     const int boxHeight, Bitmap *out, std::string *error, const Abort *abort, const Fit fit,
                      const Tone::Display &display) {
         PngHandle handle;
-        PngReader reader{data, 0};
+        PngReader reader{.data = data, .at = 0};
         const Tone::Source source = tone(data);
 
         if (!png_open(handle, reader, source.hdr())) {
@@ -421,17 +430,22 @@ namespace tiv::Decode {
         const int orientation = png_orientation(handle);
         const auto width = static_cast<int>(png_get_image_width(handle.png, handle.info));
         const auto height = static_cast<int>(png_get_image_height(handle.png, handle.info));
-        const int factor = fit == Decode::Fit::Force ? shrink_factor(width, height, Orient::swaps(orientation) ? boxHeight : boxWidth, Orient::swaps(orientation) ? boxWidth : boxHeight) : 1;
+        const int factor = fit == Fit::Force
+                                   ? shrink_factor(width, height, Orient::swaps(orientation) ? boxHeight : boxWidth,
+                                                   Orient::swaps(orientation) ? boxWidth : boxHeight)
+                                   : 1;
 
         if ((factor > 1 || source.hdr()) && png_get_interlace_type(handle.png, handle.info) != PNG_INTERLACE_NONE) {
             return Direct::Skip;
         }
 
-        const std::optional<Tone::Mapper> mapper = source.hdr() ? std::optional(Tone::Mapper(source, display)) : std::nullopt;
+        const std::optional<Tone::Mapper> mapper =
+                source.hdr() ? std::optional(Tone::Mapper(source, display)) : std::nullopt;
         const Tone::Mapper *mapping = mapper ? &*mapper : nullptr;
         const Bitmap::Encoding encoding = source.hdr() && display.hdr() ? Bitmap::Encoding::Pq : Bitmap::Encoding::Srgb;
         Bitmap held = Bitmap::allocate((width + factor - 1) / factor, (height + factor - 1) / factor, encoding);
-        const bool read = factor > 1 ? png_read_shrunk(handle, held, factor, mapping, abort) : png_read(handle, held, mapping, abort);
+        const bool read = factor > 1 ? png_read_shrunk(handle, held, factor, mapping, abort)
+                                     : png_read(handle, held, mapping, abort);
 
         if (!read) {
             fail(error, file, aborted(abort) ? "aborted" : "png decode failed");

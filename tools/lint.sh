@@ -1,17 +1,13 @@
 #!/bin/sh
-# Runs clang-tidy over the project sources.
-#
 # Usage: tools/lint.sh [build-dir]
-#
-# The build directory just has to contain a compile_commands.json, which cmake
-# writes out on its own (CMAKE_EXPORT_COMPILE_COMMANDS is set in CMakeLists.txt).
+# Any configured build directory works, as CMAKE_EXPORT_COMPILE_COMMANDS writes its compile_commands.json.
 set -eu
 
 BUILD_DIR=${1:-build}
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 if [ ! -f "$BUILD_DIR/compile_commands.json" ]; then
-    echo "no compile_commands.json in $BUILD_DIR; run cmake first" >&2
+    echo "no compile_commands.json in $BUILD_DIR, run cmake first" >&2
     exit 1
 fi
 
@@ -28,9 +24,8 @@ for entry in json.load(open(db)):
     print(path)
 ' "$ROOT" "$BUILD_DIR/compile_commands.json")
 
-# The check set and the per-check opt-outs live in .clang-tidy. Warnings are not
-# errors there, so clang-tidy exits 0 with a page of them: the output is what says
-# whether anything was found.
+# .clang-tidy makes no warning an error, so clang-tidy exits 0 with a page of them: the output
+# says whether anything was found.
 echo "== clang-tidy =="
 
 REPORT=$(echo "$FILES" | xargs -P "$(nproc)" -I{} clang-tidy -p "$BUILD_DIR" --quiet "{}" 2>&1) \

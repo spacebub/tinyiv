@@ -33,9 +33,9 @@
 namespace tiv {
     namespace {
         constexpr std::array<std::string_view, 34> SUFFIXES = {
-                ".jpg", ".jpeg", ".jpe", ".jfif", ".png", ".webp", ".jxl", ".gif", ".bmp", ".ico", ".icns", ".tif", ".tiff",
-                ".heic", ".heif", ".avif", ".svg", ".svgz", ".pdf", ".jp2", ".j2k", ".jpx", ".exr", ".hdr",
-                ".ppm", ".pgm", ".pbm", ".pnm", ".pfm", ".fits", ".fit", ".nii", ".v", ".vips",
+                ".jpg",  ".jpeg", ".jpe",  ".jfif", ".png", ".webp", ".jxl", ".gif", ".bmp", ".ico",  ".icns", ".tif",
+                ".tiff", ".heic", ".heif", ".avif", ".svg", ".svgz", ".pdf", ".jp2", ".j2k", ".jpx",  ".exr",  ".hdr",
+                ".ppm",  ".pgm",  ".pbm",  ".pnm",  ".pfm", ".fits", ".fit", ".nii", ".v",   ".vips",
         };
 
         std::string_view format_name(const Decode::Format kind) {
@@ -85,14 +85,18 @@ namespace tiv {
         }
 
         // A variant the decoder does not know, such as an embedded JPEG, is left to libvips.
-        Decode::Direct load_bmp(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit) {
+        Decode::Direct load_bmp(const std::filesystem::path &file, const std::span<const std::uint8_t> data,
+                                const int boxWidth, const int boxHeight, Bitmap *out, std::string *error,
+                                const Decode::Abort *abort, const Decode::Fit fit) {
             Bmp::Image image;
 
             if (!Bmp::Image::open(data, &image)) {
                 return Decode::Direct::Skip;
             }
 
-            const int factor = fit == Decode::Fit::Force ? Decode::shrink_factor(image.width(), image.height(), boxWidth, boxHeight) : 1;
+            const int factor = fit == Decode::Fit::Force
+                                       ? Decode::shrink_factor(image.width(), image.height(), boxWidth, boxHeight)
+                                       : 1;
 
             if (!image.decode(factor, out, abort)) {
                 Decode::fail(error, file, Decode::aborted(abort) ? "aborted" : "bmp decode failed");
@@ -121,7 +125,9 @@ namespace tiv {
         }
 
         // Only the largest entry is shown.
-        Decode::Direct load_icon(const std::filesystem::path &file, const Decode::Format kind, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Decode::Abort *abort, const Decode::Fit fit) {
+        Decode::Direct load_icon(const std::filesystem::path &file, const Decode::Format kind,
+                                 const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight,
+                                 Bitmap *out, std::string *error, Decode::Abort *abort, const Decode::Fit fit) {
             Icon::Entry entry;
 
             if (!icon_entry(kind, data, &entry)) {
@@ -132,7 +138,8 @@ namespace tiv {
                 case Icon::Payload::Png:
                     return Decode::Png::load(file, entry.data, boxWidth, boxHeight, out, error, abort, fit);
                 case Icon::Payload::Jpeg2000:
-                    return Decode::Vips::load_buffer(file, entry.data, out, error, abort) ? Decode::Direct::Done : Decode::Direct::Failed;
+                    return Decode::Vips::load_buffer(file, entry.data, out, error, abort) ? Decode::Direct::Done
+                                                                                          : Decode::Direct::Failed;
                 case Icon::Payload::Packed:
                     if (!Icon::unpack(entry, out)) {
                         Decode::fail(error, file, "icns decode failed");
@@ -150,7 +157,9 @@ namespace tiv {
                         return Decode::Direct::Failed;
                     }
 
-                    const int factor = fit == Decode::Fit::Force ? Decode::shrink_factor(image.width(), image.height(), boxWidth, boxHeight) : 1;
+                    const int factor = fit == Decode::Fit::Force ? Decode::shrink_factor(image.width(), image.height(),
+                                                                                         boxWidth, boxHeight)
+                                                                 : 1;
 
                     if (!image.decode(factor, out, abort)) {
                         Decode::fail(error, file, Decode::aborted(abort) ? "aborted" : "ico decode failed");
@@ -350,7 +359,8 @@ namespace tiv {
         return Vips::probe(file, info, error);
     }
 
-    bool Decode::load(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Abort *abort, const Fit fit, const Tone::Display &display) {
+    bool Decode::load(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out,
+                      std::string *error, Abort *abort, const Fit fit, const Tone::Display &display) {
         Mapped mapped;
 
         if (!Mapped::open(file, &mapped, error)) {

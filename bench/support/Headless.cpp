@@ -66,7 +66,8 @@ namespace bench {
             return tiv::Tiles::SIZE;
         }
 
-        return static_cast<int>(SDL_GetNumberProperty(SDL_GetRendererProperties(r), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, tiv::Tiles::SIZE));
+        return static_cast<int>(SDL_GetNumberProperty(SDL_GetRendererProperties(r),
+                                                      SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, tiv::Tiles::SIZE));
     }
 
     void Headless::shutdown() {

@@ -1,5 +1,4 @@
-# Compiles a file in as `Embedded::<symbol>` and `Embedded::<symbol>Size`, so
-# nothing has to be found on disk at runtime.
+# Compiles a file in as `Embedded::<symbol>` and `Embedded::<symbol>Size`, so no file is read at runtime.
 function(tiv_embed target symbol input)
     set(generated "${CMAKE_CURRENT_BINARY_DIR}/embed/${symbol}.cpp")
 

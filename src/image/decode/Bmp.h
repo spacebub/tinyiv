@@ -81,7 +81,8 @@ namespace tiv::Bmp {
         bool read(std::span<const std::uint8_t> data, std::size_t header, std::size_t pixelsAt, bool icon);
         bool choose_layout(std::uint32_t compression, std::array<std::uint32_t, 4> &masks, bool &alphaInPixels);
         // Returns where the table ends.
-        std::size_t read_palette(std::span<const std::uint8_t> data, std::size_t palette, std::size_t end, std::size_t entry, std::uint32_t used);
+        std::size_t read_palette(std::span<const std::uint8_t> data, std::size_t palette, std::size_t end,
+                                 std::size_t entry, std::uint32_t used);
         void find_mask();
         void set_masks(const std::array<std::uint32_t, 4> &masks);
         [[nodiscard]] bool any_alpha(std::uint32_t mask) const;
@@ -91,9 +92,11 @@ namespace tiv::Bmp {
         void indexed_row(std::span<const std::uint8_t> in, std::span<std::uint8_t> out) const;
         void masked_row(std::span<const std::uint8_t> in, std::span<std::uint8_t> out) const;
         // Hands out every row bottom first, an empty one for a row left transparent.
-        bool unpack_rle(const std::function<void(std::span<const std::uint8_t>)> &emit, const Decode::Abort *abort) const;
+        bool unpack_rle(const std::function<void(std::span<const std::uint8_t>)> &emit,
+                        const Decode::Abort *abort) const;
         bool decode_rle(int factor, Bitmap &target, const Decode::Abort *abort) const;
-        void decode_band(int from, int to, int factor, Bitmap &target, const Kernels &kernels, const Decode::Abort *abort, std::atomic<bool> &stopped) const;
+        void decode_band(int from, int to, int factor, Bitmap &target, const Kernels &kernels,
+                         const Decode::Abort *abort, std::atomic<bool> &stopped) const;
 
         std::span<const std::uint8_t> _pixels;
         std::span<const std::uint8_t> _mask;

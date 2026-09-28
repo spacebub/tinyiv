@@ -29,7 +29,6 @@
 #include "view/Viewport.h"
 
 namespace tiv {
-    // The window, the loop, and the wiring between folder, loader, view and renderer.
     class App {
 
     public:
@@ -126,8 +125,8 @@ namespace tiv {
         SDL_GPUDevice *_device = nullptr;
         std::uint32_t _loaderEvent = 0;
         std::uint32_t _refinerEvent = 0;
-        // A store read a tile the view asked for.
-        std::uint32_t _storeEvent = 0;
+        // A tile cache read a tile the view asked for.
+        std::uint32_t _tileCacheEvent = 0;
         Tone::Display _display;
 
         Folder _folder;
@@ -174,7 +173,7 @@ namespace tiv {
         Ask _asked;
 
         bool _fullscreen = false;
-        // Whether the status bar shows, apart for each, as I switches it for the one in use.
+        // Whether the status bar shows, kept apart for windowed and fullscreen: I switches the one in use.
         bool _barWindowed = true;
         bool _barFullscreen = false;
         bool _running = true;

@@ -23,6 +23,7 @@ namespace tiv::Channels {
 
     // Each byte of the row less the one above it, the Up filter of PNG, which leaves small
     // numbers that compress well. Out may be the row itself.
+    // Spec: https://www.w3.org/TR/png-3/#9Filter-types, filter type 2.
     void difference(const std::uint8_t *row, const std::uint8_t *above, std::uint8_t *out, std::size_t bytes);
 
     // Undoes difference() in place: each byte plus the one above it.

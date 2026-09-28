@@ -29,7 +29,7 @@
 #include "image/Bitmap.h"
 #include "image/Orient.h"
 #include "image/Pyramid.h"
-#include "image/Store.h"
+#include "image/TileCache.h"
 #include "image/decode/Decode.h"
 #include "services/Loader.h"
 #include "services/Memory.h"
@@ -49,29 +49,40 @@ namespace tiv {
 
         Box capped(const Decode::Info &info, const std::int64_t limit = Loader::max_pixels()) {
             if (info.pixels() <= limit) {
-                return {info.width, info.height};
+                return {.width = info.width, .height = info.height};
             }
 
             const double shrink = std::sqrt(static_cast<double>(limit) / static_cast<double>(info.pixels()));
 
-            return {std::max(static_cast<int>(std::floor(info.width * shrink)), 1), std::max(static_cast<int>(std::floor(info.height * shrink)), 1)};
+            return {
+                    .width = std::max(static_cast<int>(std::floor(info.width * shrink)), 1),
+                    .height = std::max(static_cast<int>(std::floor(info.height * shrink)), 1),
+            };
         }
 
         Box fitted(const Decode::Info &info, const int boxWidth, const int boxHeight) {
             if (info.width <= boxWidth && info.height <= boxHeight) {
-                return {info.width, info.height};
+                return {.width = info.width, .height = info.height};
             }
 
-            const double shrink = std::min(static_cast<double>(boxWidth) / info.width, static_cast<double>(boxHeight) / info.height);
+            const double shrink =
+                    std::min(static_cast<double>(boxWidth) / info.width, static_cast<double>(boxHeight) / info.height);
 
-            return {std::max(static_cast<int>(std::floor(info.width * shrink)), 1), std::max(static_cast<int>(std::floor(info.height * shrink)), 1)};
+            return {
+                    .width = std::max(static_cast<int>(std::floor(info.width * shrink)), 1),
+                    .height = std::max(static_cast<int>(std::floor(info.height * shrink)), 1),
+            };
         }
 
         // Fits the box, enlarged if need be.
         Box filled(const Decode::Info &info, const int boxWidth, const int boxHeight) {
-            const double scale = std::min(static_cast<double>(boxWidth) / info.width, static_cast<double>(boxHeight) / info.height);
+            const double scale =
+                    std::min(static_cast<double>(boxWidth) / info.width, static_cast<double>(boxHeight) / info.height);
 
-            return {std::max(static_cast<int>(std::floor(info.width * scale)), 1), std::max(static_cast<int>(std::floor(info.height * scale)), 1)};
+            return {
+                    .width = std::max(static_cast<int>(std::floor(info.width * scale)), 1),
+                    .height = std::max(static_cast<int>(std::floor(info.height * scale)), 1),
+            };
         }
 
         void take_size(const Bitmap &decoded, Decode::Info *info) {
@@ -83,7 +94,8 @@ namespace tiv {
 
         // A pyramid is its base and a third again.
         std::size_t pyramid_bytes(const Box box) {
-            return static_cast<std::size_t>(box.width) * static_cast<std::size_t>(box.height) * Bitmap::CHANNELS * 4 / 3;
+            return static_cast<std::size_t>(box.width) * static_cast<std::size_t>(box.height) * Bitmap::CHANNELS * 4
+                   / 3;
         }
 
         struct Plan {
@@ -93,12 +105,14 @@ namespace tiv {
             std::size_t estimate = 0;
         };
 
-        Plan plan(const Decode::Info &info, const bool wantsWhole, const bool over, const std::size_t budget, const int screenWidth, const int screenHeight) {
+        Plan plan(const Decode::Info &info, const bool wantsWhole, const bool over, const std::size_t budget,
+                  const int screenWidth, const int screenHeight) {
             const bool scalable = Decode::scalable(info.kind);
             const std::size_t nativeBytes = static_cast<std::size_t>(info.pixels()) * Bitmap::CHANNELS;
             // WebP and JXL have no cheaper decode than the native size, which is halved down after,
             // as long as the transient bitmap fits the budget.
-            const bool nativeThenHalve = over && (info.kind == Decode::Format::WebP || info.kind == Decode::Format::Jxl) && nativeBytes <= budget;
+            const bool nativeThenHalve = over && (info.kind == Decode::Format::WebP || info.kind == Decode::Format::Jxl)
+                                         && nativeBytes <= budget;
 
             Plan planned;
 
@@ -126,7 +140,7 @@ namespace tiv {
 
     std::int64_t Loader::max_pixels() {
         static const std::int64_t held = [] {
-            // SDL counts whole mebibytes.
+            // SDL counts whole mebibytes: https://wiki.libsdl.org/SDL3/SDL_GetSystemRAM
             const std::int64_t half = static_cast<std::int64_t>(SDL_GetSystemRAM()) * 1024 * 1024 / 2;
 
             // A pyramid is four bytes a pixel and a third again.
@@ -136,7 +150,8 @@ namespace tiv {
         return held;
     }
 
-    Loader::Loader(const std::uint32_t eventType, const std::size_t cacheBytes, const int workers) : _event(eventType), _budget(cacheBytes) {
+    Loader::Loader(const std::uint32_t eventType, const std::size_t cacheBytes, const int workers)
+        : _event(eventType), _budget(cacheBytes) {
         const int count = workers > 0 ? workers : default_workers();
 
         _workers.reserve(static_cast<std::size_t>(count));
@@ -201,7 +216,8 @@ namespace tiv {
         _wake.notify_all();
     }
 
-    void Loader::show(const std::uint64_t generation, const std::filesystem::path &current, std::vector<std::filesystem::path> ahead, std::vector<std::filesystem::path> behind) {
+    void Loader::show(const std::uint64_t generation, const std::filesystem::path &current,
+                      std::vector<std::filesystem::path> ahead, std::vector<std::filesystem::path> behind) {
         {
             const std::scoped_lock hold(_guard);
 
@@ -216,16 +232,30 @@ namespace tiv {
             if (const auto found = _cache.find(current); found != _cache.end()) {
                 found->second.used = _request.sequence;
                 post_cached(found->second);
-            } else if (const auto job = std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == current && other.streaming && !other.abort->requested(); }); job != _jobs.end()) {
+            } else if (const auto job = std::ranges::find_if(_jobs,
+                                                             [&](const Job &other) {
+                                                                 return other.file == current && other.streaming
+                                                                        && !other.abort->requested();
+                                                             });
+                       job != _jobs.end()) {
                 // Shown again while its tiles are being written, say when the mode switched as
                 // the job started. It said so for the request before, which the view has dropped.
-                post({generation, Kind::Building, job->info, nullptr, {}, false, nullptr, nullptr});
+                post({
+                        .generation = generation,
+                        .kind = Kind::Building,
+                        .info = job->info,
+                        .pyramid = nullptr,
+                        .error = {},
+                        .unsupported = false,
+                        .animation = nullptr,
+                        .tileCache = nullptr,
+                });
             }
 
             // What the images left behind read of their files goes, what is on disk stays.
             for (auto &[file, entry] : _cache) {
-                if (entry.store != nullptr && file != current) {
-                    entry.store->shrink();
+                if (entry.tileCache != nullptr && file != current) {
+                    entry.tileCache->shrink();
                 }
             }
 
@@ -257,7 +287,8 @@ namespace tiv {
         return true;
     }
 
-    bool Loader::cached(const std::filesystem::path &file, Decode::Info *info, std::shared_ptr<const Pyramid> *pyramid) const {
+    bool Loader::cached(const std::filesystem::path &file, Decode::Info *info,
+                        std::shared_ptr<const Pyramid> *pyramid) const {
         const std::scoped_lock hold(_guard);
 
         const auto found = _cache.find(file);
@@ -374,7 +405,8 @@ namespace tiv {
         // A pyramid on disk costs a pass over the whole file, so only the image on screen makes
         // one, and an HDR one only once it is known what display the pyramid is for.
         if (entry.streamed) {
-            return file == _request.current && entry.store == nullptr && entry.error.empty() && (!entry.info.hdr || _displayKnown);
+            return file == _request.current && entry.tileCache == nullptr && entry.error.empty()
+                   && (!entry.info.hdr || _displayKnown);
         }
 
         const bool animate = file == _request.current && entry.info.frames > 1 && entry.animation == nullptr;
@@ -668,7 +700,8 @@ namespace tiv {
                     take_size(decoded, &entry.info);
                 }
 
-                entry.pyramid = std::make_shared<const Pyramid>(Pyramid::build(std::move(decoded), screenWidth / THUMB_DIVISOR, screenHeight / THUMB_DIVISOR));
+                entry.pyramid = std::make_shared<const Pyramid>(
+                        Pyramid::build(std::move(decoded), screenWidth / THUMB_DIVISOR, screenHeight / THUMB_DIVISOR));
 
                 return true;
             } catch (const std::bad_alloc &) {
@@ -716,42 +749,55 @@ namespace tiv {
             waiting = entry.info.hdr && !_displayKnown;
         }
 
-        // Kept without a store, and wants_job() picks it up again once the display is said.
+        // Kept without a tile cache, and wants_job() picks it up again once the display is said.
         if (waiting) {
             store(job.file, std::move(entry));
 
             return;
         }
 
-        entry.store = Store::open(job.file, entry.display);
+        entry.tileCache = TileCache::open(job.file, entry.display);
 
         bool build = false;
 
         {
             const std::scoped_lock hold(_guard);
 
-            if (const auto found = std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == job.file; }); found != _jobs.end()) {
+            if (const auto found =
+                        std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == job.file; });
+                found != _jobs.end()) {
                 found->streaming = true;
                 found->info = entry.info;
             }
 
-            build = entry.store == nullptr && job.file == _request.current;
+            build = entry.tileCache == nullptr && job.file == _request.current;
 
             if (build) {
                 _progress.store(0.0F, std::memory_order_relaxed);
-                post({_request.generation, Kind::Building, entry.info, nullptr, {}, false, nullptr, nullptr});
+                post({
+                        .generation = _request.generation,
+                        .kind = Kind::Building,
+                        .info = entry.info,
+                        .pyramid = nullptr,
+                        .error = {},
+                        .unsupported = false,
+                        .animation = nullptr,
+                        .tileCache = nullptr,
+                });
             }
         }
 
         if (build) {
             // A decoder that holds much of the image would take the system down with it.
-            const std::uint64_t needed = Decode::stream_bytes(job.file, Store::TILE);
+            const std::uint64_t needed = Decode::stream_bytes(job.file, TileCache::TILE);
             const std::uint64_t free = Memory::available();
 
             if (needed > free) {
-                entry.error = std::format("{}: needs {:.1f} GB of memory to decode, {:.1f} GB is free", job.file.string(), static_cast<double>(needed) / 1e9, static_cast<double>(free) / 1e9);
+                entry.error =
+                        std::format("{}: needs {:.1f} GB of memory to decode, {:.1f} GB is free", job.file.string(),
+                                    static_cast<double>(needed) / 1e9, static_cast<double>(free) / 1e9);
             } else {
-                entry.store = Store::build(job.file, entry.display, &_progress, &entry.error, job.abort.get());
+                entry.tileCache = TileCache::build(job.file, entry.display, &_progress, &entry.error, job.abort.get());
             }
         }
 
@@ -796,7 +842,8 @@ namespace tiv {
             return;
         }
 
-        const std::size_t estimate = std::min(pyramid_bytes(capped(info)) * static_cast<std::size_t>(info.frames), MAX_ANIMATION_BYTES);
+        const std::size_t estimate =
+                std::min(pyramid_bytes(capped(info)) * static_cast<std::size_t>(info.frames), MAX_ANIMATION_BYTES);
 
         if (!admit(job, estimate)) {
             return;
@@ -826,7 +873,11 @@ namespace tiv {
                 return;
             }
 
-            animation->frames.push_back({std::make_shared<const Pyramid>(Pyramid::build(std::move(frame.bitmap), thumbWidth, thumbHeight)), frame.delay});
+            animation->frames.push_back({
+                    .pyramid = std::make_shared<const Pyramid>(
+                            Pyramid::build(std::move(frame.bitmap), thumbWidth, thumbHeight)),
+                    .delay = frame.delay,
+            });
         }
 
         store_frames(job.file, std::move(animation));
@@ -912,8 +963,8 @@ namespace tiv {
             _trash.push_back(std::move(entry.pyramid));
         }
 
-        if (entry.store != nullptr) {
-            _trash.push_back(std::move(entry.store));
+        if (entry.tileCache != nullptr) {
+            _trash.push_back(std::move(entry.tileCache));
         }
 
         release_animation(entry);
@@ -932,16 +983,16 @@ namespace tiv {
         for (const Job &job : _jobs) {
             const int at = rank(job.file);
 
-            if (at == FAR || (job.whole && !near(job.file)) || ((job.frames || job.streaming) && job.file != _request.current)) {
+            if (at == FAR || (job.whole && !near(job.file))
+                || ((job.frames || job.streaming) && job.file != _request.current)) {
                 job.abort->request();
             }
         }
     }
 
-    // Full resolution and frames stay only for the current image and its neighbours. Beyond
-    // the budget, the files farthest from the current go, least recently wanted first, then
-    // the far end of the window itself, then the neighbours' frames, and last of all the
-    // neighbours drop to the screen. The current image is never touched.
+    // Full resolution and frames stay only for the current image and its neighbours. Over budget, the
+    // farthest files go, least recently wanted first, then the far end of the window, then the neighbours'
+    // frames, and last the neighbours drop to the screen. The current image is never touched.
     void Loader::trim() {
         evict_outside();
 
@@ -1039,17 +1090,44 @@ namespace tiv {
 
     void Loader::post_cached(const Entry &entry) {
         if (!entry.error.empty()) {
-            post({_request.generation, Kind::Failed, entry.info, nullptr, entry.error, entry.unsupported, nullptr, nullptr});
+            post({
+                    .generation = _request.generation,
+                    .kind = Kind::Failed,
+                    .info = entry.info,
+                    .pyramid = nullptr,
+                    .error = entry.error,
+                    .unsupported = entry.unsupported,
+                    .animation = nullptr,
+                    .tileCache = nullptr,
+            });
 
             return;
         }
 
         if (entry.streamed) {
-            if (entry.store != nullptr) {
-                post({_request.generation, Kind::Full, entry.info, nullptr, {}, false, nullptr, entry.store});
+            if (entry.tileCache != nullptr) {
+                post({
+                        .generation = _request.generation,
+                        .kind = Kind::Full,
+                        .info = entry.info,
+                        .pyramid = nullptr,
+                        .error = {},
+                        .unsupported = false,
+                        .animation = nullptr,
+                        .tileCache = entry.tileCache,
+                });
             } else {
                 _progress.store(0.0F, std::memory_order_relaxed);
-                post({_request.generation, Kind::Building, entry.info, nullptr, {}, false, nullptr, nullptr});
+                post({
+                        .generation = _request.generation,
+                        .kind = Kind::Building,
+                        .info = entry.info,
+                        .pyramid = nullptr,
+                        .error = {},
+                        .unsupported = false,
+                        .animation = nullptr,
+                        .tileCache = nullptr,
+                });
             }
 
             return;
@@ -1057,7 +1135,16 @@ namespace tiv {
 
         const bool full = entry.whole || Decode::scalable(entry.info.kind);
 
-        post({_request.generation, full ? Kind::Full : Kind::Preview, entry.info, entry.pyramid, {}, false, entry.animation, nullptr});
+        post({
+                .generation = _request.generation,
+                .kind = full ? Kind::Full : Kind::Preview,
+                .info = entry.info,
+                .pyramid = entry.pyramid,
+                .error = {},
+                .unsupported = false,
+                .animation = entry.animation,
+                .tileCache = nullptr,
+        });
     }
 
     void Loader::post(Result result) {

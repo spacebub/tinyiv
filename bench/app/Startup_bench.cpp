@@ -21,7 +21,6 @@
 
 namespace bench {
     namespace {
-        // Listing and sorting the folder around the opened file.
         void Startup_folder(benchmark::State &state, const std::filesystem::path &file) {
             for ([[maybe_unused]] auto step : state) {
                 tiv::Folder folder;
@@ -36,7 +35,7 @@ namespace bench {
             }
         }
 
-        // A window and a renderer, made and dropped. SDL itself stays up.
+        // SDL stays initialised, so only the window and renderer are measured.
         void Startup_window(benchmark::State &state) {
             if (Headless::renderer() == nullptr) {
                 state.SkipWithMessage("no renderer");
@@ -56,7 +55,8 @@ namespace bench {
     }
 
     void register_startup() {
-        benchmark::RegisterBenchmark("Startup_folder", Startup_folder, Corpus::file("small.jpg"))->Unit(benchmark::kMicrosecond);
+        benchmark::RegisterBenchmark("Startup_folder", Startup_folder, Corpus::file("small.jpg"))
+                ->Unit(benchmark::kMicrosecond);
         benchmark::RegisterBenchmark("Startup_window", Startup_window)->Unit(benchmark::kMillisecond)->UseRealTime();
     }
 }

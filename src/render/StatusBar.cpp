@@ -27,10 +27,10 @@ namespace tiv {
         constexpr float HEIGHT = 26.0F;
         constexpr std::size_t CUT_MARK = 3;
 
-        constexpr SDL_Color BACKGROUND{24, 24, 24, 255};
-        constexpr SDL_Color BADGE{24, 24, 24, 216};
-        constexpr SDL_Color TEXT{220, 220, 220, 255};
-        constexpr SDL_Color SWEEP{220, 220, 220, 255};
+        constexpr SDL_Color BACKGROUND{.r = 24, .g = 24, .b = 24, .a = 255};
+        constexpr SDL_Color BADGE{.r = 24, .g = 24, .b = 24, .a = 216};
+        constexpr SDL_Color TEXT{.r = 220, .g = 220, .b = 220, .a = 255};
+        constexpr SDL_Color SWEEP{.r = 220, .g = 220, .b = 220, .a = 255};
 
         constexpr float SWEEP_HEIGHT = 2.0F;
         // The sweep crosses the bar in this many ticks.
@@ -45,12 +45,16 @@ namespace tiv {
             return text + "  " + SPINNER.at(tick() % SPINNER.size());
         }
 
-        // A short highlight running left to right along the top of the area, over and over.
         void sweep(SDL_Renderer *renderer, const SDL_FRect &area, const float scale) {
             const float length = area.w / 6.0F;
             const float travel = area.w + length;
             const float at = (static_cast<float>(tick() % SWEEP_TICKS) / SWEEP_TICKS * travel) - length;
-            const SDL_FRect line{area.x + std::max(at, 0.0F), area.y, std::min(at + length, area.w) - std::max(at, 0.0F), SWEEP_HEIGHT * scale};
+            const SDL_FRect line{
+                    .x = area.x + std::max(at, 0.0F),
+                    .y = area.y,
+                    .w = std::min(at + length, area.w) - std::max(at, 0.0F),
+                    .h = SWEEP_HEIGHT * scale,
+            };
 
             if (line.w <= 0.0F) {
                 return;
@@ -97,8 +101,14 @@ namespace tiv {
         return static_cast<int>(std::lround(HEIGHT * scale));
     }
 
-    void StatusBar::draw(SDL_Renderer *renderer, const Rect &bar, const float scale, const std::string &left, const std::string &right, const bool loading) {
-        const SDL_FRect area{static_cast<float>(bar.x), static_cast<float>(bar.y), static_cast<float>(bar.width), static_cast<float>(bar.height)};
+    void StatusBar::draw(SDL_Renderer *renderer, const Rect &bar, const float scale, const std::string &left,
+                         const std::string &right, const bool loading) {
+        const SDL_FRect area{
+                .x = static_cast<float>(bar.x),
+                .y = static_cast<float>(bar.y),
+                .w = static_cast<float>(bar.width),
+                .h = static_cast<float>(bar.height),
+        };
 
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
         SDL_SetRenderDrawColor(renderer, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, BACKGROUND.a);
@@ -118,12 +128,13 @@ namespace tiv {
         text_at(renderer, area.x + area.w - padding - rightWidth, y, scale, rightText);
     }
 
-    void StatusBar::badge(SDL_Renderer *renderer, const double x, const double y, const float scale, const std::string &given, const bool loading) {
+    void StatusBar::badge(SDL_Renderer *renderer, const double x, const double y, const float scale,
+                          const std::string &given, const bool loading) {
         const std::string text = loading ? spinning(given) : given;
         const float padding = PADDING * scale;
         const float width = badge_width(text, scale);
         const float height = HEIGHT * scale;
-        const SDL_FRect area{static_cast<float>(x), static_cast<float>(y) - height, width, height};
+        const SDL_FRect area{.x = static_cast<float>(x), .y = static_cast<float>(y) - height, .w = width, .h = height};
 
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer, BADGE.r, BADGE.g, BADGE.b, BADGE.a);
@@ -161,9 +172,9 @@ namespace tiv {
             return which >= 0 && which < 4 ? TURNS.at(static_cast<std::size_t>(which)) : -1;
         }
 
-        // Characters, not bytes.
-        std::size_t length(const std::string_view text) {
-            return static_cast<std::size_t>(std::ranges::count_if(text, [](const char c) { return (static_cast<unsigned char>(c) & 0xC0) != 0x80; }));
+        std::size_t code_points(const std::string_view text) {
+            return static_cast<std::size_t>(std::ranges::count_if(
+                    text, [](const char c) { return (static_cast<unsigned char>(c) & 0xC0U) != 0x80U; }));
         }
 
         // A shaft and a head filling the glyph cell at (x, y), turned from pointing right.
@@ -171,30 +182,48 @@ namespace tiv {
             // As thick as a stroke of the font, which is one of its eight pixels.
             constexpr float SHAFT = 1.0F / 16.0F;
             // In cells from the centre, pointing right: the head, then the shaft as two triangles.
-            constexpr std::array<SDL_FPoint, 9> SHAPE = {{
-                    {0.4F, 0.0F}, {0.0F, -0.3F}, {0.0F, 0.3F},
-                    {-0.4F, -SHAFT}, {0.05F, -SHAFT}, {0.05F, SHAFT},
-                    {-0.4F, -SHAFT}, {0.05F, SHAFT}, {-0.4F, SHAFT},
-            }};
+            constexpr std::array<SDL_FPoint, 9> SHAPE = {
+                    {
+                            {.x = 0.4F, .y = 0.0F},
+                            {.x = 0.0F, .y = -0.3F},
+                            {.x = 0.0F, .y = 0.3F},
+                            {.x = -0.4F, .y = -SHAFT},
+                            {.x = 0.05F, .y = -SHAFT},
+                            {.x = 0.05F, .y = SHAFT},
+                            {.x = -0.4F, .y = -SHAFT},
+                            {.x = 0.05F, .y = SHAFT},
+                            {.x = -0.4F, .y = SHAFT},
+                    },
+            };
             const float half = size / 2.0F;
             std::array<SDL_Vertex, 9> vertices{};
-            const SDL_FColor colour{TEXT.r / 255.0F, TEXT.g / 255.0F, TEXT.b / 255.0F, TEXT.a / 255.0F};
+            const SDL_FColor colour{
+                    .r = TEXT.r / 255.0F,
+                    .g = TEXT.g / 255.0F,
+                    .b = TEXT.b / 255.0F,
+                    .a = TEXT.a / 255.0F,
+            };
 
             for (std::size_t i = 0; i < SHAPE.size(); ++i) {
                 SDL_FPoint p = SHAPE.at(i);
 
                 for (int turn = 0; turn < quarters; ++turn) {
-                    p = {-p.y, p.x};
+                    p = {.x = -p.y, .y = p.x};
                 }
 
-                vertices.at(i) = {{x + half + (p.x * size), y + half + (p.y * size)}, colour, {0.0F, 0.0F}};
+                vertices.at(i) = {
+                        .position = {.x = x + half + (p.x * size), .y = y + half + (p.y * size)},
+                        .color = colour,
+                        .tex_coord = {.x = 0.0F, .y = 0.0F},
+                };
             }
 
             SDL_RenderGeometry(renderer, nullptr, vertices.data(), static_cast<int>(vertices.size()), nullptr, 0);
         }
 
         // Like text_at(), with the arrows drawn where they fall.
-        void symbols_at(SDL_Renderer *renderer, const float x, const float y, const float scale, const std::string_view text) {
+        void symbols_at(SDL_Renderer *renderer, const float x, const float y, const float scale,
+                        const std::string_view text) {
             std::size_t run = 0;
             float at = x;
 
@@ -208,7 +237,7 @@ namespace tiv {
                 }
 
                 text_at(renderer, at, y, scale, std::string(text.substr(run, i - run)));
-                at += static_cast<float>(length(text.substr(run, i - run))) * glyph(scale);
+                at += static_cast<float>(code_points(text.substr(run, i - run))) * glyph(scale);
                 arrow(renderer, at, y, glyph(scale), quarters);
                 at += glyph(scale);
                 i += ARROW_BYTES;
@@ -222,7 +251,7 @@ namespace tiv {
             std::size_t widest = 0;
 
             for (const StatusBar::Row &row : rows) {
-                widest = std::max(widest, length(row.*side));
+                widest = std::max(widest, code_points(row.*side));
             }
 
             return widest;
@@ -232,15 +261,28 @@ namespace tiv {
     Rect StatusBar::table_box(const Rect &area, const float scale, const std::span<const Row> rows) {
         const double padding = 2.0 * PADDING * scale;
         const double line = glyph(scale) * TABLE_LINE;
-        const double width = (static_cast<double>(column(rows, &Row::left) + TABLE_GAP + column(rows, &Row::right)) * glyph(scale)) + (2.0 * padding);
+        const double width =
+                (static_cast<double>(column(rows, &Row::left) + TABLE_GAP + column(rows, &Row::right)) * glyph(scale))
+                + (2.0 * padding);
         const double height = (static_cast<double>(rows.size()) * line) + (2.0 * padding) - (line - glyph(scale));
 
-        return {area.x + ((area.width - width) / 2.0), area.y + ((area.height - height) / 2.0), width, height};
+        return {
+                .x = area.x + ((area.width - width) / 2.0),
+                .y = area.y + ((area.height - height) / 2.0),
+                .width = width,
+                .height = height,
+        };
     }
 
-    void StatusBar::table(SDL_Renderer *renderer, const Rect &area, const float scale, const std::span<const Row> rows) {
+    void StatusBar::table(SDL_Renderer *renderer, const Rect &area, const float scale,
+                          const std::span<const Row> rows) {
         const Rect placed = table_box(area, scale, rows);
-        const SDL_FRect box{static_cast<float>(placed.x), static_cast<float>(placed.y), static_cast<float>(placed.width), static_cast<float>(placed.height)};
+        const SDL_FRect box{
+                .x = static_cast<float>(placed.x),
+                .y = static_cast<float>(placed.y),
+                .w = static_cast<float>(placed.width),
+                .h = static_cast<float>(placed.height),
+        };
         const float padding = 2.0F * PADDING * scale;
         const float right = static_cast<float>(column(rows, &Row::left) + TABLE_GAP) * glyph(scale);
 

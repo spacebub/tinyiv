@@ -47,7 +47,7 @@ namespace bench {
             state.SetBytesProcessed(static_cast<std::int64_t>(BIG_WIDTH) * BIG_HEIGHT * 4 * state.iterations());
         }
 
-        // The zeroing vector the bitmap used to be.
+        // Baseline for Bitmap_allocate_touch: a vector zeroes what it allocates.
         void Bitmap_vector_zeroed(benchmark::State &state) {
             for ([[maybe_unused]] auto step : state) {
                 std::vector<std::uint8_t> held(static_cast<std::size_t>(BIG_WIDTH) * BIG_HEIGHT * 4);
@@ -97,7 +97,7 @@ namespace bench {
             state.SetBytesProcessed(static_cast<std::int64_t>(std::filesystem::file_size(file)) * state.iterations());
         }
 
-        // The byte by byte iterator read the decoders used to start with.
+        // Baseline for Read_whole and Mapped_open: a byte by byte iterator read.
         void Read_istreambuf(benchmark::State &state, const std::filesystem::path &file) {
             for ([[maybe_unused]] auto step : state) {
                 std::ifstream in(file, std::ios::binary);
@@ -112,7 +112,8 @@ namespace bench {
     }
 
     void register_bitmap() {
-        benchmark::RegisterBenchmark("Bitmap_allocate_touch/128MP", Bitmap_allocate_touch)->Unit(benchmark::kMillisecond);
+        benchmark::RegisterBenchmark("Bitmap_allocate_touch/128MP", Bitmap_allocate_touch)
+                ->Unit(benchmark::kMillisecond);
         benchmark::RegisterBenchmark("Bitmap_vector_zeroed/128MP", Bitmap_vector_zeroed)->Unit(benchmark::kMillisecond);
 
         const std::filesystem::path file = Corpus::file("noise.png");

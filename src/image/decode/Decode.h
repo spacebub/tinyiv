@@ -102,27 +102,24 @@ namespace tiv::Decode {
     // Reads the header only.
     bool probe(const std::filesystem::path &file, Info *info, std::string *error = nullptr);
 
-    // Decodes straight into a bitmap as stored, the orientation left for drawing. For an SDR
-    // display HDR is tone mapped to RGBA8, or brought down by its gain map where the base
-    // rendition is HDR. For an HDR display it comes out PQ, rolled off into the display's
-    // headroom, and a gain map is weighed for it. Everything else is RGBA8. The
-    // box is in the image's shown orientation. A box smaller than the image asks for the
-    // size the image would have fitted into it: formats that scale cheaply deliver that
-    // size, every other one delivers the image whole and leaves the shrinking to the caller.
-    // Scalable formats render to fit the box, larger or smaller. Force makes every format
-    // deliver a size within the box without ever holding the image whole, for images too
-    // large for that.
     enum class Fit : std::uint8_t {
+        // A box smaller than the image asks for the size fitted into it: formats that scale cheaply
+        // deliver that size, the rest deliver the image whole and leave the shrinking to the caller.
         Cheap,
+        // Every format delivers a size within the box without ever holding the image whole.
         Force,
     };
 
-    bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error = nullptr, Abort *abort = nullptr, Fit fit = Fit::Cheap,
-              const Tone::Display &display = {});
+    // Decodes into a bitmap as stored, the orientation left for drawing, the box in the shown orientation.
+    // RGBA8 unless HDR goes to an HDR display, as PQ rolled off into its headroom with any gain map weighed.
+    // For SDR, HDR is tone mapped or brought down by its gain map. Scalable formats fit the box, larger or smaller.
+    bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error = nullptr,
+              Abort *abort = nullptr, Fit fit = Fit::Cheap, const Tone::Display &display = {});
 
     // Part of a scalable image rendered at the scale, the part given in pixels of the image
     // at that scale.
-    bool render(const std::filesystem::path &file, double scale, int x, int y, int width, int height, Bitmap *out, std::string *error = nullptr, Abort *abort = nullptr);
+    bool render(const std::filesystem::path &file, double scale, int x, int y, int width, int height, Bitmap *out,
+                std::string *error = nullptr, Abort *abort = nullptr);
 
     struct Frame {
         Bitmap bitmap;
@@ -132,16 +129,17 @@ namespace tiv::Decode {
 
     // Every frame of an animation, each shrunk by the same integer factor as far as it takes
     // for all of them to fit in the bytes given.
-    bool load_frames(const std::filesystem::path &file, std::size_t maxBytes, std::vector<Frame> *out, std::string *error = nullptr, Abort *abort = nullptr);
+    bool load_frames(const std::filesystem::path &file, std::size_t maxBytes, std::vector<Frame> *out,
+                     std::string *error = nullptr, Abort *abort = nullptr);
 
-    // Hands the image over as stored, top to bottom, in bands of the rows given, so an image
-    // of any size decodes in the memory of one band. Begin hears the size first, whether the
-    // image has alpha and how the bands are encoded, as load() would for the display. Either
-    // returning false stops the decode.
+    // Hands the image over as stored, top to bottom, in bands of the rows given, so any size decodes in
+    // the memory of one band. Begin first hears the size, the alpha and the bands' encoding, chosen as
+    // load() would for the display. Either returning false stops the decode.
     using Begin = std::function<bool(int width, int height, bool alpha, Bitmap::Encoding encoding)>;
     using Take = std::function<bool(int y, int rows, std::span<const std::uint8_t> pixels)>;
 
-    bool stream(const std::filesystem::path &file, int rows, const Begin &begin, const Take &take, std::string *error = nullptr, Abort *abort = nullptr, const Tone::Display &display = {});
+    bool stream(const std::filesystem::path &file, int rows, const Begin &begin, const Take &take,
+                std::string *error = nullptr, Abort *abort = nullptr, const Tone::Display &display = {});
 
     // About the most memory stream() holds for the file in bands of the rows given, for the
     // formats whose decoder holds much of the image. Zero for the rest.

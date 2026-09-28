@@ -13,12 +13,12 @@
 
 namespace tiv {
     std::size_t Animation::bytes() const {
-        return std::accumulate(frames.begin(), frames.end(), std::size_t{0}, [](const std::size_t sum, const Frame &frame) {
-            return sum + frame.pyramid->bytes();
-        });
+        return std::accumulate(frames.begin(), frames.end(), std::size_t{0},
+                               [](const std::size_t sum, const Frame &frame) { return sum + frame.pyramid->bytes(); });
     }
 
     long Animation::duration() const {
-        return std::accumulate(frames.begin(), frames.end(), 0L, [](const long sum, const Frame &frame) { return sum + frame.delay; });
+        return std::accumulate(frames.begin(), frames.end(), 0L,
+                               [](const long sum, const Frame &frame) { return sum + frame.delay; });
     }
 }

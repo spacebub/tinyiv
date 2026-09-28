@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 # Read by the vcpkg toolchain in project(). The release only triplet builds the dependencies in
 # half the time. A build tree configured on another triplet keeps it, host tools included, as
 # the toolchain caches only the target triplet.
+# https://learn.microsoft.com/en-us/vcpkg/users/buildsystems/cmake-integration#vcpkg_target_triplet
 if (CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
     set(VCPKG_TARGET_TRIPLET x64-windows-release CACHE STRING "vcpkg triplet the dependencies are built for")
     set(VCPKG_HOST_TRIPLET x64-windows-release CACHE STRING "vcpkg triplet the build tools are built for")
@@ -39,8 +40,10 @@ if (MSVC)
             "/GS"
             "/arch:AVX2"
             # jmp_buf is 16 byte aligned on x64, which pads the libjpeg error struct around it.
+            # https://learn.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-4-c4324
             "/wd4324"
             # libjpeg and libpng report errors by longjmp only, which unwinds on x64 MSVC.
+            # https://learn.microsoft.com/en-us/cpp/error-messages/compiler-warnings/compiler-warning-level-4-c4611
             "/wd4611"
             "$<$<CONFIG:RELEASE>:/O2;/GL;/Gw;/Gy>")
 
@@ -61,7 +64,8 @@ else ()
 endif ()
 
 # pkg-config resolves one configuration, and with no build type the vcpkg toolchain puts its
-# debug tree first, so every configuration would link the debug libraries.
+# debug tree first, so every configuration would link the debug libraries. See
+# z_vcpkg_add_vcpkg_to_cmake_path in vcpkg's scripts/buildsystems/vcpkg.cmake.
 get_property(TIV_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 
 if (DEFINED VCPKG_INSTALLED_DIR AND EXISTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug"
@@ -80,6 +84,7 @@ pkg_check_modules(CODECS REQUIRED IMPORTED_TARGET libwebp libjxl libjxl_threads 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 include(DownloadCache)
 include(Embed)
+include(Format)
 include(GitRevision)
 
 add_subdirectory(src)

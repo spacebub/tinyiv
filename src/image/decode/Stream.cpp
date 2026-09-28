@@ -22,7 +22,8 @@
 #include "image/decode/Vips.h"
 
 namespace tiv {
-    bool Decode::stream(const std::filesystem::path &file, const int rows, const Begin &begin, const Take &take, std::string *error, Abort *abort, const Tone::Display &display) {
+    bool Decode::stream(const std::filesystem::path &file, const int rows, const Begin &begin, const Take &take,
+                        std::string *error, Abort *abort, const Tone::Display &display) {
         if (Mapped mapped; Mapped::open(file, &mapped) && sniff(mapped.data()) == Format::Jxl) {
             const Direct direct = Jxl::stream(mapped.data(), rows, begin, take, abort, display);
 
@@ -39,7 +40,8 @@ namespace tiv {
 
         try {
             // Sequential, so each band decodes as it is asked for and nothing above it stays.
-            const vips::VImage image = vips::VImage::new_from_file(file.string().c_str(), vips::VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
+            const vips::VImage image = vips::VImage::new_from_file(
+                    file.string().c_str(), vips::VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
             const bool alpha = image.has_alpha();
             const Vips::Prepared prepared = Vips::prepare(image, Vips::container_tone(file), display);
             const int width = prepared.image.width();

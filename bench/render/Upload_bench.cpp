@@ -51,7 +51,8 @@ namespace bench {
 
             for ([[maybe_unused]] auto step : state) {
                 for (int i = 0; i < BATCH; ++i) {
-                    SDL_Texture *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, size, size);
+                    SDL_Texture *texture =
+                            SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, size, size);
 
                     SDL_UpdateTexture(texture, nullptr, pixels->data(), static_cast<int>(pixels->pitch()));
                     textures.push_back(texture);
@@ -82,7 +83,7 @@ namespace bench {
             }
 
             tiv::Tiles tiles(renderer, Headless::max_texture(), grey(13056, 9792));
-            const tiv::Rect view{4000.0, 3000.0, 3840.0, 2160.0};
+            const tiv::Rect view{.x = 4000.0, .y = 3000.0, .width = 3840.0, .height = 2160.0};
 
             std::size_t uploaded = 0;
 
@@ -96,7 +97,8 @@ namespace bench {
             }
 
             state.SetBytesProcessed(static_cast<std::int64_t>(uploaded) * state.iterations());
-            state.counters.insert_or_assign("mb_per_view", benchmark::Counter(static_cast<double>(uploaded) / (1024.0 * 1024.0)));
+            state.counters.insert_or_assign("mb_per_view",
+                                            benchmark::Counter(static_cast<double>(uploaded) / (1024.0 * 1024.0)));
         }
 
         // A frame of draw calls at fit, with every tile resident.
@@ -111,7 +113,8 @@ namespace bench {
 
             tiv::Canvas canvas(renderer, Headless::max_texture());
             tiv::Viewport viewport;
-            auto pyramid = std::make_shared<const tiv::Pyramid>(tiv::Pyramid::build(tiv::Bitmap::allocate(6656, 4992), 960, 540));
+            auto pyramid = std::make_shared<const tiv::Pyramid>(
+                    tiv::Pyramid::build(tiv::Bitmap::allocate(6656, 4992), 960, 540));
 
             viewport.set_area(3840.0, 2160.0);
             viewport.set_image(6656, 4992);
@@ -130,9 +133,15 @@ namespace bench {
     }
 
     void register_upload() {
-        benchmark::RegisterBenchmark("Upload_static/1024", Upload_static, 1024)->Unit(benchmark::kMillisecond)->UseRealTime();
-        benchmark::RegisterBenchmark("Upload_static/2048", Upload_static, 2048)->Unit(benchmark::kMillisecond)->UseRealTime();
-        benchmark::RegisterBenchmark("Tiles_visible_4k/128MP", Tiles_visible)->Unit(benchmark::kMillisecond)->UseRealTime();
+        benchmark::RegisterBenchmark("Upload_static/1024", Upload_static, 1024)
+                ->Unit(benchmark::kMillisecond)
+                ->UseRealTime();
+        benchmark::RegisterBenchmark("Upload_static/2048", Upload_static, 2048)
+                ->Unit(benchmark::kMillisecond)
+                ->UseRealTime();
+        benchmark::RegisterBenchmark("Tiles_visible_4k/128MP", Tiles_visible)
+                ->Unit(benchmark::kMillisecond)
+                ->UseRealTime();
         benchmark::RegisterBenchmark("Canvas_draw/33MP", Canvas_draw)->Unit(benchmark::kMicrosecond)->UseRealTime();
     }
 }

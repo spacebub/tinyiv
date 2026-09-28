@@ -28,7 +28,8 @@ namespace tiv::StatusBar {
 
     // The left text is cut to what fits beside the right one. While loading, a highlight
     // sweeps along the top edge and a spinner follows the right text.
-    void draw(SDL_Renderer *renderer, const Rect &bar, float scale, const std::string &left, const std::string &right, bool loading);
+    void draw(SDL_Renderer *renderer, const Rect &bar, float scale, const std::string &left, const std::string &right,
+              bool loading);
 
     // A small dark box with one line of text, its bottom left corner at (x, y), with a
     // spinner after the text while loading.

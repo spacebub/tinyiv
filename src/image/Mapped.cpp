@@ -29,9 +29,9 @@
 
 namespace tiv {
     namespace {
-        // A file up to this size is read ahead whole, for the decoder about to go through it.
-        // A larger one is streamed, or only sniffed and probed, so just its head is, where the
-        // headers lie: asking for all of an image larger than memory fills it and stalls the disk.
+        // A file up to this size is read ahead whole, for the decoder about to go through it. A larger one is
+        // streamed or only probed, so just its head is read ahead: asking for all of an image larger than
+        // memory fills it and stalls the disk.
         constexpr std::size_t READ_AHEAD_WHOLE = std::size_t{1} << 30U;
         constexpr std::size_t READ_AHEAD_HEAD = std::size_t{16} << 20U;
 
@@ -58,7 +58,8 @@ namespace tiv {
         release();
     }
 
-    Mapped::Mapped(Mapped &&other) noexcept : _data(std::exchange(other._data, nullptr)), _size(std::exchange(other._size, 0)) {
+    Mapped::Mapped(Mapped &&other) noexcept
+        : _data(std::exchange(other._data, nullptr)), _size(std::exchange(other._size, 0)) {
     }
 
     Mapped &Mapped::operator=(Mapped &&other) noexcept {
@@ -89,7 +90,8 @@ namespace tiv {
 #ifdef _WIN32
     bool Mapped::open(const std::filesystem::path &file, Mapped *out, std::string *error) {
         // Shared for deleting too, so a file on screen can still be removed or renamed.
-        HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+        HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
 
         if (handle == INVALID_HANDLE_VALUE) {
             fail(error, file, last_error());

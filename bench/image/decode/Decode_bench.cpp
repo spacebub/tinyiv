@@ -33,14 +33,16 @@ namespace bench {
                 return {info.width, info.height};
             }
 
-            const double shrink = std::sqrt(static_cast<double>(tiv::Loader::max_pixels()) / static_cast<double>(info.pixels()));
+            const double shrink =
+                    std::sqrt(static_cast<double>(tiv::Loader::max_pixels()) / static_cast<double>(info.pixels()));
 
             return {static_cast<int>(info.width * shrink), static_cast<int>(info.height * shrink)};
         }
 
         void report(benchmark::State &state, const std::filesystem::path &file, const std::int64_t pixels) {
             state.SetBytesProcessed(static_cast<std::int64_t>(std::filesystem::file_size(file)) * state.iterations());
-            state.counters.insert_or_assign("MP/s", benchmark::Counter(static_cast<double>(pixels) / 1e6, benchmark::Counter::kIsIterationInvariantRate));
+            state.counters.insert_or_assign("MP/s", benchmark::Counter(static_cast<double>(pixels) / 1e6,
+                                                                       benchmark::Counter::kIsIterationInvariantRate));
             Memory::report_peak(state);
         }
 
@@ -69,7 +71,8 @@ namespace bench {
             }
 
             const auto [boxWidth, boxHeight] = capped(info);
-            const tiv::Decode::Fit fit = info.pixels() > tiv::Loader::max_pixels() ? tiv::Decode::Fit::Force : tiv::Decode::Fit::Cheap;
+            const tiv::Decode::Fit fit =
+                    info.pixels() > tiv::Loader::max_pixels() ? tiv::Decode::Fit::Force : tiv::Decode::Fit::Cheap;
 
             Memory::reset_peak();
 
@@ -138,7 +141,8 @@ namespace bench {
                 tiv::Bitmap out;
                 std::string error;
 
-                if (!tiv::Decode::load(file, SCREEN_WIDTH, SCREEN_HEIGHT, &out, &error, nullptr, tiv::Decode::Fit::Force)) {
+                if (!tiv::Decode::load(file, SCREEN_WIDTH, SCREEN_HEIGHT, &out, &error, nullptr,
+                                       tiv::Decode::Fit::Force)) {
                     state.SkipWithError(error);
 
                     break;
@@ -176,9 +180,15 @@ namespace bench {
             const std::string name(spec.name);
 
             benchmark::RegisterBenchmark("Decode_probe/" + name, Decode_probe, file)->Unit(benchmark::kMicrosecond);
-            benchmark::RegisterBenchmark("Decode_full/" + name, Decode_full, file)->Unit(benchmark::kMillisecond)->UseRealTime();
-            benchmark::RegisterBenchmark("Decode_preview/" + name, Decode_preview, file)->Unit(benchmark::kMillisecond)->UseRealTime();
-            benchmark::RegisterBenchmark("Decode_forced/" + name, Decode_forced, file)->Unit(benchmark::kMillisecond)->UseRealTime();
+            benchmark::RegisterBenchmark("Decode_full/" + name, Decode_full, file)
+                    ->Unit(benchmark::kMillisecond)
+                    ->UseRealTime();
+            benchmark::RegisterBenchmark("Decode_preview/" + name, Decode_preview, file)
+                    ->Unit(benchmark::kMillisecond)
+                    ->UseRealTime();
+            benchmark::RegisterBenchmark("Decode_forced/" + name, Decode_forced, file)
+                    ->Unit(benchmark::kMillisecond)
+                    ->UseRealTime();
             benchmark::RegisterBenchmark("Decode_aborted/" + name, Decode_aborted, file)->Unit(benchmark::kMicrosecond);
         }
     }

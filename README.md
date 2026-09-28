@@ -3,7 +3,9 @@
 A small, very fast, GPU rendered image viewer. It decodes on background threads, keeps the
 image on the GPU as tiles of a mipmap pyramid, and prefetches the folder around the file, so
 stepping is instant and gigapixel files pan without a stutter. An image too large for memory
-streams from a pyramid of tiles written to disk on first open, so it opens at full resolution whatever its size. One window, one folder, one image. No configuration, no editing, no extra features.
+streams from a pyramid of tiles written to disk on first open, so it opens at full resolution
+whatever its size. One window, one folder, one image. No configuration, no editing, no extra
+features.
 
 Every format libvips reads is shown. JPEG, PNG, WebP, JPEG XL, BMP, ICO and ICNS go through
 their own decoders, with a cheap DCT scaled preview for large JPEGs. ICO and ICNS show their

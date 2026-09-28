@@ -32,8 +32,10 @@ namespace tiv {
                     return 0;
                 }
 
-                return little ? static_cast<std::uint16_t>(block[at] | (block[at + 1] << 8))
-                              : static_cast<std::uint16_t>((block[at] << 8) | block[at + 1]);
+                return little ? static_cast<std::uint16_t>(block[at]
+                                                           | (static_cast<std::uint32_t>(block[at + 1]) << 8U))
+                              : static_cast<std::uint16_t>((static_cast<std::uint32_t>(block[at]) << 8U)
+                                                           | block[at + 1]);
             }
 
             [[nodiscard]] std::uint32_t u32(const std::size_t at) const {
@@ -41,8 +43,8 @@ namespace tiv {
                     return 0;
                 }
 
-                return little ? static_cast<std::uint32_t>(u16(at)) | (static_cast<std::uint32_t>(u16(at + 2)) << 16)
-                              : (static_cast<std::uint32_t>(u16(at)) << 16) | static_cast<std::uint32_t>(u16(at + 2));
+                return little ? static_cast<std::uint32_t>(u16(at)) | (static_cast<std::uint32_t>(u16(at + 2)) << 16U)
+                              : (static_cast<std::uint32_t>(u16(at)) << 16U) | static_cast<std::uint32_t>(u16(at + 2));
             }
         };
     }
@@ -55,16 +57,16 @@ namespace tiv {
             bool little = true;
 
             void u16(std::vector<std::uint8_t> &out, const std::uint16_t value) const {
-                const auto low = static_cast<std::uint8_t>(value & 0xFF);
-                const auto high = static_cast<std::uint8_t>(value >> 8);
+                const auto low = static_cast<std::uint8_t>(value & 0xFFU);
+                const auto high = static_cast<std::uint8_t>(value >> 8U);
 
                 out.push_back(little ? low : high);
                 out.push_back(little ? high : low);
             }
 
             void u32(std::vector<std::uint8_t> &out, const std::uint32_t value) const {
-                u16(out, static_cast<std::uint16_t>(little ? value & 0xFFFF : value >> 16));
-                u16(out, static_cast<std::uint16_t>(little ? value >> 16 : value & 0xFFFF));
+                u16(out, static_cast<std::uint16_t>(little ? value & 0xFFFFU : value >> 16U));
+                u16(out, static_cast<std::uint16_t>(little ? value >> 16U : value & 0xFFFFU));
             }
         };
 
@@ -92,7 +94,7 @@ namespace tiv {
             return 1;
         }
 
-        Reader reader{block, true};
+        Reader reader{.block = block, .little = true};
 
         if (block[0] == 'M' && block[1] == 'M') {
             reader.little = false;
@@ -138,7 +140,7 @@ namespace tiv {
             return false;
         }
 
-        Reader reader{block, true};
+        Reader reader{.block = block, .little = true};
 
         if (block[0] == 'M' && block[1] == 'M') {
             reader.little = false;
@@ -146,7 +148,7 @@ namespace tiv {
             return false;
         }
 
-        const Writer writer{reader.little};
+        const Writer writer{.little = reader.little};
         const std::size_t ifd = reader.u32(4);
 
         if (reader.u16(2) != MAGIC || ifd < HEADER_BYTES || ifd + 2 > block.size()) {
@@ -182,7 +184,7 @@ namespace tiv {
 
             writer.u32(bytes, static_cast<std::uint32_t>(at));
 
-            return Splice{4, 4, bytes};
+            return Splice{.at = 4, .length = 4, .bytes = bytes};
         };
 
         if (found == count) {
@@ -190,7 +192,7 @@ namespace tiv {
                 return true;
             }
 
-            // Tags stay in ascending order, as the specification asks.
+            // TIFF 6.0, section 2: the entries of an IFD are sorted in ascending order by tag.
             std::vector<std::uint8_t> copy;
             const std::vector<std::uint8_t> added = orientation_entry(writer, orientation);
             const std::size_t split = entries + (insert * ENTRY_BYTES);
@@ -201,7 +203,7 @@ namespace tiv {
             std::ranges::copy(raw(split, end), std::back_inserter(copy));
 
             out->push_back(header(block.size()));
-            out->push_back({block.size(), 0, std::move(copy)});
+            out->push_back({.at = block.size(), .length = 0, .bytes = std::move(copy)});
 
             return true;
         }
@@ -221,11 +223,12 @@ namespace tiv {
             std::ranges::copy(raw(entry + ENTRY_BYTES, end), std::back_inserter(original));
 
             const std::span<const std::uint8_t> before = raw(HEADER_BYTES, ifd);
-            const auto at = std::search(before.begin(), before.end(), std::boyer_moore_horspool_searcher(original.begin(), original.end()));
+            const auto at = std::search(before.begin(), before.end(),
+                                        std::boyer_moore_horspool_searcher(original.begin(), original.end()));
 
             if (at != before.end()) {
                 out->push_back(header(HEADER_BYTES + static_cast<std::size_t>(at - before.begin())));
-                out->push_back({ifd, block.size() - ifd, {}});
+                out->push_back({.at = ifd, .length = block.size() - ifd, .bytes = {}});
 
                 return true;
             }
@@ -235,14 +238,14 @@ namespace tiv {
             std::vector<std::uint8_t> value;
 
             writer.u16(value, static_cast<std::uint16_t>(orientation));
-            out->push_back({entry + 8, 2, std::move(value)});
+            out->push_back({.at = entry + 8, .length = 2, .bytes = std::move(value)});
         }
 
         return true;
     }
 
     std::vector<std::uint8_t> Exif::minimal(const int orientation) {
-        const Writer writer{true};
+        const Writer writer{.little = true};
         std::vector<std::uint8_t> block = {'I', 'I'};
 
         writer.u16(block, MAGIC);
@@ -254,12 +257,14 @@ namespace tiv {
         return block;
     }
 
-    std::vector<std::uint8_t> Exif::apply(const std::span<const std::uint8_t> data, const std::vector<Splice> &splices) {
+    std::vector<std::uint8_t> Exif::apply(const std::span<const std::uint8_t> data,
+                                          const std::vector<Splice> &splices) {
         std::vector<std::uint8_t> held;
         std::size_t from = 0;
 
         for (const Splice &splice : splices) {
-            held.insert(held.end(), data.begin() + static_cast<std::ptrdiff_t>(from), data.begin() + static_cast<std::ptrdiff_t>(splice.at));
+            held.insert(held.end(), data.begin() + static_cast<std::ptrdiff_t>(from),
+                        data.begin() + static_cast<std::ptrdiff_t>(splice.at));
             held.insert(held.end(), splice.bytes.begin(), splice.bytes.end());
             from = splice.at + splice.length;
         }

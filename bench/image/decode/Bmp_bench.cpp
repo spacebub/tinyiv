@@ -28,26 +28,30 @@ namespace bench {
             int height;
         };
 
-        constexpr std::array<Size, 3> SIZES = {{
-                {"4k", 3840, 2160},
-                {"33MP", 6656, 4992},
-                {"128MP", 13056, 9792},
-        }};
+        constexpr std::array<Size, 3> SIZES = {
+                {
+                        {.name = "4k", .width = 3840, .height = 2160},
+                        {.name = "33MP", .width = 6656, .height = 4992},
+                        {.name = "128MP", .width = 13056, .height = 9792},
+                },
+        };
 
         void put16(std::vector<std::uint8_t> &out, const std::size_t at, const std::uint32_t value) {
             out.at(at) = static_cast<std::uint8_t>(value);
-            out.at(at + 1) = static_cast<std::uint8_t>(value >> 8);
+            out.at(at + 1) = static_cast<std::uint8_t>(value >> 8U);
         }
 
         void put32(std::vector<std::uint8_t> &out, const std::size_t at, const std::uint32_t value) {
             put16(out, at, value);
-            put16(out, at + 2, value >> 16);
+            put16(out, at + 2, value >> 16U);
         }
 
-        // A bottom up file with an info header and noise for pixels.
+        // A bottom up file, as a positive height makes it, with an info header and noise for pixels.
+        // https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-bitmapinfoheader
         std::vector<std::uint8_t> file(const Size size, const int depth) {
             constexpr std::size_t HEADERS = 14 + 40;
-            const std::size_t stride = ((static_cast<std::size_t>(size.width) * static_cast<std::size_t>(depth)) + 31) / 32 * 4;
+            const std::size_t stride =
+                    ((static_cast<std::size_t>(size.width) * static_cast<std::size_t>(depth)) + 31) / 32 * 4;
             std::vector<std::uint8_t> held(HEADERS + (stride * static_cast<std::size_t>(size.height)));
             std::uint32_t seed = 12345;
 
@@ -63,13 +67,14 @@ namespace bench {
 
             for (std::size_t i = HEADERS; i < held.size(); ++i) {
                 seed = (seed * 1103515245U) + 12345U;
-                held.at(i) = static_cast<std::uint8_t>(seed >> 16);
+                held.at(i) = static_cast<std::uint8_t>(seed >> 16U);
             }
 
             return held;
         }
 
-        void Bmp_decode(benchmark::State &state, const Size size, const int depth, const int factor, const tiv::Bmp::Kernel kernel) {
+        void Bmp_decode(benchmark::State &state, const Size size, const int depth, const int factor,
+                        const tiv::Bmp::Kernel kernel) {
             if (!tiv::Bmp::supports(kernel)) {
                 state.SkipWithMessage("kernel unsupported here");
 
@@ -98,7 +103,9 @@ namespace bench {
             }
 
             state.SetBytesProcessed(static_cast<std::int64_t>(data.size()) * state.iterations());
-            state.counters.insert_or_assign("MP/s", benchmark::Counter(static_cast<double>(size.width) * size.height / 1e6, benchmark::Counter::kIsIterationInvariantRate));
+            state.counters.insert_or_assign("MP/s",
+                                            benchmark::Counter(static_cast<double>(size.width) * size.height / 1e6,
+                                                               benchmark::Counter::kIsIterationInvariantRate));
         }
     }
 
@@ -108,18 +115,25 @@ namespace bench {
             tiv::Bmp::Kernel kernel;
         };
 
-        constexpr std::array<Named, 2> KERNELS = {{
-                {"scalar", tiv::Bmp::Kernel::Scalar},
-                {"avx2", tiv::Bmp::Kernel::Avx2},
-        }};
+        constexpr std::array<Named, 2> KERNELS = {
+                {
+                        {.name = "scalar", .kernel = tiv::Bmp::Kernel::Scalar},
+                        {.name = "avx2", .kernel = tiv::Bmp::Kernel::Avx2},
+                },
+        };
 
         for (const Size &size : SIZES) {
             for (const int depth : {24, 32}) {
                 for (const Named &kernel : KERNELS) {
-                    const std::string suffix = std::string(kernel.name) + "/" + std::to_string(depth) + "bit/" + size.name;
+                    const std::string suffix =
+                            std::string(kernel.name) + "/" + std::to_string(depth) + "bit/" + size.name;
 
-                    benchmark::RegisterBenchmark("Bmp_decode/" + suffix, Bmp_decode, size, depth, 1, kernel.kernel)->Unit(benchmark::kMillisecond)->UseRealTime();
-                    benchmark::RegisterBenchmark("Bmp_forced/" + suffix, Bmp_decode, size, depth, 3, kernel.kernel)->Unit(benchmark::kMillisecond)->UseRealTime();
+                    benchmark::RegisterBenchmark("Bmp_decode/" + suffix, Bmp_decode, size, depth, 1, kernel.kernel)
+                            ->Unit(benchmark::kMillisecond)
+                            ->UseRealTime();
+                    benchmark::RegisterBenchmark("Bmp_forced/" + suffix, Bmp_decode, size, depth, 3, kernel.kernel)
+                            ->Unit(benchmark::kMillisecond)
+                            ->UseRealTime();
                 }
             }
         }

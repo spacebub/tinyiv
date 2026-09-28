@@ -18,12 +18,6 @@
 #include "view/Viewport.h"
 
 namespace tiv {
-    // The fixed scheme: left drag pans, right drag zooms, Up and Down zoom a step, 0 centres, 1 fits and
-    // 2 shows the image at its own size, the wheel and Left and Right walk the folder, Home
-    // and End jump to its ends, R reads the image from disk again, [ and ] turn the image
-    // left and right, ; and ' flip it vertically and horizontally, Ctrl+S saves how it is
-    // turned, S switches streaming mode, I shows or hides the status bar, Space plays or
-    // pauses an animation, comma and period step it a frame, Ctrl+H shows all of this.
     class Input {
 
     public:
@@ -51,7 +45,7 @@ namespace tiv {
             Redraw,
         };
 
-        // Pixels of drag per doubling of the zoom, roughly.
+        // Natural log of the zoom per pixel of drag: about 139 pixels double it.
         static constexpr double ZOOM_PER_PIXEL = 0.005;
 
         // Two key presses double the zoom.

@@ -18,8 +18,7 @@
 #include "image/Pyramid.h"
 
 namespace tiv {
-    // Which frame of an animation is up and when the next is due. Times are milliseconds on
-    // any steady clock the caller keeps using. It loops for ever.
+    // Times are milliseconds on any steady clock the caller keeps using. It loops for ever.
     class Playback {
 
     public:

@@ -1,8 +1,6 @@
-# Fetched sources, shared across build trees. Empty fetches into the tree.
 set(TIV_DOWNLOAD_CACHE "${CMAKE_SOURCE_DIR}/.download-cache"
-        CACHE PATH "Where fetched sources are kept, shared by every build tree")
+        CACHE PATH "Where fetched sources are kept, shared by every build tree. Empty fetches into each tree")
 
-# Clones once into the cache and points FetchContent at it through FETCHCONTENT_SOURCE_DIR_<NAME>.
 function(tiv_cache_source name repo tag)
     string(TOUPPER ${name} upper)
     string(TOLOWER ${name} lower)
@@ -11,8 +9,9 @@ function(tiv_cache_source name repo tag)
         return()
     endif ()
 
-    # FetchContent writes the path this function hands it back into the cache, where it
-    # would otherwise pin the old tag forever.
+    # A path under the cache was set here on an earlier configure and would pin its tag forever.
+    # Any other path is the user's own override.
+    # https://cmake.org/cmake/help/latest/module/FetchContent.html#variable:FETCHCONTENT_SOURCE_DIR_%3CuppercaseName%3E
     if (FETCHCONTENT_SOURCE_DIR_${upper})
         string(FIND "${FETCHCONTENT_SOURCE_DIR_${upper}}" "${TIV_DOWNLOAD_CACHE}/" at)
 

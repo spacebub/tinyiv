@@ -90,7 +90,6 @@ namespace tiv::Decode {
             return 1;
         }
 
-        // Reads the header into handle. False on a malformed file.
         bool jpeg_open(JpegHandle &handle, const std::span<const std::uint8_t> data) {
             // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp,cppcoreguidelines-pro-bounds-array-to-pointer-decay): libjpeg reports errors by longjmp only.
             if (setjmp(handle.error.jump) != 0) {
@@ -108,8 +107,12 @@ namespace tiv::Decode {
         constexpr unsigned JPEG_DENOM = 8;
 
         Size jpeg_scaled(const jpeg_decompress_struct &info, const unsigned num) {
-            return {static_cast<int>(((static_cast<unsigned long>(info.image_width) * num) + JPEG_DENOM - 1) / JPEG_DENOM),
-                    static_cast<int>(((static_cast<unsigned long>(info.image_height) * num) + JPEG_DENOM - 1) / JPEG_DENOM)};
+            return {
+                    .width = static_cast<int>(((static_cast<unsigned long>(info.image_width) * num) + JPEG_DENOM - 1)
+                                              / JPEG_DENOM),
+                    .height = static_cast<int>(((static_cast<unsigned long>(info.image_height) * num) + JPEG_DENOM - 1)
+                                               / JPEG_DENOM),
+            };
         }
 
         // Only the powers of two have SIMD inverse transforms in libjpeg-turbo. The others
@@ -118,11 +121,11 @@ namespace tiv::Decode {
 
         // The smallest scale that still covers the fitted size, or when forced, the largest
         // that stays within the box.
-        unsigned jpeg_scale(const jpeg_decompress_struct &info, const Size box, const int orientation, const Decode::Fit fit) {
+        unsigned jpeg_scale(const jpeg_decompress_struct &info, const Size box, const int orientation, const Fit fit) {
             const int boxWidth = Orient::swaps(orientation) ? box.height : box.width;
             const int boxHeight = Orient::swaps(orientation) ? box.width : box.height;
 
-            if (fit == Decode::Fit::Force) {
+            if (fit == Fit::Force) {
                 for (const unsigned num : std::views::reverse(JPEG_SCALES)) {
                     const Size size = jpeg_scaled(info, num);
 
@@ -145,9 +148,8 @@ namespace tiv::Decode {
             return JPEG_DENOM;
         }
 
-        // Rows are read into the bitmap, which the caller has sized from output_width and
-        // output_height. False on a libjpeg error or an abort.
-        bool jpeg_read(JpegHandle &handle, Bitmap &target, std::vector<JSAMPROW> &rows, const Decode::Abort *abort) {
+        // The caller sizes target from output_width and output_height.
+        bool jpeg_read(JpegHandle &handle, Bitmap &target, std::vector<JSAMPROW> &rows, const Abort *abort) {
             // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp,cppcoreguidelines-pro-bounds-array-to-pointer-decay): libjpeg reports errors by longjmp only.
             if (setjmp(handle.error.jump) != 0) {
                 return false;
@@ -180,7 +182,9 @@ namespace tiv::Decode {
             return jpeg_finish_decompress(&handle.info) != 0;
         }
 
-        Direct jpeg_decode(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit) {
+        Direct jpeg_decode(const std::filesystem::path &file, const std::span<const std::uint8_t> data,
+                           const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Abort *abort,
+                           const Fit fit) {
             JpegHandle handle;
 
             if (!jpeg_open(handle, data)) {
@@ -196,9 +200,9 @@ namespace tiv::Decode {
             const int orientation = jpeg_orientation(handle.info);
             const auto width = static_cast<int>(handle.info.image_width);
             const auto height = static_cast<int>(handle.info.image_height);
-            Size want{boxWidth, boxHeight};
+            Size want{.width = boxWidth, .height = boxHeight};
 
-            if (fit != Decode::Fit::Force) {
+            if (fit != Fit::Force) {
                 const int shownWidth = Orient::swaps(orientation) ? height : width;
                 const int shownHeight = Orient::swaps(orientation) ? width : height;
 
@@ -212,7 +216,8 @@ namespace tiv::Decode {
 
             jpeg_calc_output_dimensions(&handle.info);
 
-            Bitmap held = Bitmap::allocate(static_cast<int>(handle.info.output_width), static_cast<int>(handle.info.output_height));
+            Bitmap held = Bitmap::allocate(static_cast<int>(handle.info.output_width),
+                                           static_cast<int>(handle.info.output_height));
             std::vector<JSAMPROW> rows(static_cast<std::size_t>(std::max(handle.info.rec_outbuf_height, 1)) + 1);
 
             if (!jpeg_read(handle, held, rows, abort)) {
@@ -227,7 +232,7 @@ namespace tiv::Decode {
         }
 
         // Bands of rows of the height on up to MAX_THREADS threads, until an abort.
-        void parallel_rows(const int height, const std::function<void(int from, int to)> &each, const Decode::Abort *abort) {
+        void parallel_rows(const int height, const std::function<void(int from, int to)> &each, const Abort *abort) {
             const int bands = (height + ABORT_ROWS - 1) / ABORT_ROWS;
             const int wanted = std::min(MAX_THREADS, static_cast<int>(std::thread::hardware_concurrency()));
             std::atomic<int> next = 0;
@@ -249,7 +254,8 @@ namespace tiv::Decode {
 
         // The base rendition lifted by its gain map as far as the display's headroom goes, into
         // PQ in place. Cut short by an abort, it leaves rows of both encodings.
-        bool jpeg_lift(const std::span<const std::uint8_t> data, const Tone::Display &display, Bitmap *base, const Decode::Abort *abort) {
+        bool jpeg_lift(const std::span<const std::uint8_t> data, const Tone::Display &display, Bitmap *base,
+                       const Abort *abort) {
             GainMap::Jpeg gain;
             Bitmap map;
 
@@ -260,22 +266,28 @@ namespace tiv::Decode {
             const float weight = gain.metadata.weight(std::log2(display.headroom));
             constexpr int WHOLE = std::numeric_limits<int>::max();
 
-            if (weight == 0.0F || jpeg_decode("gain map", gain.image, WHOLE, WHOLE, &map, nullptr, abort, Decode::Fit::Cheap) != Direct::Done) {
+            if (weight == 0.0F
+                || jpeg_decode("gain map", gain.image, WHOLE, WHOLE, &map, nullptr, abort, Fit::Cheap)
+                           != Direct::Done) {
                 return false;
             }
 
             const GainMap::Applier applier(gain.metadata, &map, base->width(), base->height(), weight);
             const Tone::Mapper mapper({}, display);
 
-            parallel_rows(base->height(), [&](const int from, const int to) {
-                for (int y = from; y < to; ++y) {
-                    const std::span<std::uint8_t> row = base->row(y);
+            parallel_rows(
+                    base->height(),
+                    [&](const int from, const int to) {
+                        for (int y = from; y < to; ++y) {
+                            const std::span<std::uint8_t> row = base->row(y);
 
-                    mapper.map(std::span<const std::uint8_t>(row), Bitmap::CHANNELS, row, [&applier, y](const std::size_t first, const std::span<float> rgba) {
-                        applier.apply(static_cast<int>(first), y, rgba);
-                    });
-                }
-            }, abort);
+                            mapper.map(std::span<const std::uint8_t>(row), Bitmap::CHANNELS, row,
+                                       [&applier, y](const std::size_t first, const std::span<float> rgba) {
+                                           applier.apply(static_cast<int>(first), y, rgba);
+                                       });
+                        }
+                    },
+                    abort);
 
             base->set_encoding(Bitmap::Encoding::Pq);
 
@@ -283,7 +295,7 @@ namespace tiv::Decode {
         }
     }
 
-    bool Jpeg::probe(const std::span<const std::uint8_t> data, Decode::Info *info) {
+    bool Jpeg::probe(const std::span<const std::uint8_t> data, Info *info) {
         JpegHandle handle;
 
         if (!jpeg_open(handle, data)) {
@@ -305,8 +317,9 @@ namespace tiv::Decode {
         return true;
     }
 
-    Direct Jpeg::load(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort,
-                      const Decode::Fit fit, const Tone::Display &display) {
+    Direct Jpeg::load(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth,
+                      const int boxHeight, Bitmap *out, std::string *error, const Abort *abort, const Fit fit,
+                      const Tone::Display &display) {
         const Direct direct = jpeg_decode(file, data, boxWidth, boxHeight, out, error, abort, fit);
 
         if (direct == Direct::Done && display.hdr() && !jpeg_lift(data, display, out, abort) && aborted(abort)) {

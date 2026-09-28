@@ -44,7 +44,7 @@ namespace tiv {
         constexpr float PQ_TOP = 10000.0F / SDR_WHITE_NITS;
         constexpr std::uint32_t TEN_BITS = 1023;
 
-        // SMPTE ST 2084, in nits: https://www.itu.int/rec/R-REC-BT.2100
+        // The PQ EOTF of SMPTE ST 2084 and BT.2100 table 4, in nits: https://www.itu.int/rec/R-REC-BT.2100
         float pq_nits(const float signal) {
             constexpr double M1 = 2610.0 / 16384.0;
             constexpr double M2 = 2523.0 / 4096.0 * 128.0;
@@ -57,7 +57,7 @@ namespace tiv {
             return static_cast<float>(std::pow(std::max(power - C1, 0.0) / (C2 - (C3 * power)), 1.0 / M1) * 10000.0);
         }
 
-        // The inverse OETF of BT.2100, scene light from 0 to 1.
+        // The inverse HLG OETF of BT.2100 table 5, scene light from 0 to 1.
         float hlg_scene(const float signal) {
             constexpr double A = 0.17883277;
             constexpr double B = 1.0 - (4.0 * A);
@@ -201,18 +201,23 @@ namespace tiv {
         }
 
         Matrix invert(const Matrix &m) {
-            const auto at = [&](const std::size_t row, const std::size_t column) {
-                return m.at((row * 3) + column);
-            };
+            const auto at = [&](const std::size_t row, const std::size_t column) { return m.at((row * 3) + column); };
 
-            const float det = (at(0, 0) * ((at(1, 1) * at(2, 2)) - (at(1, 2) * at(2, 1)))) - (at(0, 1) * ((at(1, 0) * at(2, 2)) - (at(1, 2) * at(2, 0))))
+            const float det = (at(0, 0) * ((at(1, 1) * at(2, 2)) - (at(1, 2) * at(2, 1))))
+                              - (at(0, 1) * ((at(1, 0) * at(2, 2)) - (at(1, 2) * at(2, 0))))
                               + (at(0, 2) * ((at(1, 0) * at(2, 1)) - (at(1, 1) * at(2, 0))));
 
-            return {((at(1, 1) * at(2, 2)) - (at(1, 2) * at(2, 1))) / det, ((at(0, 2) * at(2, 1)) - (at(0, 1) * at(2, 2))) / det,
-                    ((at(0, 1) * at(1, 2)) - (at(0, 2) * at(1, 1))) / det, ((at(1, 2) * at(2, 0)) - (at(1, 0) * at(2, 2))) / det,
-                    ((at(0, 0) * at(2, 2)) - (at(0, 2) * at(2, 0))) / det, ((at(0, 2) * at(1, 0)) - (at(0, 0) * at(1, 2))) / det,
-                    ((at(1, 0) * at(2, 1)) - (at(1, 1) * at(2, 0))) / det, ((at(0, 1) * at(2, 0)) - (at(0, 0) * at(2, 1))) / det,
-                    ((at(0, 0) * at(1, 1)) - (at(0, 1) * at(1, 0))) / det};
+            return {
+                    ((at(1, 1) * at(2, 2)) - (at(1, 2) * at(2, 1))) / det,
+                    ((at(0, 2) * at(2, 1)) - (at(0, 1) * at(2, 2))) / det,
+                    ((at(0, 1) * at(1, 2)) - (at(0, 2) * at(1, 1))) / det,
+                    ((at(1, 2) * at(2, 0)) - (at(1, 0) * at(2, 2))) / det,
+                    ((at(0, 0) * at(2, 2)) - (at(0, 2) * at(2, 0))) / det,
+                    ((at(0, 2) * at(1, 0)) - (at(0, 0) * at(1, 2))) / det,
+                    ((at(1, 0) * at(2, 1)) - (at(1, 1) * at(2, 0))) / det,
+                    ((at(0, 1) * at(2, 0)) - (at(0, 0) * at(2, 1))) / det,
+                    ((at(0, 0) * at(1, 1)) - (at(0, 1) * at(1, 0))) / det,
+            };
         }
 
         // RGB to XYZ from the primaries and the D65 white they share:
@@ -223,18 +228,19 @@ namespace tiv {
                 float y = 0.0F;
             };
 
-            constexpr Xy WHITE{0.3127F, 0.3290F};
+            // Spec: ITU-T H.273 table 2, for BT.709, SMPTE EG 432-1 (P3 D65) and BT.2020.
+            constexpr Xy WHITE{.x = 0.3127F, .y = 0.3290F};
             std::array<Xy, 3> rgb{};
 
             switch (primaries) {
                 case Tone::Primaries::Bt709:
-                    rgb = {Xy{0.640F, 0.330F}, Xy{0.300F, 0.600F}, Xy{0.150F, 0.060F}};
+                    rgb = {Xy{.x = 0.640F, .y = 0.330F}, Xy{.x = 0.300F, .y = 0.600F}, Xy{.x = 0.150F, .y = 0.060F}};
                     break;
                 case Tone::Primaries::P3:
-                    rgb = {Xy{0.680F, 0.320F}, Xy{0.265F, 0.690F}, Xy{0.150F, 0.060F}};
+                    rgb = {Xy{.x = 0.680F, .y = 0.320F}, Xy{.x = 0.265F, .y = 0.690F}, Xy{.x = 0.150F, .y = 0.060F}};
                     break;
                 case Tone::Primaries::Bt2020:
-                    rgb = {Xy{0.708F, 0.292F}, Xy{0.170F, 0.797F}, Xy{0.131F, 0.046F}};
+                    rgb = {Xy{.x = 0.708F, .y = 0.292F}, Xy{.x = 0.170F, .y = 0.797F}, Xy{.x = 0.131F, .y = 0.046F}};
                     break;
             }
 
@@ -251,7 +257,8 @@ namespace tiv {
             Matrix out = columns;
 
             for (std::size_t c = 0; c < 3; ++c) {
-                const float scale = (inverse.at(c * 3) * white.at(0)) + (inverse.at((c * 3) + 1) * white.at(1)) + (inverse.at((c * 3) + 2) * white.at(2));
+                const float scale = (inverse.at(c * 3) * white.at(0)) + (inverse.at((c * 3) + 1) * white.at(1))
+                                    + (inverse.at((c * 3) + 2) * white.at(2));
 
                 for (std::size_t row = 0; row < 3; ++row) {
                     out.at((row * 3) + c) *= scale;
@@ -289,8 +296,12 @@ namespace tiv {
         // For positive x, by polynomials fitted to log2 over [1, 2) and exp2 over [0, 1), within 1e-5.
         TIV_AVX2 __m256 log2_avx2(const __m256 x) {
             const __m256i bits = _mm256_castps_si256(x);
-            const __m256 exponent = _mm256_cvtepi32_ps(_mm256_sub_epi32(_mm256_srli_epi32(bits, 23), _mm256_set1_epi32(127)));
-            const __m256 t = _mm256_sub_ps(_mm256_castsi256_ps(_mm256_or_si256(_mm256_and_si256(bits, _mm256_set1_epi32(0x7FFFFF)), _mm256_set1_epi32(0x3F800000))), _mm256_set1_ps(1.0F));
+            const __m256 exponent =
+                    _mm256_cvtepi32_ps(_mm256_sub_epi32(_mm256_srli_epi32(bits, 23), _mm256_set1_epi32(127)));
+            const __m256 t = _mm256_sub_ps(
+                    _mm256_castsi256_ps(_mm256_or_si256(_mm256_and_si256(bits, _mm256_set1_epi32(0x7FFFFF)),
+                                                        _mm256_set1_epi32(0x3F800000))),
+                    _mm256_set1_ps(1.0F));
             __m256 p = _mm256_set1_ps(0.04392957F);
 
             p = _mm256_add_ps(_mm256_mul_ps(p, t), _mm256_set1_ps(-0.18983641F));
@@ -314,12 +325,14 @@ namespace tiv {
             p = _mm256_add_ps(_mm256_mul_ps(p, f), _mm256_set1_ps(0.69296962F));
             p = _mm256_add_ps(_mm256_mul_ps(p, f), _mm256_set1_ps(1.00000359F));
 
-            const __m256i scale = _mm256_slli_epi32(_mm256_add_epi32(_mm256_cvtps_epi32(whole), _mm256_set1_epi32(127)), 23);
+            const __m256i scale =
+                    _mm256_slli_epi32(_mm256_add_epi32(_mm256_cvtps_epi32(whole), _mm256_set1_epi32(127)), 23);
 
             return _mm256_mul_ps(p, _mm256_castsi256_ps(scale));
         }
 
-        // Interleaved RGBA of eight pixels into planes and back: the even pixels land in the low lane, the odd in the high.
+        // Interleaved RGBA of eight pixels into planes and back: the even pixels land in the low
+        // lane, the odd in the high.
         struct Planes {
             __m256 r;
             __m256 g;
@@ -337,8 +350,12 @@ namespace tiv {
             const __m256 t2 = _mm256_unpacklo_ps(p2, p3);
             const __m256 t3 = _mm256_unpackhi_ps(p2, p3);
 
-            return {_mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0)), _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2)), _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0)),
-                    _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(3, 2, 3, 2))};
+            return {
+                    .r = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0)),
+                    .g = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2)),
+                    .b = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0)),
+                    .a = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(3, 2, 3, 2)),
+            };
         }
 
         TIV_AVX2 void join_avx2(const Planes &planes, float *out) {
@@ -364,9 +381,12 @@ namespace tiv {
             for (; done + 8 <= pixels; done += 8) {
                 float *at = rgba + (done * 4);
                 Planes planes = split_avx2(at);
-                const __m256 luminance = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(kr, planes.r), _mm256_mul_ps(kg, planes.g)), _mm256_mul_ps(kb, planes.b));
+                const __m256 luminance =
+                        _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(kr, planes.r), _mm256_mul_ps(kg, planes.g)),
+                                      _mm256_mul_ps(kb, planes.b));
                 const __m256 power = exp2_avx2(_mm256_mul_ps(log2_avx2(luminance), _mm256_set1_ps(HLG_GAMMA - 1.0F)));
-                const __m256 gain = _mm256_and_ps(_mm256_cmp_ps(luminance, zero, _CMP_GT_OQ), _mm256_mul_ps(power, _mm256_set1_ps(scale)));
+                const __m256 gain = _mm256_and_ps(_mm256_cmp_ps(luminance, zero, _CMP_GT_OQ),
+                                                  _mm256_mul_ps(power, _mm256_set1_ps(scale)));
 
                 planes.r = _mm256_mul_ps(planes.r, gain);
                 planes.g = _mm256_mul_ps(planes.g, gain);
@@ -417,7 +437,8 @@ namespace tiv {
         void spread(const std::span<const Sample> in, const int channels, std::span<float> out, const Decode &decode) {
             const auto step = static_cast<std::size_t>(channels);
 
-            for (std::size_t from = 0, to = 0; from + step <= in.size() && to + 4 <= out.size(); from += step, to += 4) {
+            for (std::size_t from = 0, to = 0; from + step <= in.size() && to + 4 <= out.size();
+                 from += step, to += 4) {
                 if (channels < 3) {
                     const float grey = decode(in[from]);
 
@@ -436,7 +457,8 @@ namespace tiv {
 
         // Through linear floats a chunk at a time, so a row of any width stays on the stack.
         template <typename Sample, typename Each>
-        void chunked(const std::span<const Sample> in, const int channels, const std::span<std::uint8_t> out, const Each &each) {
+        void chunked(const std::span<const Sample> in, const int channels, const std::span<std::uint8_t> out,
+                     const Each &each) {
             std::array<float, CHUNK * 4> held{};
             const auto step = static_cast<std::size_t>(channels);
             const std::size_t pixels = std::min(in.size() / step, out.size() / 4);
@@ -444,7 +466,8 @@ namespace tiv {
             for (std::size_t at = 0; at < pixels; at += CHUNK) {
                 const std::size_t count = std::min(CHUNK, pixels - at);
 
-                each(at, in.subspan(at * step, count * step), std::span(held).first(count * 4), out.subspan(at * 4, count * 4));
+                each(at, in.subspan(at * step, count * step), std::span(held).first(count * 4),
+                     out.subspan(at * 4, count * 4));
             }
         }
 
@@ -453,8 +476,8 @@ namespace tiv {
             return value > 0.0F ? std::min(value, 1.0e6F) : 0.0F;
         }
 
-        // Where a finite, non negative value lands in the sRGB table. Through a 32 bit int,
-        // which AVX2 converts eight at a time where a size_t takes one instruction each.
+        // Where a finite, non negative value lands in the sRGB table. Through a 32 bit int, which
+        // AVX2 converts eight at a time.
         std::uint16_t slot(const float value) {
             constexpr auto TOP = static_cast<float>(ENCODED - 1);
 
@@ -468,15 +491,19 @@ namespace tiv {
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast,portability-simd-intrinsics): the kernel walks the rows with intrinsics.
         // NaN compares false, so it goes to zero with the negatives.
         TIV_AVX2 __m256 finite_avx2(const __m256 value) {
-            return _mm256_and_ps(_mm256_cmp_ps(value, _mm256_setzero_ps(), _CMP_GT_OQ), _mm256_min_ps(value, _mm256_set1_ps(1.0e6F)));
+            return _mm256_and_ps(_mm256_cmp_ps(value, _mm256_setzero_ps(), _CMP_GT_OQ),
+                                 _mm256_min_ps(value, _mm256_set1_ps(1.0e6F)));
         }
 
         TIV_AVX2 __m256i slots_avx2(const __m256 value, const bool pq) {
             constexpr auto TOP = static_cast<float>(ENCODED - 1);
             const __m256 one = _mm256_set1_ps(1.0F);
-            const __m256 clamped = pq ? _mm256_sqrt_ps(_mm256_min_ps(_mm256_mul_ps(value, _mm256_set1_ps(1.0F / PQ_TOP)), one)) : _mm256_min_ps(value, one);
+            const __m256 clamped =
+                    pq ? _mm256_sqrt_ps(_mm256_min_ps(_mm256_mul_ps(value, _mm256_set1_ps(1.0F / PQ_TOP)), one))
+                       : _mm256_min_ps(value, one);
 
-            return _mm256_cvttps_epi32(_mm256_add_ps(_mm256_mul_ps(clamped, _mm256_set1_ps(TOP)), _mm256_set1_ps(0.5F)));
+            return _mm256_cvttps_epi32(
+                    _mm256_add_ps(_mm256_mul_ps(clamped, _mm256_set1_ps(TOP)), _mm256_set1_ps(0.5F)));
         }
 
         TIV_AVX2 __m256i look_up_avx2(const int *table, const __m256i slot, const bool pq) {
@@ -487,7 +514,8 @@ namespace tiv {
         // Both encoders eight pixels at a time, the same arithmetic as the scalar loops, which
         // take whatever is left over. The matrix, if any, goes first. Returns how many pixels it did.
         template <bool Pq, bool Convert>
-        TIV_AVX2 std::size_t encode_avx2(const float *rgba, std::uint8_t *out, const std::size_t pixels, const float headroom, const bool rolledOff, const Matrix &matrix) {
+        TIV_AVX2 std::size_t encode_avx2(const float *rgba, std::uint8_t *out, const std::size_t pixels,
+                                         const float headroom, const bool rolledOff, const Matrix &matrix) {
             const __m256 knee = _mm256_set1_ps(KNEE * headroom);
             const __m256 room = _mm256_set1_ps(headroom - (KNEE * headroom));
             const __m256 one = _mm256_set1_ps(1.0F);
@@ -495,7 +523,8 @@ namespace tiv {
             const __m256 alphaTop = _mm256_set1_ps(Pq ? 3.0F : 255.0F);
             // The transpose leaves the even pixels in the low lane and the odd ones in the high.
             const __m256i order = _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7);
-            const int *table = Pq ? reinterpret_cast<const int *>(pq_table().data()) : reinterpret_cast<const int *>(srgb_table().data());
+            const int *table = Pq ? reinterpret_cast<const int *>(pq_table().data())
+                                  : reinterpret_cast<const int *>(srgb_table().data());
             const auto [c0, c1, c2, c3, c4, c5, c6, c7, c8] = matrix;
             const __m256 m0 = _mm256_set1_ps(c0);
             const __m256 m1 = _mm256_set1_ps(c1);
@@ -515,9 +544,12 @@ namespace tiv {
                 __m256 b = in.b;
 
                 if constexpr (Convert) {
-                    r = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(m0, in.r), _mm256_mul_ps(m1, in.g)), _mm256_mul_ps(m2, in.b));
-                    g = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(m3, in.r), _mm256_mul_ps(m4, in.g)), _mm256_mul_ps(m5, in.b));
-                    b = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(m6, in.r), _mm256_mul_ps(m7, in.g)), _mm256_mul_ps(m8, in.b));
+                    r = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(m0, in.r), _mm256_mul_ps(m1, in.g)),
+                                      _mm256_mul_ps(m2, in.b));
+                    g = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(m3, in.r), _mm256_mul_ps(m4, in.g)),
+                                      _mm256_mul_ps(m5, in.b));
+                    b = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(m6, in.r), _mm256_mul_ps(m7, in.g)),
+                                      _mm256_mul_ps(m8, in.b));
                 }
 
                 r = finite_avx2(r);
@@ -528,7 +560,9 @@ namespace tiv {
                 if (rolledOff) {
                     const __m256 peak = _mm256_max_ps(r, _mm256_max_ps(g, b));
                     const __m256 over = _mm256_max_ps(_mm256_sub_ps(peak, knee), _mm256_setzero_ps());
-                    const __m256 bent = _mm256_div_ps(_mm256_add_ps(knee, _mm256_div_ps(_mm256_mul_ps(room, over), _mm256_add_ps(over, room))), peak);
+                    const __m256 bent = _mm256_div_ps(
+                            _mm256_add_ps(knee, _mm256_div_ps(_mm256_mul_ps(room, over), _mm256_add_ps(over, room))),
+                            peak);
                     const __m256 scale = _mm256_blendv_ps(one, bent, _mm256_cmp_ps(peak, knee, _CMP_GT_OQ));
 
                     r = _mm256_mul_ps(r, scale);
@@ -544,7 +578,8 @@ namespace tiv {
                 word = _mm256_or_si256(word, _mm256_slli_epi32(look_up_avx2(table, slots_avx2(b, Pq), Pq), shift * 2));
                 word = _mm256_or_si256(word, _mm256_slli_epi32(alpha, Pq ? 30 : 24));
 
-                _mm256_storeu_si256(reinterpret_cast<__m256i *>(out + (done * 4)), _mm256_permutevar8x32_epi32(word, order));
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(out + (done * 4)),
+                                    _mm256_permutevar8x32_epi32(word, order));
             }
 
             return done;
@@ -553,31 +588,37 @@ namespace tiv {
 #endif
 
         // How far the vector kernel got, for the scalar loop to go on from.
-        std::size_t encode_vector(const std::span<const float> rgba, const std::span<std::uint8_t> out, const bool pq, const float headroom, const bool rolledOff, const Matrix *matrix) {
+        std::size_t encode_vector(const std::span<const float> rgba, const std::span<std::uint8_t> out, const bool pq,
+                                  const float headroom, const bool rolledOff, const Matrix *matrix) {
 #if defined(__x86_64__) || defined(_M_X64)
             if (Simd::avx2()) {
                 const std::size_t pixels = std::min(rgba.size(), out.size()) / 4;
 
                 if (pq) {
-                    return matrix != nullptr ? encode_avx2<true, true>(rgba.data(), out.data(), pixels, headroom, rolledOff, *matrix)
-                                             : encode_avx2<true, false>(rgba.data(), out.data(), pixels, headroom, rolledOff, Matrix{});
+                    return matrix != nullptr ? encode_avx2<true, true>(rgba.data(), out.data(), pixels, headroom,
+                                                                       rolledOff, *matrix)
+                                             : encode_avx2<true, false>(rgba.data(), out.data(), pixels, headroom,
+                                                                        rolledOff, Matrix{});
                 }
 
-                return matrix != nullptr ? encode_avx2<false, true>(rgba.data(), out.data(), pixels, headroom, rolledOff, *matrix)
-                                         : encode_avx2<false, false>(rgba.data(), out.data(), pixels, headroom, rolledOff, Matrix{});
+                return matrix != nullptr
+                               ? encode_avx2<false, true>(rgba.data(), out.data(), pixels, headroom, rolledOff, *matrix)
+                               : encode_avx2<false, false>(rgba.data(), out.data(), pixels, headroom, rolledOff,
+                                                           Matrix{});
             }
 #else
-            (void) rgba;
-            (void) out;
-            (void) pq;
-            (void) headroom;
-            (void) rolledOff;
+            (void)rgba;
+            (void)out;
+            (void)pq;
+            (void)headroom;
+            (void)rolledOff;
 #endif
 
             return 0;
         }
 
-        void encode_srgb(const std::span<const float> rgba, const std::span<std::uint8_t> out, const bool rolledOff, const std::size_t from) {
+        void encode_srgb(const std::span<const float> rgba, const std::span<std::uint8_t> out, const bool rolledOff,
+                         const std::size_t from) {
             constexpr float ROOM = 1.0F - KNEE;
             constexpr std::size_t BLOCK = 64;
             const SrgbTable &srgb = srgb_table();
@@ -600,7 +641,8 @@ namespace tiv {
                     slots[at] = slot(r * scale);
                     slots[at + 1] = slot(g * scale);
                     slots[at + 2] = slot(b * scale);
-                    slots[at + 3] = static_cast<std::uint16_t>(static_cast<std::int32_t>((std::min(finite(in[at + 3]), 1.0F) * 255.0F) + 0.5F));
+                    slots[at + 3] = static_cast<std::uint16_t>(
+                            static_cast<std::int32_t>((std::min(finite(in[at + 3]), 1.0F) * 255.0F) + 0.5F));
                 }
 
                 const std::span<std::uint8_t> bytes = out.subspan(first * 4, count * 4);
@@ -616,7 +658,8 @@ namespace tiv {
         }
 
         // By the same roll off, up to the headroom, into the words Bitmap::Encoding::Pq describes.
-        void encode_pq(const std::span<const float> rgba, const std::span<std::uint8_t> out, const float headroom, const bool rolledOff, const std::size_t from) {
+        void encode_pq(const std::span<const float> rgba, const std::span<std::uint8_t> out, const float headroom,
+                       const bool rolledOff, const std::size_t from) {
             constexpr std::size_t BLOCK = 64;
             constexpr auto TOP = static_cast<float>(ENCODED - 1);
             const float knee = KNEE * headroom;
@@ -638,17 +681,22 @@ namespace tiv {
                     const float over = std::max(peak - knee, 0.0F);
                     const float scale = rolledOff && peak > knee ? (knee + (room * over / (over + room))) / peak : 1.0F;
 
-                    slots[at] = static_cast<std::uint16_t>(static_cast<std::int32_t>((std::sqrt(std::min(r * scale * (1.0F / PQ_TOP), 1.0F)) * TOP) + 0.5F));
-                    slots[at + 1] = static_cast<std::uint16_t>(static_cast<std::int32_t>((std::sqrt(std::min(g * scale * (1.0F / PQ_TOP), 1.0F)) * TOP) + 0.5F));
-                    slots[at + 2] = static_cast<std::uint16_t>(static_cast<std::int32_t>((std::sqrt(std::min(b * scale * (1.0F / PQ_TOP), 1.0F)) * TOP) + 0.5F));
-                    slots[at + 3] = static_cast<std::uint16_t>(static_cast<std::int32_t>((std::min(finite(in[at + 3]), 1.0F) * 3.0F) + 0.5F));
+                    slots[at] = static_cast<std::uint16_t>(static_cast<std::int32_t>(
+                            (std::sqrt(std::min(r * scale * (1.0F / PQ_TOP), 1.0F)) * TOP) + 0.5F));
+                    slots[at + 1] = static_cast<std::uint16_t>(static_cast<std::int32_t>(
+                            (std::sqrt(std::min(g * scale * (1.0F / PQ_TOP), 1.0F)) * TOP) + 0.5F));
+                    slots[at + 2] = static_cast<std::uint16_t>(static_cast<std::int32_t>(
+                            (std::sqrt(std::min(b * scale * (1.0F / PQ_TOP), 1.0F)) * TOP) + 0.5F));
+                    slots[at + 3] = static_cast<std::uint16_t>(
+                            static_cast<std::int32_t>((std::min(finite(in[at + 3]), 1.0F) * 3.0F) + 0.5F));
                 }
 
                 const std::span<std::uint8_t> bytes = out.subspan(first * 4, count * 4);
 
                 for (std::size_t at = 0; at < count * 4; at += 4) {
-                    const std::uint32_t word = pq[slots[at]] | (static_cast<std::uint32_t>(pq[slots[at + 1]]) << 10) | (static_cast<std::uint32_t>(pq[slots[at + 2]]) << 20)
-                                               | (static_cast<std::uint32_t>(slots[at + 3]) << 30);
+                    const std::uint32_t word = pq[slots[at]] | (static_cast<std::uint32_t>(pq[slots[at + 1]]) << 10U)
+                                               | (static_cast<std::uint32_t>(pq[slots[at + 2]]) << 20U)
+                                               | (static_cast<std::uint32_t>(slots[at + 3]) << 30U);
 
                     std::memcpy(bytes.subspan(at, 4).data(), &word, 4);
                 }
@@ -700,18 +748,21 @@ namespace tiv {
     Tone::Mapper::Mapper(const Source source, const Display display, const bool rolledOff)
         : _source(source), _display(display), _table(table_for(source.transfer).data()),
           _toOutput(convert(source.primaries, display.hdr() ? Primaries::Bt2020 : Primaries::Bt709)),
-          _luma(luma_of(source.primaries)), _convert(source.primaries != (display.hdr() ? Primaries::Bt2020 : Primaries::Bt709)), _rolledOff(rolledOff) {
+          _luma(luma_of(source.primaries)),
+          _convert(source.primaries != (display.hdr() ? Primaries::Bt2020 : Primaries::Bt709)), _rolledOff(rolledOff) {
     }
 
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static): an overload of the others, which read the source.
-    void Tone::Mapper::linear(const std::span<const std::uint8_t> in, const int channels, const std::span<float> out) const {
+    void Tone::Mapper::linear(const std::span<const std::uint8_t> in, const int channels,
+                              const std::span<float> out) const {
         const std::array<float, 256> &table = srgb_linear();
 
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access): the table holds every 8 bit value.
         spread(in, channels, out, [&table](const std::uint8_t sample) { return table[sample]; });
     }
 
-    void Tone::Mapper::linear(const std::span<const std::uint16_t> in, const int channels, const std::span<float> out) const {
+    void Tone::Mapper::linear(const std::span<const std::uint16_t> in, const int channels,
+                              const std::span<float> out) const {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic): the table holds every 16 bit value.
         spread(in, channels, out, [this](const std::uint16_t sample) { return _table[sample]; });
 
@@ -748,39 +799,48 @@ namespace tiv {
         }
     }
 
-    void Tone::Mapper::map(const std::span<const std::uint8_t> in, const int channels, const std::span<std::uint8_t> out, const Adjust &adjust) const {
-        chunked(in, channels, out, [&](const std::size_t first, const auto part, const std::span<float> rgba, const std::span<std::uint8_t> bytes) {
-            linear(part, channels, rgba);
+    void Tone::Mapper::map(const std::span<const std::uint8_t> in, const int channels,
+                           const std::span<std::uint8_t> out, const Adjust &adjust) const {
+        chunked(in, channels, out,
+                [&](const std::size_t first, const auto part, const std::span<float> rgba,
+                    const std::span<std::uint8_t> bytes) {
+                    linear(part, channels, rgba);
 
-            if (adjust) {
-                adjust(first, rgba);
-            }
+                    if (adjust) {
+                        adjust(first, rgba);
+                    }
 
-            finish(rgba, bytes);
-        });
+                    finish(rgba, bytes);
+                });
     }
 
-    void Tone::Mapper::map(const std::span<const std::uint16_t> in, const int channels, const std::span<std::uint8_t> out, const Adjust &adjust) const {
-        chunked(in, channels, out, [&](const std::size_t first, const auto part, const std::span<float> rgba, const std::span<std::uint8_t> bytes) {
-            linear(part, channels, rgba);
+    void Tone::Mapper::map(const std::span<const std::uint16_t> in, const int channels,
+                           const std::span<std::uint8_t> out, const Adjust &adjust) const {
+        chunked(in, channels, out,
+                [&](const std::size_t first, const auto part, const std::span<float> rgba,
+                    const std::span<std::uint8_t> bytes) {
+                    linear(part, channels, rgba);
 
-            if (adjust) {
-                adjust(first, rgba);
-            }
+                    if (adjust) {
+                        adjust(first, rgba);
+                    }
 
-            finish(rgba, bytes);
-        });
+                    finish(rgba, bytes);
+                });
     }
 
-    void Tone::Mapper::map(const std::span<const float> in, const int channels, const std::span<std::uint8_t> out, const Adjust &adjust) const {
-        chunked(in, channels, out, [&](const std::size_t first, const auto part, const std::span<float> rgba, const std::span<std::uint8_t> bytes) {
-            linear(part, channels, rgba);
+    void Tone::Mapper::map(const std::span<const float> in, const int channels, const std::span<std::uint8_t> out,
+                           const Adjust &adjust) const {
+        chunked(in, channels, out,
+                [&](const std::size_t first, const auto part, const std::span<float> rgba,
+                    const std::span<std::uint8_t> bytes) {
+                    linear(part, channels, rgba);
 
-            if (adjust) {
-                adjust(first, rgba);
-            }
+                    if (adjust) {
+                        adjust(first, rgba);
+                    }
 
-            finish(rgba, bytes);
-        });
+                    finish(rgba, bytes);
+                });
     }
 }

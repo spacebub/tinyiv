@@ -45,18 +45,19 @@ namespace tiv {
                     return 0;
                 }
 
-                return little ? static_cast<std::uint32_t>(data[at] | (data[at + 1] << 8)) : static_cast<std::uint32_t>((data[at] << 8) | data[at + 1]);
+                return little ? data[at] | (static_cast<std::uint32_t>(data[at + 1]) << 8U)
+                              : (static_cast<std::uint32_t>(data[at]) << 8U) | data[at + 1];
             }
 
             [[nodiscard]] std::uint32_t u32(const std::size_t at) const {
-                return little ? u16(at) | (u16(at + 2) << 16) : (u16(at) << 16) | u16(at + 2);
+                return little ? u16(at) | (u16(at + 2) << 16U) : (u16(at) << 16U) | u16(at + 2);
             }
         };
 
         bool starts_with(const std::span<const std::uint8_t> data, const std::string_view prefix) {
-            return data.size() >= prefix.size() && std::equal(prefix.begin(), prefix.end(), data.begin(), [](const char a, const std::uint8_t b) {
-                return static_cast<std::uint8_t>(a) == b;
-            });
+            return data.size() >= prefix.size()
+                   && std::equal(prefix.begin(), prefix.end(), data.begin(),
+                                 [](const char a, const std::uint8_t b) { return static_cast<std::uint8_t>(a) == b; });
         }
 
         struct Segment {
@@ -85,13 +86,13 @@ namespace tiv {
                     break;
                 }
 
-                const std::size_t length = (static_cast<std::size_t>(data[at + 2]) << 8) | data[at + 3];
+                const std::size_t length = (static_cast<std::size_t>(data[at + 2]) << 8U) | data[at + 3];
 
                 if (length < 2 || at + 2 + length > data.size()) {
                     break;
                 }
 
-                held.push_back({marker, data.subspan(at + 4, length - 2)});
+                held.push_back({.marker = marker, .body = data.subspan(at + 4, length - 2)});
                 at += 2 + length;
             }
 
@@ -130,7 +131,8 @@ namespace tiv {
         }
 
         std::optional<float> number(std::string_view text) {
-            while (!text.empty() && (text.front() == ' ' || text.front() == '\n' || text.front() == '\t' || text.front() == '+')) {
+            while (!text.empty()
+                   && (text.front() == ' ' || text.front() == '\n' || text.front() == '\t' || text.front() == '+')) {
                 text.remove_prefix(1);
             }
 
@@ -167,7 +169,8 @@ namespace tiv {
 
         // Fills all three channels, from one value or three. False when the property is
         // there but unreadable, or missing where it has no default.
-        bool channels(const std::string_view xmp, const std::string_view name, std::array<float, 3> *out, int *count, const bool required) {
+        bool channels(const std::string_view xmp, const std::string_view name, std::array<float, 3> *out, int *count,
+                      const bool required) {
             const std::string_view text = property(xmp, name);
 
             if (text.empty()) {
@@ -215,17 +218,19 @@ namespace tiv {
             const std::vector<Segment> found = segments(image);
 
             for (const Segment &segment : found) {
-                if (segment.marker == MARKER_APP2 && starts_with(segment.body, ISO_SIGNATURE) && GainMap::parse_iso(segment.body.subspan(ISO_SIGNATURE.size()), out)) {
+                if (segment.marker == MARKER_APP2 && starts_with(segment.body, ISO_SIGNATURE)
+                    && GainMap::parse_iso(segment.body.subspan(ISO_SIGNATURE.size()), out)) {
                     return true;
                 }
             }
 
             return std::ranges::any_of(found, [out](const Segment &segment) {
-                return segment.marker == MARKER_APP1 && starts_with(segment.body, XMP_SIGNATURE) && GainMap::parse_xmp(as_text(segment.body.subspan(XMP_SIGNATURE.size())), out);
+                return segment.marker == MARKER_APP1 && starts_with(segment.body, XMP_SIGNATURE)
+                       && GainMap::parse_xmp(as_text(segment.body.subspan(XMP_SIGNATURE.size())), out);
             });
         }
 
-        // The images after the primary one, from the MP entries in its APP2 segment.
+        // The images after the primary one, from the MP entries in its APP2 segment: CIPA DC-007.
         std::vector<std::span<const std::uint8_t>> mpf_images(const std::span<const std::uint8_t> data) {
             std::vector<std::span<const std::uint8_t>> held;
 
@@ -237,7 +242,7 @@ namespace tiv {
                 // Offsets count from the TIFF header that follows the signature.
                 const std::span<const std::uint8_t> tiff = segment.body.subspan(MPF_SIGNATURE.size());
                 const auto origin = static_cast<std::size_t>(tiff.data() - data.data());
-                const Reader reader{tiff, starts_with(tiff, "II")};
+                const Reader reader{.data = tiff, .little = starts_with(tiff, "II")};
                 const std::size_t ifd = reader.u32(4);
                 const std::uint32_t count = reader.u16(ifd);
 
@@ -283,7 +288,7 @@ namespace tiv {
     // writes: https://github.com/AOMediaCodec/libavif/blob/main/src/read.c
     bool GainMap::parse_iso(const std::span<const std::uint8_t> data, Metadata *out) {
         const auto parse = [&](const std::size_t start) {
-            const Reader reader{data, false};
+            const Reader reader{.data = data, .little = false};
 
             if (start + 5 > data.size() || reader.u16(start) != 0) {
                 return false;
@@ -311,7 +316,8 @@ namespace tiv {
                     return 0.0F;
                 }
 
-                const double top = isSigned ? static_cast<double>(static_cast<std::int32_t>(numerator)) : static_cast<double>(numerator);
+                const double top = isSigned ? static_cast<double>(static_cast<std::int32_t>(numerator))
+                                            : static_cast<double>(numerator);
 
                 return static_cast<float>(top / denominator);
             };
@@ -364,9 +370,12 @@ namespace tiv {
         std::array<float, 3> offsetSdr = held.baseOffset;
         std::array<float, 3> offsetHdr = held.alternateOffset;
 
-        const bool read = channels(xmp, "GainMapMin", &held.min, &count, false) && channels(xmp, "GainMapMax", &held.max, &count, true)
-                          && channels(xmp, "Gamma", &held.gamma, &count, false) && channels(xmp, "OffsetSDR", &offsetSdr, &count, false)
-                          && channels(xmp, "OffsetHDR", &offsetHdr, &count, false) && single(xmp, "HDRCapacityMin", &capacityMin, false)
+        const bool read = channels(xmp, "GainMapMin", &held.min, &count, false)
+                          && channels(xmp, "GainMapMax", &held.max, &count, true)
+                          && channels(xmp, "Gamma", &held.gamma, &count, false)
+                          && channels(xmp, "OffsetSDR", &offsetSdr, &count, false)
+                          && channels(xmp, "OffsetHDR", &offsetHdr, &count, false)
+                          && single(xmp, "HDRCapacityMin", &capacityMin, false)
                           && single(xmp, "HDRCapacityMax", &capacityMax, true);
 
         if (!read || std::ranges::any_of(held.gamma, [](const float g) { return g <= 0.0F; })) {
@@ -391,14 +400,14 @@ namespace tiv {
                 return false;
             }
 
-            *out = {image, metadata};
+            *out = {.image = image, .metadata = metadata};
 
             return true;
         });
     }
 
     bool GainMap::read_jxl(const std::span<const std::uint8_t> box, Jxl *out) {
-        const Reader reader{box, false};
+        const Reader reader{.data = box, .little = false};
 
         if (box.size() < 3) {
             return false;
@@ -444,14 +453,16 @@ namespace tiv {
         return !held.image.empty();
     }
 
-    GainMap::Applier::Applier(const Metadata &metadata, const Bitmap *map, const int width, const int height, const float weight)
+    GainMap::Applier::Applier(const Metadata &metadata, const Bitmap *map, const int width, const int height,
+                              const float weight)
         : _metadata(metadata), _map(map), _scaleX(static_cast<float>(map->width()) / static_cast<float>(width)),
           _scaleY(static_cast<float>(map->height()) / static_cast<float>(height)) {
         for (std::size_t c = 0; c < 3; ++c) {
             _factors.at(c).resize(GAIN_STEPS);
 
             for (std::size_t i = 0; i < GAIN_STEPS; ++i) {
-                const float g = std::pow(static_cast<float>(i) / static_cast<float>(GAIN_STEPS - 1), 1.0F / metadata.gamma.at(c));
+                const float g = std::pow(static_cast<float>(i) / static_cast<float>(GAIN_STEPS - 1),
+                                         1.0F / metadata.gamma.at(c));
                 const float stops = std::lerp(metadata.min.at(c), metadata.max.at(c), g);
 
                 _factors.at(c).at(i) = std::exp2(stops * weight);
@@ -464,7 +475,8 @@ namespace tiv {
     void GainMap::Applier::apply(const int x, const int y, const std::span<float> rgba) const {
         const int mapWidth = _map->width();
         const int mapHeight = _map->height();
-        const float fy = std::clamp(((static_cast<float>(y) + 0.5F) * _scaleY) - 0.5F, 0.0F, static_cast<float>(mapHeight - 1));
+        const float fy =
+                std::clamp(((static_cast<float>(y) + 0.5F) * _scaleY) - 0.5F, 0.0F, static_cast<float>(mapHeight - 1));
         const int y0 = static_cast<int>(fy);
         const int y1 = std::min(y0 + 1, mapHeight - 1);
         const float ty = fy - static_cast<float>(y0);
@@ -477,7 +489,8 @@ namespace tiv {
 
         for (std::size_t at = 0; at + 4 <= rgba.size(); at += 4) {
             const std::size_t pixel = at / 4;
-            const float fx = std::clamp(((static_cast<float>(x) + static_cast<float>(pixel) + 0.5F) * _scaleX) - 0.5F, 0.0F, static_cast<float>(mapWidth - 1));
+            const float fx = std::clamp(((static_cast<float>(x) + static_cast<float>(pixel) + 0.5F) * _scaleX) - 0.5F,
+                                        0.0F, static_cast<float>(mapWidth - 1));
             const auto x0 = static_cast<std::size_t>(fx);
             const std::size_t x1 = std::min(x0 + 1, static_cast<std::size_t>(mapWidth - 1));
             const float tx = fx - static_cast<float>(x0);
@@ -485,10 +498,13 @@ namespace tiv {
 
             // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic,bugprone-incorrect-roundings): the rows hold every x0 and x1, the steps stay within the factors, and nothing is negative.
             for (std::size_t band = 0; band < bands; ++band) {
-                const float top = std::lerp(static_cast<float>(above[(x0 * 4) + band]), static_cast<float>(above[(x1 * 4) + band]), tx);
-                const float bottom = std::lerp(static_cast<float>(below[(x0 * 4) + band]), static_cast<float>(below[(x1 * 4) + band]), tx);
+                const float top = std::lerp(static_cast<float>(above[(x0 * 4) + band]),
+                                            static_cast<float>(above[(x1 * 4) + band]), tx);
+                const float bottom = std::lerp(static_cast<float>(below[(x0 * 4) + band]),
+                                               static_cast<float>(below[(x1 * 4) + band]), tx);
 
-                steps[band] = static_cast<std::size_t>((std::lerp(top, bottom, ty) * static_cast<float>(GAIN_STEPS - 1) / 255.0F) + 0.5F);
+                steps[band] = static_cast<std::size_t>(
+                        (std::lerp(top, bottom, ty) * static_cast<float>(GAIN_STEPS - 1) / 255.0F) + 0.5F);
             }
 
             for (std::size_t c = 0; c < 3; ++c) {

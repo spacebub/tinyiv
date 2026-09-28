@@ -17,7 +17,8 @@
 
 namespace tiv {
     BoxShrink::BoxShrink(const int width, const int height, const int factor, Bitmap *target, const int from)
-        : _target(target), _width(width), _height(height), _factor(factor), _y(from), _sums(target->pitch()), _counts(static_cast<std::size_t>(target->width())) {
+        : _target(target), _width(width), _height(height), _factor(factor), _y(from), _sums(target->pitch()),
+          _counts(static_cast<std::size_t>(target->width())) {
         for (int x = 0; x < width; ++x) {
             ++_counts.at(static_cast<std::size_t>(x / factor));
         }
@@ -101,11 +102,10 @@ namespace tiv {
             const bool pq = _target->encoding() == Bitmap::Encoding::Pq;
 
             for (int x = 0; x < _target->width(); ++x) {
-                const std::uint32_t count = _counts[static_cast<std::size_t>(x)] * static_cast<std::uint32_t>(_gathered);
+                const std::uint32_t count =
+                        _counts[static_cast<std::size_t>(x)] * static_cast<std::uint32_t>(_gathered);
                 const std::size_t at = static_cast<std::size_t>(x) * Bitmap::CHANNELS;
-                const auto mean = [&](const std::size_t c) {
-                    return (_sums[at + c] + (count / 2)) / count;
-                };
+                const auto mean = [&](const std::size_t c) { return (_sums[at + c] + (count / 2)) / count; };
 
                 if (pq) {
                     const std::uint32_t word = Bitmap::pack(mean(0), mean(1), mean(2), mean(3));

@@ -37,7 +37,7 @@ namespace tiv {
         constexpr long PREFERENCES = 64;
 
         // Keeps the score of an entry well inside 64 bits.
-        constexpr int MAX_SIDE = 1 << 20;
+        constexpr int MAX_SIDE = 1U << 20U;
 
         constexpr std::array<std::uint8_t, 8> PNG_MAGIC = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
         constexpr std::array<std::uint8_t, 12> JP2_MAGIC = {0, 0, 0, 0x0C, 'j', 'P', ' ', ' ', '\r', '\n', 0x87, '\n'};
@@ -51,21 +51,21 @@ namespace tiv {
         };
 
         constexpr std::array ICNS_TYPES = {
-                IcnsType{"icp4", 16, {}},
-                IcnsType{"icp5", 32, {}},
-                IcnsType{"icp6", 64, {}},
-                IcnsType{"ic07", 128, {}},
-                IcnsType{"ic08", 256, {}},
-                IcnsType{"ic09", 512, {}},
-                IcnsType{"ic10", 1024, {}},
-                IcnsType{"ic11", 32, {}},
-                IcnsType{"ic12", 64, {}},
-                IcnsType{"ic13", 256, {}},
-                IcnsType{"ic14", 512, {}},
-                IcnsType{"is32", 16, "s8mk"},
-                IcnsType{"il32", 32, "l8mk"},
-                IcnsType{"ih32", 48, "h8mk"},
-                IcnsType{"it32", 128, "t8mk"},
+                IcnsType{.tag = "icp4", .size = 16, .mask = {}},
+                IcnsType{.tag = "icp5", .size = 32, .mask = {}},
+                IcnsType{.tag = "icp6", .size = 64, .mask = {}},
+                IcnsType{.tag = "ic07", .size = 128, .mask = {}},
+                IcnsType{.tag = "ic08", .size = 256, .mask = {}},
+                IcnsType{.tag = "ic09", .size = 512, .mask = {}},
+                IcnsType{.tag = "ic10", .size = 1024, .mask = {}},
+                IcnsType{.tag = "ic11", .size = 32, .mask = {}},
+                IcnsType{.tag = "ic12", .size = 64, .mask = {}},
+                IcnsType{.tag = "ic13", .size = 256, .mask = {}},
+                IcnsType{.tag = "ic14", .size = 512, .mask = {}},
+                IcnsType{.tag = "is32", .size = 16, .mask = "s8mk"},
+                IcnsType{.tag = "il32", .size = 32, .mask = "l8mk"},
+                IcnsType{.tag = "ih32", .size = 48, .mask = "h8mk"},
+                IcnsType{.tag = "it32", .size = 128, .mask = "t8mk"},
         };
 
         std::uint32_t le16(const std::span<const std::uint8_t> data, const std::size_t at) {
@@ -73,11 +73,11 @@ namespace tiv {
                 return 0;
             }
 
-            return static_cast<std::uint32_t>(data[at]) | (static_cast<std::uint32_t>(data[at + 1]) << 8);
+            return static_cast<std::uint32_t>(data[at]) | (static_cast<std::uint32_t>(data[at + 1]) << 8U);
         }
 
         std::uint32_t le32(const std::span<const std::uint8_t> data, const std::size_t at) {
-            return le16(data, at) | (le16(data, at + 2) << 16);
+            return le16(data, at) | (le16(data, at + 2) << 16U);
         }
 
         std::uint32_t be32(const std::span<const std::uint8_t> data, const std::size_t at) {
@@ -85,8 +85,8 @@ namespace tiv {
                 return 0;
             }
 
-            return (static_cast<std::uint32_t>(data[at]) << 24) | (static_cast<std::uint32_t>(data[at + 1]) << 16) | (static_cast<std::uint32_t>(data[at + 2]) << 8)
-                   | data[at + 3];
+            return (static_cast<std::uint32_t>(data[at]) << 24U) | (static_cast<std::uint32_t>(data[at + 1]) << 16U)
+                   | (static_cast<std::uint32_t>(data[at + 2]) << 8U) | data[at + 3];
         }
 
         bool starts(const std::span<const std::uint8_t> data, const std::span<const std::uint8_t> magic) {
@@ -94,12 +94,11 @@ namespace tiv {
         }
 
         bool tagged(const std::span<const std::uint8_t> data, const std::size_t at, const std::string_view tag) {
-            return at + tag.size() <= data.size() && std::ranges::equal(data.subspan(at, tag.size()), tag, {}, {}, [](const char c) {
-                       return static_cast<std::uint8_t>(c);
-                   });
+            return at + tag.size() <= data.size()
+                   && std::ranges::equal(data.subspan(at, tag.size()), tag, {}, {},
+                                         [](const char c) { return static_cast<std::uint8_t>(c); });
         }
 
-        // False when the PNG is too short to hold its size.
         bool png_size(const std::span<const std::uint8_t> data, Icon::Entry *entry) {
             if (!starts(data, PNG_MAGIC) || data.size() < PNG_IHDR + 8) {
                 return false;
@@ -117,12 +116,14 @@ namespace tiv {
                 return -1;
             }
 
-            return (static_cast<long>(entry.width) * entry.height * PREFERENCES) + std::clamp(preference, 0, static_cast<int>(PREFERENCES) - 1);
+            return (static_cast<long>(entry.width) * entry.height * PREFERENCES)
+                   + std::clamp(preference, 0, static_cast<int>(PREFERENCES) - 1);
         }
 
         // One colour plane of a packed entry, starting at at, which moves past it. False when
         // the data ends first.
-        bool unpack_plane(const std::span<const std::uint8_t> data, std::size_t &at, const std::span<std::uint8_t> pixels, const std::size_t channel) {
+        bool unpack_plane(const std::span<const std::uint8_t> data, std::size_t &at,
+                          const std::span<std::uint8_t> pixels, const std::size_t channel) {
             const std::size_t count = pixels.size() / Bitmap::CHANNELS;
 
             for (std::size_t done = 0; done < count;) {
@@ -132,7 +133,8 @@ namespace tiv {
 
                 const std::uint8_t run = data[at++];
                 const bool repeat = run >= PACKED_REPEAT;
-                const std::size_t length = std::min(repeat ? run - PACKED_REPEAT + PACKED_SHORTEST : std::size_t{run} + 1, count - done);
+                const std::size_t length =
+                        std::min(repeat ? run - PACKED_REPEAT + PACKED_SHORTEST : std::size_t{run} + 1, count - done);
 
                 if (at + (repeat ? 1 : length) > data.size()) {
                     return false;
@@ -150,7 +152,7 @@ namespace tiv {
         }
 
         // Calls visit with the offset of every chunk's tag and the data after its header.
-        template<typename Visit>
+        template <typename Visit>
         void each_chunk(const std::span<const std::uint8_t> file, Visit visit) {
             const std::size_t end = std::min<std::size_t>(be32(file, 4), file.size());
 
@@ -290,7 +292,8 @@ namespace tiv {
         if (data.size() == count * Bitmap::CHANNELS) {
             // Small entries are sometimes stored plain, as a pad byte and RGB per pixel.
             for (std::size_t i = 0; i < count; ++i) {
-                std::ranges::copy(data.subspan((i * Bitmap::CHANNELS) + 1, 3), pixels.subspan(i * Bitmap::CHANNELS, 3).begin());
+                std::ranges::copy(data.subspan((i * Bitmap::CHANNELS) + 1, 3),
+                                  pixels.subspan(i * Bitmap::CHANNELS, 3).begin());
             }
         } else {
             std::size_t at = 0;

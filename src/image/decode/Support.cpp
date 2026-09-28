@@ -26,22 +26,25 @@ namespace tiv {
 
     Decode::Size Decode::fitted(const int width, const int height, const int boxWidth, const int boxHeight) {
         if (width <= boxWidth && height <= boxHeight) {
-            return {width, height};
+            return {.width = width, .height = height};
         }
 
         const double shrink = std::min(static_cast<double>(boxWidth) / width, static_cast<double>(boxHeight) / height);
 
-        return {std::max(static_cast<int>(std::floor(width * shrink)), 1), std::max(static_cast<int>(std::floor(height * shrink)), 1)};
+        return {
+                .width = std::max(static_cast<int>(std::floor(width * shrink)), 1),
+                .height = std::max(static_cast<int>(std::floor(height * shrink)), 1),
+        };
     }
 
-    bool Decode::starts_with(const std::span<const std::uint8_t> head, const std::string_view magic, const std::size_t at) {
+    bool Decode::starts_with(const std::span<const std::uint8_t> head, const std::string_view magic,
+                             const std::size_t at) {
         if (head.size() < at + magic.size()) {
             return false;
         }
 
-        return std::equal(magic.begin(), magic.end(), head.begin() + static_cast<std::ptrdiff_t>(at), [](const char a, const std::uint8_t b) {
-            return static_cast<std::uint8_t>(a) == b;
-        });
+        return std::equal(magic.begin(), magic.end(), head.begin() + static_cast<std::ptrdiff_t>(at),
+                          [](const char a, const std::uint8_t b) { return static_cast<std::uint8_t>(a) == b; });
     }
 
     int Decode::shrink_factor(const int width, const int height, const int boxWidth, const int boxHeight) {

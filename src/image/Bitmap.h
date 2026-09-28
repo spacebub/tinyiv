@@ -46,11 +46,12 @@ namespace tiv {
 
         // The channels of a Pq word, red first, alpha from 0 to 3.
         [[nodiscard]] static constexpr std::array<std::uint32_t, 4> unpack(const std::uint32_t word) {
-            return {word & PQ_MASK, (word >> 10) & PQ_MASK, (word >> 20) & PQ_MASK, word >> 30};
+            return {word & PQ_MASK, (word >> 10U) & PQ_MASK, (word >> 20U) & PQ_MASK, word >> 30U};
         }
 
-        [[nodiscard]] static constexpr std::uint32_t pack(const std::uint32_t red, const std::uint32_t green, const std::uint32_t blue, const std::uint32_t alpha) {
-            return red | (green << 10) | (blue << 20) | (alpha << 30);
+        [[nodiscard]] static constexpr std::uint32_t pack(const std::uint32_t red, const std::uint32_t green,
+                                                          const std::uint32_t blue, const std::uint32_t alpha) {
+            return red | (green << 10U) | (blue << 20U) | (alpha << 30U);
         }
 
         [[nodiscard]] int width() const { return _width; }

@@ -32,7 +32,7 @@ namespace tiv {
             x1 = 1.0 - x1;
         }
 
-        return {std::min(x0, x1), std::min(y0, y1), std::abs(x1 - x0), std::abs(y1 - y0)};
+        return {.x = std::min(x0, x1), .y = std::min(y0, y1), .width = std::abs(x1 - x0), .height = std::abs(y1 - y0)};
     }
 
     void Viewport::set_area(const double width, const double height) {
@@ -101,6 +101,6 @@ namespace tiv {
     }
 
     Rect Viewport::image_rect() const {
-        return {_x, _y, _imageWidth * _zoom, _imageHeight * _zoom};
+        return {.x = _x, .y = _y, .width = _imageWidth * _zoom, .height = _imageHeight * _zoom};
     }
 }

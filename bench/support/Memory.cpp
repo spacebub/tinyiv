@@ -48,6 +48,7 @@ namespace bench {
 
     void Memory::reset_peak() {
         // Writing 5 resets the high water mark, which needs no privilege for one's own process.
+        // https://man7.org/linux/man-pages/man5/proc_pid_clear_refs.5.html
         std::ofstream("/proc/self/clear_refs") << "5\n";
         baseline() = resident();
     }
@@ -55,7 +56,10 @@ namespace bench {
     void Memory::report_peak(benchmark::State &state) {
         const std::size_t most = peak();
 
-        state.counters.insert_or_assign("peak_rss_mb", benchmark::Counter(static_cast<double>(most) / (1024.0 * 1024.0)));
-        state.counters.insert_or_assign("rss_added_mb", benchmark::Counter(static_cast<double>(most > baseline() ? most - baseline() : 0) / (1024.0 * 1024.0)));
+        state.counters.insert_or_assign("peak_rss_mb",
+                                        benchmark::Counter(static_cast<double>(most) / (1024.0 * 1024.0)));
+        state.counters.insert_or_assign(
+                "rss_added_mb",
+                benchmark::Counter(static_cast<double>(most > baseline() ? most - baseline() : 0) / (1024.0 * 1024.0)));
     }
 }

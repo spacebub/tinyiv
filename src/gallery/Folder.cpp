@@ -54,7 +54,8 @@ namespace tiv {
         }
     }
 
-    bool Folder::open(const std::filesystem::path &file, const std::span<const std::string_view> suffixes, std::string *error) {
+    bool Folder::open(const std::filesystem::path &file, const std::span<const std::string_view> suffixes,
+                      std::string *error) {
         std::error_code failure;
         const std::filesystem::path opened = std::filesystem::absolute(file, failure);
 
@@ -68,7 +69,8 @@ namespace tiv {
 
         std::vector<std::filesystem::path> found;
 
-        for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(opened.parent_path(), failure)) {
+        for (const std::filesystem::directory_entry &entry :
+             std::filesystem::directory_iterator(opened.parent_path(), failure)) {
             if (entry.path() == opened || !entry.is_regular_file(failure)) {
                 continue;
             }

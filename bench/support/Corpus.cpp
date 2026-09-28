@@ -36,18 +36,90 @@ namespace bench {
         constexpr double LOSSLESS_NOISE = 18.0;
         constexpr double LOSSY_NOISE = 45.0;
 
-        constexpr std::array<Corpus::Spec, 10> SPECS = {{
-                {"noise.png", "[compression=6]", 45 * MIB, 0, 0, LOSSLESS_NOISE},
-                {"noise.jpg", "[Q=95]", 45 * MIB, 0, 0, LOSSY_NOISE},
-                {"noise.webp", "[Q=90]", 45 * MIB, 0, 0, LOSSY_NOISE},
-                {"noise-lossless.webp", "[lossless=true,effort=2]", 45 * MIB, 0, 0, LOSSLESS_NOISE},
-                {"noise.jxl", "[distance=1,effort=5]", 45 * MIB, 0, 0, LOSSY_NOISE},
-                {"noise.avif", "[Q=60,effort=1]", 45 * MIB, 0, 0, LOSSY_NOISE},
-                {"noise.tif", "[compression=lzw]", 45 * MIB, 0, 0, LOSSLESS_NOISE},
-                {"small.jpg", "[Q=90]", 0, 1600, 1200, LOSSY_NOISE},
-                {"small.png", "[compression=6]", 0, 1600, 1200, LOSSLESS_NOISE},
-                {"huge-lossless.webp", "[lossless=true,effort=0]", 0, 11547, 8660, LOSSLESS_NOISE},
-        }};
+        constexpr std::array<Corpus::Spec, 10> SPECS = {
+                {
+                        {
+                                .name = "noise.png",
+                                .options = "[compression=6]",
+                                .targetBytes = 45 * MIB,
+                                .width = 0,
+                                .height = 0,
+                                .sigma = LOSSLESS_NOISE,
+                        },
+                        {
+                                .name = "noise.jpg",
+                                .options = "[Q=95]",
+                                .targetBytes = 45 * MIB,
+                                .width = 0,
+                                .height = 0,
+                                .sigma = LOSSY_NOISE,
+                        },
+                        {
+                                .name = "noise.webp",
+                                .options = "[Q=90]",
+                                .targetBytes = 45 * MIB,
+                                .width = 0,
+                                .height = 0,
+                                .sigma = LOSSY_NOISE,
+                        },
+                        {
+                                .name = "noise-lossless.webp",
+                                .options = "[lossless=true,effort=2]",
+                                .targetBytes = 45 * MIB,
+                                .width = 0,
+                                .height = 0,
+                                .sigma = LOSSLESS_NOISE,
+                        },
+                        {
+                                .name = "noise.jxl",
+                                .options = "[distance=1,effort=5]",
+                                .targetBytes = 45 * MIB,
+                                .width = 0,
+                                .height = 0,
+                                .sigma = LOSSY_NOISE,
+                        },
+                        {
+                                .name = "noise.avif",
+                                .options = "[Q=60,effort=1]",
+                                .targetBytes = 45 * MIB,
+                                .width = 0,
+                                .height = 0,
+                                .sigma = LOSSY_NOISE,
+                        },
+                        {
+                                .name = "noise.tif",
+                                .options = "[compression=lzw]",
+                                .targetBytes = 45 * MIB,
+                                .width = 0,
+                                .height = 0,
+                                .sigma = LOSSLESS_NOISE,
+                        },
+                        {
+                                .name = "small.jpg",
+                                .options = "[Q=90]",
+                                .targetBytes = 0,
+                                .width = 1600,
+                                .height = 1200,
+                                .sigma = LOSSY_NOISE,
+                        },
+                        {
+                                .name = "small.png",
+                                .options = "[compression=6]",
+                                .targetBytes = 0,
+                                .width = 1600,
+                                .height = 1200,
+                                .sigma = LOSSLESS_NOISE,
+                        },
+                        {
+                                .name = "huge-lossless.webp",
+                                .options = "[lossless=true,effort=0]",
+                                .targetBytes = 0,
+                                .width = 11547,
+                                .height = 8660,
+                                .sigma = LOSSLESS_NOISE,
+                        },
+                },
+        };
 
         struct State {
             std::filesystem::path dir;
@@ -62,16 +134,22 @@ namespace bench {
 
         void ensure_vips() {
             std::call_once(state().vips, [] {
-                g_log_set_handler("VIPS", G_LOG_LEVEL_WARNING, [](const gchar *, GLogLevelFlags, const gchar *, gpointer) {}, nullptr);
+                g_log_set_handler(
+                        "VIPS", G_LOG_LEVEL_WARNING, [](const gchar *, GLogLevelFlags, const gchar *, gpointer) {},
+                        nullptr);
                 VIPS_INIT("tiv_bench");
             });
         }
 
         VImage texture(const int width, const int height, const double sigma) {
-            const VImage r = VImage::perlin(width, height, VImage::option()->set("cell_size", 300)->set("seed", 1)->set("uchar", true));
-            const VImage g = VImage::perlin(width, height, VImage::option()->set("cell_size", 180)->set("seed", 2)->set("uchar", true));
-            const VImage b = VImage::perlin(width, height, VImage::option()->set("cell_size", 90)->set("seed", 3)->set("uchar", true));
-            const VImage noise = VImage::gaussnoise(width, height, VImage::option()->set("sigma", sigma)->set("mean", 0.0)->set("seed", 4));
+            const VImage r = VImage::perlin(
+                    width, height, VImage::option()->set("cell_size", 300)->set("seed", 1)->set("uchar", true));
+            const VImage g = VImage::perlin(
+                    width, height, VImage::option()->set("cell_size", 180)->set("seed", 2)->set("uchar", true));
+            const VImage b = VImage::perlin(width, height,
+                                            VImage::option()->set("cell_size", 90)->set("seed", 3)->set("uchar", true));
+            const VImage noise = VImage::gaussnoise(
+                    width, height, VImage::option()->set("sigma", sigma)->set("mean", 0.0)->set("seed", 4));
 
             return (r.bandjoin(g).bandjoin(b) + noise).cast(VIPS_FORMAT_UCHAR);
         }
@@ -82,7 +160,6 @@ namespace bench {
             image.write_to_file(target.c_str());
         }
 
-        // Bytes per pixel the format yields on the texture, from a probe.
         double bytes_per_pixel(const Corpus::Spec &spec, const std::filesystem::path &dir) {
             constexpr int PROBE_WIDTH = 1600;
             constexpr int PROBE_HEIGHT = 1200;
@@ -103,7 +180,8 @@ namespace bench {
 
             if (spec.targetBytes > 0) {
                 const double perPixel = bytes_per_pixel(spec, dir);
-                const double pixels = std::min(static_cast<double>(spec.targetBytes) / perPixel, static_cast<double>(MAX_PIXELS));
+                const double pixels =
+                        std::min(static_cast<double>(spec.targetBytes) / perPixel, static_cast<double>(MAX_PIXELS));
 
                 width = std::min(static_cast<int>(std::sqrt(pixels * 4.0 / 3.0)), MAX_SIDE);
                 height = std::min(static_cast<int>(pixels / width), MAX_SIDE);
@@ -116,7 +194,8 @@ namespace bench {
 
             const std::chrono::duration<double> took = std::chrono::steady_clock::now() - started;
 
-            std::println(stderr, "corpus: wrote {} ({}x{}, {:.1f} MiB) in {:.1f} s", spec.name, width, height, static_cast<double>(std::filesystem::file_size(file)) / MIB, took.count());
+            std::println(stderr, "corpus: wrote {} ({}x{}, {:.1f} MiB) in {:.1f} s", spec.name, width, height,
+                         static_cast<double>(std::filesystem::file_size(file)) / MIB, took.count());
         }
     }
 

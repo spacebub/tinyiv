@@ -48,33 +48,41 @@ namespace tiv {
         TIV_AVX2 void expand_avx2(const std::uint8_t *rgb, std::uint8_t *rgba, const int pixels) {
             // Bytes 0 to 11 into the low lane, 12 to 23 into the high one, four pixels each.
             const __m256i spread = _mm256_setr_epi32(0, 1, 2, 3, 3, 4, 5, 6);
+            // clang-format off
             const __m256i place = _mm256_setr_epi8(0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8, -1, 9, 10, 11, -1,
                                                    0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8, -1, 9, 10, 11, -1);
+            // clang-format on
             const __m256i opaque = _mm256_set1_epi32(static_cast<int>(0xFF000000U));
             int x = 0;
 
             for (; x + 11 <= pixels; x += 8) {
-                const __m256i in = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(rgb + (static_cast<std::size_t>(x) * 3)));
-                const __m256i out = _mm256_or_si256(_mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(in, spread), place), opaque);
+                const __m256i in =
+                        _mm256_loadu_si256(reinterpret_cast<const __m256i *>(rgb + (static_cast<std::size_t>(x) * 3)));
+                const __m256i out =
+                        _mm256_or_si256(_mm256_shuffle_epi8(_mm256_permutevar8x32_epi32(in, spread), place), opaque);
 
                 _mm256_storeu_si256(reinterpret_cast<__m256i *>(rgba + (static_cast<std::size_t>(x) * 4)), out);
             }
 
-            expand_scalar(rgb + (static_cast<std::size_t>(x) * 3), rgba + (static_cast<std::size_t>(x) * 4), pixels - x);
+            expand_scalar(rgb + (static_cast<std::size_t>(x) * 3), rgba + (static_cast<std::size_t>(x) * 4),
+                          pixels - x);
         }
 
         // Eight pixels a step. The 32 bytes written reach 8 past the 24 meant, which the next
         // step or the tail writes over, so the loop stops while that much is left.
         TIV_AVX2 void pack_avx2(const std::uint8_t *rgba, std::uint8_t *rgb, const int pixels) {
             // Per lane, four pixels become twelve bytes at the front.
+            // clang-format off
             const __m256i squeeze = _mm256_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1,
                                                      0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
+            // clang-format on
             // The high lane's twelve bytes follow the low lane's.
             const __m256i join = _mm256_setr_epi32(0, 1, 2, 4, 5, 6, 7, 7);
             int x = 0;
 
             for (; x + 11 <= pixels; x += 8) {
-                const __m256i in = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(rgba + (static_cast<std::size_t>(x) * 4)));
+                const __m256i in =
+                        _mm256_loadu_si256(reinterpret_cast<const __m256i *>(rgba + (static_cast<std::size_t>(x) * 4)));
                 const __m256i out = _mm256_permutevar8x32_epi32(_mm256_shuffle_epi8(in, squeeze), join);
 
                 _mm256_storeu_si256(reinterpret_cast<__m256i *>(rgb + (static_cast<std::size_t>(x) * 3)), out);
@@ -84,7 +92,8 @@ namespace tiv {
         }
 
         // Both return how many bytes they did, whole steps of 64, and leave the rest to the caller.
-        TIV_AVX2 std::size_t difference_avx2(const std::uint8_t *row, const std::uint8_t *above, std::uint8_t *out, const std::size_t bytes) {
+        TIV_AVX2 std::size_t difference_avx2(const std::uint8_t *row, const std::uint8_t *above, std::uint8_t *out,
+                                             const std::size_t bytes) {
             std::size_t i = 0;
 
             for (; i + 64 <= bytes; i += 64) {
@@ -142,7 +151,8 @@ namespace tiv {
         pack_scalar(rgba, rgb, pixels);
     }
 
-    void Channels::difference(const std::uint8_t *row, const std::uint8_t *above, std::uint8_t *out, const std::size_t bytes) {
+    void Channels::difference(const std::uint8_t *row, const std::uint8_t *above, std::uint8_t *out,
+                              const std::size_t bytes) {
         std::size_t i = 0;
 
 #if defined(__x86_64__) || defined(_M_X64)

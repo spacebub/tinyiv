@@ -23,9 +23,9 @@ namespace tiv {
         __attribute__((target("xsave")))
 #endif
         bool detect() {
-            constexpr int OSXSAVE = 1 << 27;
-            constexpr int AVX = 1 << 28;
-            constexpr int AVX2 = 1 << 5;
+            constexpr int OSXSAVE = 1U << 27U;
+            constexpr int AVX = 1U << 28U;
+            constexpr int AVX2 = 1U << 5U;
             constexpr unsigned long long XMM_YMM = 0x6;
             std::array<int, 4> info{};
 

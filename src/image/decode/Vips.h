@@ -51,7 +51,6 @@ namespace tiv::Decode::Vips {
     bool probe(const std::filesystem::path &file, Info *info, std::string *error);
 
     enum class Via : std::uint8_t {
-        // The image as it is.
         Whole,
         // Rendered or shrunk on load to the box, for formats that do that cheaply.
         Thumbnail,
@@ -61,10 +60,12 @@ namespace tiv::Decode::Vips {
         Shrink,
     };
 
-    bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error, Abort *abort, Via via, Tone::Source source, const Tone::Display &display);
+    bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error,
+              Abort *abort, Via via, Tone::Source source, const Tone::Display &display);
 
     // The data has to stay mapped until the image is written.
-    bool load_buffer(const std::filesystem::path &file, std::span<const std::uint8_t> data, Bitmap *out, std::string *error, Abort *abort);
+    bool load_buffer(const std::filesystem::path &file, std::span<const std::uint8_t> data, Bitmap *out,
+                     std::string *error, Abort *abort);
 
     // The transfer of an HDR file that libvips reads without it.
     [[nodiscard]] Tone::Source container_tone(Format kind, std::span<const std::uint8_t> data);

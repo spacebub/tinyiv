@@ -1,5 +1,4 @@
-# Written at build time rather than configure time, so it cannot go stale.
-# Run with -P to write the header. A release has an empty revision.
+# The header is written at build time so it cannot go stale. Run with -P, this file writes it.
 if (CMAKE_SCRIPT_MODE_FILE)
     set(revision "")
 
@@ -49,7 +48,8 @@ function(tiv_git_revision target)
             -DTIV_RELEASE=${TIV_RELEASE}
             -P ${CMAKE_CURRENT_FUNCTION_LIST_FILE})
 
-    # Once now so the header is there to include, then again every build.
+    # Once now so the header is there to include, then every build, as a custom target is always out of date.
+    # https://cmake.org/cmake/help/latest/command/add_custom_target.html
     file(MAKE_DIRECTORY "${dir}")
     execute_process(COMMAND ${command})
 

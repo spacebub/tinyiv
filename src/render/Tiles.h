@@ -20,7 +20,7 @@
 #include <SDL3/SDL.h>
 
 #include "image/Bitmap.h"
-#include "image/Store.h"
+#include "image/TileCache.h"
 #include "view/Viewport.h"
 
 namespace tiv {
@@ -36,8 +36,8 @@ namespace tiv {
 
         Tiles(SDL_Renderer *renderer, int maxTexture, std::shared_ptr<const Bitmap> bitmap);
 
-        // A level of a pyramid on disk. Tiles upload once the store has them in memory.
-        Tiles(SDL_Renderer *renderer, std::shared_ptr<const Store> store, int level);
+        // A level of a pyramid on disk. Tiles upload once the tile cache has them in memory.
+        Tiles(SDL_Renderer *renderer, std::shared_ptr<const TileCache> tileCache, int level);
         ~Tiles();
 
         Tiles(const Tiles &) = delete;
@@ -66,9 +66,9 @@ namespace tiv {
         // upload() would do something.
         [[nodiscard]] bool uploadable(const Rect &area) const;
 
-        // The store's keys of the tiles meeting the area that have no texture, nearest its
+        // The tile cache's keys of the tiles meeting the area that have no texture, nearest its
         // centre first. Nothing for a bitmap, which has every tile at hand.
-        void missing(const Rect &area, std::vector<Store::Key> *out) const;
+        void missing(const Rect &area, std::vector<TileCache::Key> *out) const;
 
         // The area, in bitmap pixels, of the bitmap shown whole in the screen rect with the
         // orientation. Tiles drawn are stamped as used.
@@ -94,8 +94,14 @@ namespace tiv {
 
         [[nodiscard]] Span columns(const Rect &area) const;
         [[nodiscard]] Span rows(const Rect &area) const;
-        [[nodiscard]] Tile &at(int column, int row) { return _tiles.at((static_cast<std::size_t>(row) * static_cast<std::size_t>(_columns)) + static_cast<std::size_t>(column)); }
-        [[nodiscard]] const Tile &at(int column, int row) const { return _tiles.at((static_cast<std::size_t>(row) * static_cast<std::size_t>(_columns)) + static_cast<std::size_t>(column)); }
+        [[nodiscard]] Tile &at(int column, int row) {
+            return _tiles.at((static_cast<std::size_t>(row) * static_cast<std::size_t>(_columns))
+                             + static_cast<std::size_t>(column));
+        }
+        [[nodiscard]] const Tile &at(int column, int row) const {
+            return _tiles.at((static_cast<std::size_t>(row) * static_cast<std::size_t>(_columns))
+                             + static_cast<std::size_t>(column));
+        }
         void lay_out();
         [[nodiscard]] static std::size_t bytes_of(const Tile &tile);
         void fill(const Tile &tile) const;
@@ -114,7 +120,7 @@ namespace tiv {
         std::size_t _bytes = 0;
         std::shared_ptr<const Bitmap> _bitmap;
         // Instead of the bitmap, for a level on disk.
-        std::shared_ptr<const Store> _store;
+        std::shared_ptr<const TileCache> _tileCache;
         int _level = 0;
     };
 }

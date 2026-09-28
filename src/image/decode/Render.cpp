@@ -46,12 +46,14 @@ namespace tiv {
         };
 
         // One piece of the part as a document of its own, drawn with its reach and cropped back.
-        bool render_svg_piece(const std::span<const std::uint8_t> document, const double scale, const Decode::Size whole, const Part piece, Bitmap *out) {
+        bool render_svg_piece(const std::span<const std::uint8_t> document, const double scale,
+                              const Decode::Size whole, const Part piece, Bitmap *out) {
             const int left = std::max(piece.x - SVG_REACH, 0);
             const int top = std::max(piece.y - SVG_REACH, 0);
             const int width = std::min(piece.x + piece.width + SVG_REACH, whole.width) - left;
             const int height = std::min(piece.y + piece.height + SVG_REACH, whole.height) - top;
-            const std::string narrowed = Svg::narrow(document, scale, whole.width, whole.height, left, top, width, height);
+            const std::string narrowed =
+                    Svg::narrow(document, scale, whole.width, whole.height, left, top, width, height);
 
             if (narrowed.empty()) {
                 return false;
@@ -64,14 +66,17 @@ namespace tiv {
                     return false;
                 }
 
-                return Decode::Vips::write_rgba(Decode::Vips::prepare(drawn.crop(piece.x - left, piece.y - top, piece.width, piece.height), {}), out, nullptr);
+                return Decode::Vips::write_rgba(
+                        Decode::Vips::prepare(drawn.crop(piece.x - left, piece.y - top, piece.width, piece.height), {}),
+                        out, nullptr);
             } catch (const vips::VError &) {
                 return false;
             }
         }
 
         // The pieces render on threads of their own, since libvips would draw them one by one.
-        bool render_svg(const std::span<const std::uint8_t> document, const double scale, const Decode::Size whole, const Part part, Bitmap *out, const Decode::Abort *abort) {
+        bool render_svg(const std::span<const std::uint8_t> document, const double scale, const Decode::Size whole,
+                        const Part part, Bitmap *out, const Decode::Abort *abort) {
             constexpr int STEP = SVG_TILE - (2 * SVG_REACH);
             const int across = (part.width + STEP - 1) / STEP;
             const int down = (part.height + STEP - 1) / STEP;
@@ -87,7 +92,12 @@ namespace tiv {
                 for (int index = next++; index < count && !failed && !Decode::aborted(abort); index = next++) {
                     const int column = index % across;
                     const int row = index / across;
-                    const Part piece{part.x + (column * pieceWidth), part.y + (row * pieceHeight), std::min(pieceWidth, part.width - (column * pieceWidth)), std::min(pieceHeight, part.height - (row * pieceHeight))};
+                    const Part piece{
+                            .x = part.x + (column * pieceWidth),
+                            .y = part.y + (row * pieceHeight),
+                            .width = std::min(pieceWidth, part.width - (column * pieceWidth)),
+                            .height = std::min(pieceHeight, part.height - (row * pieceHeight)),
+                    };
                     Bitmap drawn;
 
                     if (!render_svg_piece(document, scale, whole, piece, &drawn)) {
@@ -97,7 +107,10 @@ namespace tiv {
                     }
 
                     for (int y = 0; y < drawn.height(); ++y) {
-                        std::ranges::copy(drawn.row(y), target.row((row * pieceHeight) + y).subspan(static_cast<std::size_t>(column * pieceWidth) * Bitmap::CHANNELS).begin());
+                        std::ranges::copy(drawn.row(y), target.row((row * pieceHeight) + y)
+                                                                .subspan(static_cast<std::size_t>(column * pieceWidth)
+                                                                         * Bitmap::CHANNELS)
+                                                                .begin());
                     }
                 }
             };
@@ -122,7 +135,8 @@ namespace tiv {
         }
     }
 
-    bool Decode::render(const std::filesystem::path &file, const double scale, const int x, const int y, const int width, const int height, Bitmap *out, std::string *error, Abort *abort) {
+    bool Decode::render(const std::filesystem::path &file, const double scale, const int x, const int y,
+                        const int width, const int height, Bitmap *out, std::string *error, Abort *abort) {
         Vips::ensure();
 
         try {
@@ -133,7 +147,8 @@ namespace tiv {
             const int partHeight = std::clamp(height, 1, image.height() - top);
 
             if (Mapped mapped; Mapped::open(file, &mapped) && sniff(mapped.data()) == Format::Svg) {
-                if (render_svg(mapped.data(), scale, {image.width(), image.height()}, {left, top, partWidth, partHeight}, out, abort)) {
+                if (render_svg(mapped.data(), scale, {.width = image.width(), .height = image.height()},
+                               {.x = left, .y = top, .width = partWidth, .height = partHeight}, out, abort)) {
                     return true;
                 }
 

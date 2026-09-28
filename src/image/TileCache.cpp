@@ -42,16 +42,15 @@
 #include "image/Bitmap.h"
 #include "image/Channels.h"
 #include "image/Pyramid.h"
-#include "image/Store.h"
+#include "image/TileCache.h"
 #include "image/decode/Decode.h"
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic): tiles are cut from rows by offset.
 namespace tiv {
     namespace {
         constexpr std::array<char, 8> MAGIC{'T', 'I', 'V', 'T', 'I', 'L', 'E', 'S'};
-        // The same layout with PQ tiles, which RGBA8 files never had to say.
+        // The same layout with PQ tiles.
         constexpr std::array<char, 8> MAGIC_PQ{'T', 'I', 'V', 'P', 'Q', 'T', 'I', 'L'};
-        // 2: tiles are filtered and compressed. 3: marked with the image's contents, not its time.
         constexpr std::uint32_t VERSION = 3;
         constexpr std::uint32_t MAX_LEVELS = 32;
         // Far past any image, and far enough from the limit of an int that sums of sides stay within it.
@@ -63,7 +62,7 @@ namespace tiv {
         constexpr std::size_t WRITE_BUFFER = std::size_t{16} * 1024 * 1024;
         constexpr std::string_view SUFFIX = ".tiles";
         constexpr std::string_view PART = ".part";
-        // zstd's fastest level short of the negative ones, which lose much of the ratio for little speed.
+        // zstd's fastest level that keeps most of the ratio.
         constexpr int ZSTD_LEVEL = 1;
         constexpr int MAX_ENCODERS = 16;
         // Guesses the tiles at a third of their raw size, to know how much room to make before any are written.
@@ -179,7 +178,9 @@ namespace tiv {
             explicit Reader(const std::filesystem::path &file)
 #ifdef _WIN32
                 // Shared for writing too, as the image it reads to identify may be open in an editor.
-                : _handle(CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, nullptr))
+                : _handle(CreateFileW(file.c_str(), GENERIC_READ,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                      FILE_FLAG_RANDOM_ACCESS, nullptr))
 #else
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
                 : _fd(::open(file.c_str(), O_RDONLY | O_CLOEXEC))
@@ -216,7 +217,7 @@ namespace tiv {
                 auto *at = static_cast<std::uint8_t *>(out);
 
                 while (bytes > 0) {
-                    constexpr std::size_t MAX_CHUNK = std::size_t{1} << 30;
+                    constexpr std::size_t MAX_CHUNK = std::size_t{1} << 30U;
                     const std::size_t chunk = std::min(bytes, MAX_CHUNK);
 #ifdef _WIN32
                     OVERLAPPED where{};
@@ -251,9 +252,8 @@ namespace tiv {
 #endif
         };
 
-        // Which image a pyramid was made from, by what is in it rather than where it lies or when
-        // it was written, so a pyramid beside the image serves it after any copy, move or rename,
-        // and on any system that mounts the drive.
+        // Which image a pyramid was made from, by its contents alone, so a pyramid beside the image
+        // serves it after any copy, move or rename, and on any system that mounts the drive.
         struct Identity {
             std::uint64_t size = 0;
             std::uint64_t contents = 0;
@@ -308,15 +308,16 @@ namespace tiv {
         // Named for the image's contents, so a changed image never finds an old pyramid, and for
         // the headroom an HDR one was mapped into.
         std::filesystem::path name_of(const Identity &identity, const Tone::Display &display) {
-            const std::u8string text = utf8(std::format("{}|{:016x}", identity.size, identity.contents)) + pq_tag(display);
+            const std::u8string text =
+                    utf8(std::format("{}|{:016x}", identity.size, identity.contents)) + pq_tag(display);
 
             return std::format("{:016x}{}", hash(std::as_bytes(std::span(text))), SUFFIX);
         }
 
-        // A pyramid of the same image made for another headroom, as another system shows it, by
-        // what its header says it was made from. Its highlights roll off where that display's
-        // did, which is better than a pass over the whole image to make one for this display.
-        std::filesystem::path made_for(const std::filesystem::path &dir, const Identity &identity, const Tone::Display &display) {
+        // A pyramid of the same image made for another display's headroom, found by its header. Its
+        // highlights roll off where that display's did, but it saves a pass over the whole image.
+        std::filesystem::path made_for(const std::filesystem::path &dir, const Identity &identity,
+                                       const Tone::Display &display) {
             std::error_code failure;
 
             for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(dir, failure)) {
@@ -333,7 +334,8 @@ namespace tiv {
 
                 const bool pq = header.magic == MAGIC_PQ;
 
-                if (header.version == VERSION && header.sourceSize == identity.size && header.sourceContents == identity.contents && pq == display.hdr()) {
+                if (header.version == VERSION && header.sourceSize == identity.size
+                    && header.sourceContents == identity.contents && pq == display.hdr()) {
                     return entry.path();
                 }
             }
@@ -347,7 +349,8 @@ namespace tiv {
         public:
             explicit Writer(const std::filesystem::path &file)
 #ifdef _WIN32
-                : _handle(CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_FLAG_SEQUENTIAL_SCAN, nullptr))
+                : _handle(CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_FLAG_SEQUENTIAL_SCAN,
+                                      nullptr))
 #else
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
                 : _fd(::open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644))
@@ -356,9 +359,7 @@ namespace tiv {
                 _buffer.reserve(WRITE_BUFFER);
             }
 
-            ~Writer() {
-                close();
-            }
+            ~Writer() { close(); }
 
             Writer(const Writer &) = delete;
             Writer(Writer &&) = delete;
@@ -424,7 +425,7 @@ namespace tiv {
 
             void put(std::uint64_t offset, const std::uint8_t *from, std::size_t bytes) {
                 while (ok() && bytes > 0) {
-                    constexpr std::size_t MAX_CHUNK = std::size_t{1} << 30;
+                    constexpr std::size_t MAX_CHUNK = std::size_t{1} << 30U;
                     const std::size_t chunk = std::min(bytes, MAX_CHUNK);
 #ifdef _WIN32
                     OVERLAPPED where{};
@@ -465,13 +466,18 @@ namespace tiv {
             bool _ok = true;
         };
 
-        std::vector<Store::Level> level_sizes(int width, int height) {
-            std::vector<Store::Level> held;
+        std::vector<TileCache::Level> level_sizes(int width, int height) {
+            std::vector<TileCache::Level> held;
 
             for (;;) {
-                held.push_back({width, height, (width + Store::TILE - 1) / Store::TILE, (height + Store::TILE - 1) / Store::TILE});
+                held.push_back({
+                        .width = width,
+                        .height = height,
+                        .columns = (width + TileCache::TILE - 1) / TileCache::TILE,
+                        .rows = (height + TileCache::TILE - 1) / TileCache::TILE,
+                });
 
-                if (width <= Store::TILE && height <= Store::TILE) {
+                if (width <= TileCache::TILE && height <= TileCache::TILE) {
                     return held;
                 }
 
@@ -480,11 +486,12 @@ namespace tiv {
             }
         }
 
-        std::uint64_t pyramid_bytes(const std::span<const Store::Level> levels, const int channels) {
+        std::uint64_t pyramid_bytes(const std::span<const TileCache::Level> levels, const int channels) {
             std::uint64_t total = 0;
 
-            for (const Store::Level &level : levels) {
-                total += static_cast<std::uint64_t>(level.width) * static_cast<std::uint64_t>(level.height) * static_cast<std::uint64_t>(channels);
+            for (const TileCache::Level &level : levels) {
+                total += static_cast<std::uint64_t>(level.width) * static_cast<std::uint64_t>(level.height)
+                         * static_cast<std::uint64_t>(channels);
             }
 
             return total;
@@ -514,7 +521,11 @@ namespace tiv {
                 if (extension == PART) {
                     std::filesystem::remove(entry.path(), failure);
                 } else if (extension == SUFFIX) {
-                    kept.push_back({entry.path(), entry.last_write_time(failure), entry.file_size(failure)});
+                    kept.push_back({
+                            .file = entry.path(),
+                            .time = entry.last_write_time(failure),
+                            .size = entry.file_size(failure),
+                    });
                     total += kept.back().size;
                 }
             }
@@ -528,7 +539,7 @@ namespace tiv {
             };
 
             for (const Kept &old : kept) {
-                if (total + wanted <= Store::DISK_BYTES && room() >= wanted + SPARE_DISK) {
+                if (total + wanted <= TileCache::DISK_BYTES && room() >= wanted + SPARE_DISK) {
                     break;
                 }
 
@@ -561,16 +572,20 @@ namespace tiv {
         class Builder {
 
         public:
-            Builder(Writer &out, const std::vector<Store::Level> &levels, const int channels, const Bitmap::Encoding encoding)
-                : _out(&out), _channels(channels), _encoding(encoding), _slots(static_cast<std::size_t>(std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_ENCODERS))) {
-                const std::size_t raw = static_cast<std::size_t>(Store::TILE) * Store::TILE * static_cast<std::size_t>(channels);
+            Builder(Writer &out, const std::vector<TileCache::Level> &levels, const int channels,
+                    const Bitmap::Encoding encoding)
+                : _out(&out), _channels(channels), _encoding(encoding),
+                  _slots(static_cast<std::size_t>(
+                          std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_ENCODERS))) {
+                const std::size_t raw = static_cast<std::size_t>(TileCache::TILE) * TileCache::TILE
+                                        * static_cast<std::size_t>(channels);
 
                 for (Encoded &slot : _slots) {
                     slot.raw.resize(raw);
                     slot.packed.resize(ZSTD_compressBound(raw));
                 }
 
-                for (const Store::Level &level : levels) {
+                for (const TileCache::Level &level : levels) {
                     State state;
                     const std::size_t pitch = static_cast<std::size_t>(level.width) * Bitmap::CHANNELS;
 
@@ -579,14 +594,15 @@ namespace tiv {
                     state.held.resize(pitch);
                     // The finest level arrives in whole bands, so only the rest gather them.
                     if (!_states.empty()) {
-                        state.band.resize(pitch * Store::TILE);
+                        state.band.resize(pitch * TileCache::TILE);
                     }
 
                     _states.push_back(std::move(state));
                 }
 
                 for (std::size_t i = 0; i + 1 < _states.size(); ++i) {
-                    _states.at(i).half.resize(static_cast<std::size_t>(_states.at(i + 1).level.width) * Bitmap::CHANNELS);
+                    _states.at(i).half.resize(static_cast<std::size_t>(_states.at(i + 1).level.width)
+                                              * Bitmap::CHANNELS);
                 }
             }
 
@@ -613,7 +629,10 @@ namespace tiv {
                 }
 
                 for (const State &state : _states) {
-                    const LevelSize size{static_cast<std::uint32_t>(state.level.width), static_cast<std::uint32_t>(state.level.height)};
+                    const LevelSize size{
+                            .width = static_cast<std::uint32_t>(state.level.width),
+                            .height = static_cast<std::uint32_t>(state.level.height),
+                    };
 
                     _out->write(&size, sizeof size);
                 }
@@ -627,7 +646,7 @@ namespace tiv {
 
         private:
             struct State {
-                Store::Level level;
+                TileCache::Level level;
                 // RGBA8 rows of the tile row being gathered.
                 std::vector<std::uint8_t> band;
                 int filled = 0;
@@ -642,10 +661,11 @@ namespace tiv {
                 std::vector<Placed> spans;
             };
 
-            void encode(const Store::Level &level, const std::uint8_t *rows, const int count, const int column, Encoded &slot) const {
-                const int width = std::min(Store::TILE, level.width - (column * Store::TILE));
+            void encode(const TileCache::Level &level, const std::uint8_t *rows, const int count, const int column,
+                        Encoded &slot) const {
+                const int width = std::min(TileCache::TILE, level.width - (column * TileCache::TILE));
                 const std::size_t pitch = static_cast<std::size_t>(level.width) * Bitmap::CHANNELS;
-                const std::size_t from = static_cast<std::size_t>(column) * Store::TILE * Bitmap::CHANNELS;
+                const std::size_t from = static_cast<std::size_t>(column) * TileCache::TILE * Bitmap::CHANNELS;
                 const std::size_t outPitch = static_cast<std::size_t>(width) * static_cast<std::size_t>(_channels);
                 std::uint8_t *raw = slot.raw.data();
 
@@ -667,14 +687,15 @@ namespace tiv {
                     Channels::difference(row, row - outPitch, row, outPitch);
                 }
 
-                const std::size_t made = ZSTD_compressCCtx(slot.context.get(), slot.packed.data(), slot.packed.size(), raw, outPitch * static_cast<std::size_t>(count), ZSTD_LEVEL);
+                const std::size_t made = ZSTD_compressCCtx(slot.context.get(), slot.packed.data(), slot.packed.size(),
+                                                           raw, outPitch * static_cast<std::size_t>(count), ZSTD_LEVEL);
 
                 slot.ok = slot.context != nullptr && ZSTD_isError(made) == 0;
                 slot.size = slot.ok ? made : 0;
             }
 
             void write_band(State &state, const std::uint8_t *rows, const int count) {
-                const Store::Level &level = state.level;
+                const TileCache::Level &level = state.level;
                 const auto workers = static_cast<int>(_slots.size());
 
                 for (int first = 0; first < level.columns; first += workers) {
@@ -684,7 +705,9 @@ namespace tiv {
                         std::vector<std::jthread> threads;
 
                         for (int column = first + 1; column < last; ++column) {
-                            threads.emplace_back([&, column] { encode(level, rows, count, column, _slots.at(static_cast<std::size_t>(column - first))); });
+                            threads.emplace_back([&, column] {
+                                encode(level, rows, count, column, _slots.at(static_cast<std::size_t>(column - first)));
+                            });
                         }
 
                         encode(level, rows, count, first, _slots.front());
@@ -694,7 +717,9 @@ namespace tiv {
                         const Encoded &slot = _slots.at(static_cast<std::size_t>(column - first));
 
                         _failed = _failed || !slot.ok;
-                        state.spans.at((static_cast<std::size_t>(state.tileRow) * static_cast<std::size_t>(level.columns)) + static_cast<std::size_t>(column)) = {_out->at(), slot.size};
+                        state.spans.at(
+                                (static_cast<std::size_t>(state.tileRow) * static_cast<std::size_t>(level.columns))
+                                + static_cast<std::size_t>(column)) = {.offset = _out->at(), .bytes = slot.size};
                         _out->write(slot.packed.data(), slot.size);
                     }
                 }
@@ -710,7 +735,7 @@ namespace tiv {
                 std::memcpy(state.band.data() + (pitch * static_cast<std::size_t>(state.filled)), row, pitch);
                 ++state.filled;
 
-                if (state.filled == Store::TILE || state.received + state.filled == state.level.height) {
+                if (state.filled == TileCache::TILE || state.received + state.filled == state.level.height) {
                     write_band(state, state.band.data(), state.filled);
                     state.filled = 0;
                 }
@@ -726,9 +751,11 @@ namespace tiv {
                     ++state.paired;
 
                     if (state.holding) {
-                        Pyramid::halve_row(state.held.data(), row, state.half.data(), state.level.width, Pyramid::Kernel::Auto, _encoding);
+                        Pyramid::halve_row(state.held.data(), row, state.half.data(), state.level.width,
+                                           Pyramid::Kernel::Auto, _encoding);
                     } else if (state.paired == state.level.height) {
-                        Pyramid::halve_row(row, row, state.half.data(), state.level.width, Pyramid::Kernel::Auto, _encoding);
+                        Pyramid::halve_row(row, row, state.half.data(), state.level.width, Pyramid::Kernel::Auto,
+                                           _encoding);
                     } else {
                         std::memcpy(state.held.data(), row, pitch);
                         state.holding = true;
@@ -755,20 +782,24 @@ namespace tiv {
             const bool channels = header.channels == 3 || header.channels == Bitmap::CHANNELS;
             const bool levels = header.levels > 0 && header.levels <= MAX_LEVELS;
 
-            return known && header.version == VERSION && header.tile == Store::TILE && channels && levels && header.index < size;
+            return known && header.version == VERSION && header.tile == TileCache::TILE && channels && levels
+                   && header.index < size;
         }
 
         // Every tile has to lie before the index, and be no larger than it could compress to.
-        bool tiles_fit(const std::span<const Placed> placed, const Store::Level &level, const Header &header) {
+        bool tiles_fit(const std::span<const Placed> placed, const TileCache::Level &level, const Header &header) {
             std::size_t i = 0;
 
             for (const Placed &tile : placed) {
                 const int column = static_cast<int>(i % static_cast<std::size_t>(level.columns));
                 const int row = static_cast<int>(i / static_cast<std::size_t>(level.columns));
-                const auto width = static_cast<std::uint64_t>(std::min(Store::TILE, level.width - (column * Store::TILE)));
-                const auto height = static_cast<std::uint64_t>(std::min(Store::TILE, level.height - (row * Store::TILE)));
+                const auto width =
+                        static_cast<std::uint64_t>(std::min(TileCache::TILE, level.width - (column * TileCache::TILE)));
+                const auto height =
+                        static_cast<std::uint64_t>(std::min(TileCache::TILE, level.height - (row * TileCache::TILE)));
 
-                if (tile.offset + tile.bytes > header.index || tile.bytes > ZSTD_compressBound(width * height * header.channels)) {
+                if (tile.offset + tile.bytes > header.index
+                    || tile.bytes > ZSTD_compressBound(width * height * header.channels)) {
                     return false;
                 }
 
@@ -785,10 +816,11 @@ namespace tiv {
             std::vector<std::uint8_t> raw;
         };
 
-        Bitmap read_tile(const Reader &reader, const Store::Level &level, const std::uint64_t offset, const std::uint64_t bytes, const int channels, const Bitmap::Encoding encoding, const Store::Key &key,
-                         Decoder &decoder) {
-            const int width = std::min(Store::TILE, level.width - (key.column * Store::TILE));
-            const int height = std::min(Store::TILE, level.height - (key.row * Store::TILE));
+        Bitmap read_tile(const Reader &reader, const TileCache::Level &level, const std::uint64_t offset,
+                         const std::uint64_t bytes, const int channels, const Bitmap::Encoding encoding,
+                         const TileCache::Key &key, Decoder &decoder) {
+            const int width = std::min(TileCache::TILE, level.width - (key.column * TileCache::TILE));
+            const int height = std::min(TileCache::TILE, level.height - (key.row * TileCache::TILE));
             const std::size_t pixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
             const std::size_t pitch = static_cast<std::size_t>(width) * static_cast<std::size_t>(channels);
             const std::size_t raw = pitch * static_cast<std::size_t>(height);
@@ -806,7 +838,9 @@ namespace tiv {
             bool read = decoder.context != nullptr && reader.read(offset, decoder.packed.data(), decoder.packed.size());
 
             if (read) {
-                read = ZSTD_decompressDCtx(decoder.context.get(), target, raw, decoder.packed.data(), decoder.packed.size()) == raw;
+                read = ZSTD_decompressDCtx(decoder.context.get(), target, raw, decoder.packed.data(),
+                                           decoder.packed.size())
+                       == raw;
             }
 
             if (read) {
@@ -822,7 +856,7 @@ namespace tiv {
                 }
             }
 
-            // A tile that cannot be read shows as a hole, rather than being asked for forever.
+            // A tile that cannot be read shows as a hole, else the view would ask for it forever.
             if (!read) {
                 std::memset(tile.data(), 0, tile.bytes());
             }
@@ -831,10 +865,11 @@ namespace tiv {
         }
     }
 
-    std::filesystem::path Store::location(const std::filesystem::path &file) {
+    std::filesystem::path TileCache::location(const std::filesystem::path &file) {
         std::error_code failure;
 
-        if (const std::filesystem::path folder = std::filesystem::absolute(file, failure).parent_path(); !failure && !folder.empty()) {
+        if (const std::filesystem::path folder = std::filesystem::absolute(file, failure).parent_path();
+            !failure && !folder.empty()) {
             std::filesystem::path dir = folder / "tinyiv-cache";
 
             if (usable(dir)) {
@@ -853,7 +888,7 @@ namespace tiv {
         return std::filesystem::temp_directory_path(missing) / "tinyiv";
     }
 
-    std::shared_ptr<Store> Store::open(const std::filesystem::path &file, const Tone::Display &display) {
+    std::shared_ptr<TileCache> TileCache::open(const std::filesystem::path &file, const Tone::Display &display) {
         Identity identity;
 
         if (!identify(file, &identity)) {
@@ -875,20 +910,22 @@ namespace tiv {
         // Opened now, so the last to go when room is made.
         std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now(), failure);
 
-        std::shared_ptr<Store> store(new Store());
+        std::shared_ptr<TileCache> tileCache(new TileCache());
 
-        if (!store->load(path)) {
+        if (!tileCache->load(path)) {
             std::filesystem::remove(path, failure);
 
             return nullptr;
         }
 
-        store->start();
+        tileCache->start();
 
-        return store;
+        return tileCache;
     }
 
-    std::shared_ptr<Store> Store::build(const std::filesystem::path &file, const Tone::Display &display, std::atomic<float> *progress, std::string *error, Decode::Abort *abort) {
+    std::shared_ptr<TileCache> TileCache::build(const std::filesystem::path &file, const Tone::Display &display,
+                                                std::atomic<float> *progress, std::string *error,
+                                                Decode::Abort *abort) {
         Identity identity;
 
         if (!identify(file, &identity)) {
@@ -921,7 +958,8 @@ namespace tiv {
             const std::uint64_t bytes = pyramid_bytes(levels, channels) / EXPECTED_RATIO;
 
             if (!make_room(dir, bytes)) {
-                why = std::format("needs {:.1f} GB free on the drive for tiles", static_cast<double>(bytes + SPARE_DISK) / 1e9);
+                why = std::format("needs {:.1f} GB free on the drive for tiles",
+                                  static_cast<double>(bytes + SPARE_DISK) / 1e9);
 
                 return false;
             }
@@ -1000,16 +1038,16 @@ namespace tiv {
             return nullptr;
         }
 
-        std::shared_ptr<Store> store = open(file, display);
+        std::shared_ptr<TileCache> tileCache = open(file, display);
 
-        if (store == nullptr) {
+        if (tileCache == nullptr) {
             fail(error, file, "could not open the tile file just made");
         }
 
-        return store;
+        return tileCache;
     }
 
-    bool Store::load(const std::filesystem::path &path) {
+    bool TileCache::load(const std::filesystem::path &path) {
         const Reader reader(path);
         Header header;
         std::error_code failure;
@@ -1040,7 +1078,12 @@ namespace tiv {
 
             const auto width = static_cast<int>(level.width);
             const auto height = static_cast<int>(level.height);
-            const Level held{width, height, (width + TILE - 1) / TILE, (height + TILE - 1) / TILE};
+            const Level held{
+                    .width = width,
+                    .height = height,
+                    .columns = (width + TILE - 1) / TILE,
+                    .rows = (height + TILE - 1) / TILE,
+            };
             const std::size_t count = static_cast<std::size_t>(held.columns) * static_cast<std::size_t>(held.rows);
 
             // The table has to fit in the file before anything is sized from it.
@@ -1061,7 +1104,7 @@ namespace tiv {
             spans.reserve(count);
 
             for (const Placed &tile : placed) {
-                spans.push_back({tile.offset, tile.bytes});
+                spans.push_back({.offset = tile.offset, .bytes = tile.bytes});
             }
 
             _levels.push_back(held);
@@ -1083,10 +1126,15 @@ namespace tiv {
 
             for (int row = 0; row < level.rows; ++row) {
                 for (int column = 0; column < level.columns; ++column) {
-                    const Key key{static_cast<int>(index), column, row};
-                    const Span &span = _spans.at(index).at((static_cast<std::size_t>(row) * static_cast<std::size_t>(level.columns)) + static_cast<std::size_t>(column));
+                    const Key key{.level = static_cast<int>(index), .column = column, .row = row};
+                    const Span &span = _spans.at(index).at(
+                            (static_cast<std::size_t>(row) * static_cast<std::size_t>(level.columns))
+                            + static_cast<std::size_t>(column));
 
-                    keep(id_of(key), std::make_shared<const Bitmap>(read_tile(reader, level, span.offset, span.bytes, _channels, _encoding, key, decoder)), true);
+                    keep(id_of(key),
+                         std::make_shared<const Bitmap>(
+                                 read_tile(reader, level, span.offset, span.bytes, _channels, _encoding, key, decoder)),
+                         true);
                 }
             }
         }
@@ -1094,13 +1142,13 @@ namespace tiv {
         return true;
     }
 
-    void Store::start() {
+    void TileCache::start() {
         for (int i = 0; i < READERS; ++i) {
             _readers.emplace_back([this] { read_loop(); });
         }
     }
 
-    Store::~Store() {
+    TileCache::~TileCache() {
         {
             const std::scoped_lock hold(_guard);
 
@@ -1114,7 +1162,7 @@ namespace tiv {
         }
     }
 
-    void Store::read_loop() {
+    void TileCache::read_loop() {
         const Reader reader(_path);
         Decoder decoder;
         std::unique_lock hold(_guard);
@@ -1139,8 +1187,11 @@ namespace tiv {
 
             const Key key = key_of(id);
             const Level &level = _levels.at(static_cast<std::size_t>(key.level));
-            const Span &span = _spans.at(static_cast<std::size_t>(key.level)).at((static_cast<std::size_t>(key.row) * static_cast<std::size_t>(level.columns)) + static_cast<std::size_t>(key.column));
-            auto tile = std::make_shared<const Bitmap>(read_tile(reader, level, span.offset, span.bytes, _channels, _encoding, key, decoder));
+            const Span &span = _spans.at(static_cast<std::size_t>(key.level))
+                                       .at((static_cast<std::size_t>(key.row) * static_cast<std::size_t>(level.columns))
+                                           + static_cast<std::size_t>(key.column));
+            auto tile = std::make_shared<const Bitmap>(
+                    read_tile(reader, level, span.offset, span.bytes, _channels, _encoding, key, decoder));
 
             hold.lock();
             _reading.erase(id);
@@ -1158,7 +1209,7 @@ namespace tiv {
         }
     }
 
-    void Store::keep(const std::uint64_t id, std::shared_ptr<const Bitmap> bitmap, const bool pinned) const {
+    void TileCache::keep(const std::uint64_t id, std::shared_ptr<const Bitmap> bitmap, const bool pinned) const {
         Slot slot;
 
         slot.pinned = pinned;
@@ -1185,7 +1236,7 @@ namespace tiv {
         }
     }
 
-    std::shared_ptr<const Bitmap> Store::find(const Key &key) const {
+    std::shared_ptr<const Bitmap> TileCache::find(const Key &key) const {
         const std::scoped_lock hold(_guard);
 
         const auto found = _cache.find(id_of(key));
@@ -1201,7 +1252,7 @@ namespace tiv {
         return found->second.bitmap;
     }
 
-    void Store::want(const std::span<const Key> keys) const {
+    void TileCache::want(const std::span<const Key> keys) const {
         {
             const std::scoped_lock hold(_guard);
             std::unordered_set<std::uint64_t> seen;
@@ -1236,13 +1287,13 @@ namespace tiv {
         _wake.notify_all();
     }
 
-    void Store::on_ready(std::function<void()> ready) const {
+    void TileCache::on_ready(std::function<void()> ready) const {
         const std::scoped_lock hold(_guard);
 
         _ready = std::move(ready);
     }
 
-    void Store::shrink() const {
+    void TileCache::shrink() const {
         const std::scoped_lock hold(_guard);
 
         for (const std::uint64_t id : _used) {
@@ -1253,20 +1304,25 @@ namespace tiv {
         _bytes = 0;
     }
 
-    std::size_t Store::cached_bytes() const {
+    std::size_t TileCache::cached_bytes() const {
         const std::scoped_lock hold(_guard);
 
         return _bytes;
     }
 
-    std::uint64_t Store::id_of(const Key &key) {
-        return (static_cast<std::uint64_t>(key.level) << 48U) | (static_cast<std::uint64_t>(key.row) << 24U) | static_cast<std::uint64_t>(key.column);
+    std::uint64_t TileCache::id_of(const Key &key) {
+        return (static_cast<std::uint64_t>(key.level) << 48U) | (static_cast<std::uint64_t>(key.row) << 24U)
+               | static_cast<std::uint64_t>(key.column);
     }
 
-    Store::Key Store::key_of(const std::uint64_t id) {
+    TileCache::Key TileCache::key_of(const std::uint64_t id) {
         constexpr std::uint64_t MASK = (std::uint64_t{1} << 24U) - 1;
 
-        return {static_cast<int>(id >> 48U), static_cast<int>(id & MASK), static_cast<int>((id >> 24U) & MASK)};
+        return {
+                .level = static_cast<int>(id >> 48U),
+                .column = static_cast<int>(id & MASK),
+                .row = static_cast<int>((id >> 24U) & MASK),
+        };
     }
 }
 // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)

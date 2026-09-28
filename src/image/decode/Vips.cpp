@@ -41,24 +41,18 @@ namespace tiv::Decode {
         };
 
         constexpr std::array NAMES = {
-                Name{"jpeg", "JPEG"},
-                Name{"png", "PNG"},
-                Name{"webp", "WEBP"},
-                Name{"tiff", "TIFF"},
-                Name{"heif", "HEIF"},
-                Name{"jxl", "JXL"},
-                Name{"gif", "GIF"},
-                Name{"svg", "SVG"},
-                Name{"pdf", "PDF"},
-                Name{"jp2k", "JP2"},
-                Name{"dcraw", "RAW"},
-                Name{"openexr", "EXR"},
-                Name{"rad", "HDR"},
-                Name{"ppm", "PPM"},
-                Name{"vips", "VIPS"},
+                Name{.loader = "jpeg", .format = "JPEG"}, Name{.loader = "png", .format = "PNG"},
+                Name{.loader = "webp", .format = "WEBP"}, Name{.loader = "tiff", .format = "TIFF"},
+                Name{.loader = "heif", .format = "HEIF"}, Name{.loader = "jxl", .format = "JXL"},
+                Name{.loader = "gif", .format = "GIF"},   Name{.loader = "svg", .format = "SVG"},
+                Name{.loader = "pdf", .format = "PDF"},   Name{.loader = "jp2k", .format = "JP2"},
+                Name{.loader = "dcraw", .format = "RAW"}, Name{.loader = "openexr", .format = "EXR"},
+                Name{.loader = "rad", .format = "HDR"},   Name{.loader = "ppm", .format = "PPM"},
+                Name{.loader = "vips", .format = "VIPS"},
         };
 
-        void drop_log(const gchar * /*domain*/, GLogLevelFlags /*level*/, const gchar * /*message*/, gpointer /*data*/) {
+        void drop_log(const gchar * /*domain*/, GLogLevelFlags /*level*/, const gchar * /*message*/,
+                      gpointer /*data*/) {
         }
 
         struct VipsState {
@@ -73,8 +67,8 @@ namespace tiv::Decode {
         }
 
         // Pages of these formats are frames, where in a TIFF or a PDF they are separate images.
-        bool animates(const Decode::Format kind) {
-            return kind == Decode::Format::Gif || kind == Decode::Format::WebP;
+        bool animates(const Format kind) {
+            return kind == Format::Gif || kind == Format::WebP;
         }
 
         std::string vips_format_name(const VImage &image) {
@@ -124,7 +118,8 @@ namespace tiv::Decode {
         }
 
         bool floating(const VImage &image) {
-            return image.coding() == VIPS_CODING_RAD || image.format() == VIPS_FORMAT_FLOAT || image.format() == VIPS_FORMAT_DOUBLE;
+            return image.coding() == VIPS_CODING_RAD || image.format() == VIPS_FORMAT_FLOAT
+                   || image.format() == VIPS_FORMAT_DOUBLE;
         }
 
         // Where libvips hands over the rows of an HDR image, in order, for the tone mapper.
@@ -135,7 +130,7 @@ namespace tiv::Decode {
         };
 
         // A region this large maps on several threads, since libvips hands regions over one at a time.
-        constexpr std::size_t PARALLEL_PIXELS = std::size_t{1} << 20;
+        constexpr std::size_t PARALLEL_PIXELS = std::size_t{1} << 20U;
 
         template <typename Sample>
         void map_rows(VipsRegion *region, const VipsRect *area, const MappedSink *sink, const int from, const int to) {
@@ -220,11 +215,11 @@ namespace tiv::Decode {
         }
 
         if (floating(image)) {
-            source = {Tone::Transfer::Linear, Tone::Primaries::Bt709};
+            source = {.transfer = Tone::Transfer::Linear, .primaries = Tone::Primaries::Bt709};
         }
 
         if (!source.hdr()) {
-            return {to_rgba(image), std::nullopt, Bitmap::Encoding::Srgb};
+            return {.image = to_rgba(image), .mapper = std::nullopt, .encoding = Bitmap::Encoding::Srgb};
         }
 
         if (image.bands() > Bitmap::CHANNELS) {
@@ -239,10 +234,14 @@ namespace tiv::Decode {
             image = image.cast(VIPS_FORMAT_USHORT);
         }
 
-        return {image, Tone::Mapper(source, display), display.hdr() ? Bitmap::Encoding::Pq : Bitmap::Encoding::Srgb};
+        return {
+                .image = image,
+                .mapper = Tone::Mapper(source, display),
+                .encoding = display.hdr() ? Bitmap::Encoding::Pq : Bitmap::Encoding::Srgb,
+        };
     }
 
-    bool Vips::write_rows(const Prepared &prepared, const int y, const int count, std::uint8_t *target, Decode::Abort *abort) {
+    bool Vips::write_rows(const Prepared &prepared, const int y, const int count, std::uint8_t *target, Abort *abort) {
         const VImage &image = prepared.image;
         const VImage part = y == 0 && count == image.height() ? image : image.crop(0, y, image.width(), count);
 
@@ -254,12 +253,18 @@ namespace tiv::Decode {
 
         if (prepared.mapper) {
             // One pass, which sequential loaders need. The wide samples never take more than the regions in flight.
-            MappedSink sink{&*prepared.mapper, target, image.bands()};
+            MappedSink sink{.mapper = &*prepared.mapper, .target = target, .bands = image.bands()};
 
-            written = vips_sink_disc(part.get_image(), image.format() == VIPS_FORMAT_FLOAT ? map_region<float> : map_region<std::uint16_t>, &sink) == 0;
+            written =
+                    vips_sink_disc(part.get_image(),
+                                   image.format() == VIPS_FORMAT_FLOAT ? map_region<float> : map_region<std::uint16_t>,
+                                   &sink)
+                    == 0;
         } else {
-            const std::size_t bytes = static_cast<std::size_t>(image.width()) * Bitmap::CHANNELS * static_cast<std::size_t>(count);
-            const VImage packed = VImage::new_from_memory(target, bytes, image.width(), count, Bitmap::CHANNELS, VIPS_FORMAT_UCHAR);
+            const std::size_t bytes =
+                    static_cast<std::size_t>(image.width()) * Bitmap::CHANNELS * static_cast<std::size_t>(count);
+            const VImage packed =
+                    VImage::new_from_memory(target, bytes, image.width(), count, Bitmap::CHANNELS, VIPS_FORMAT_UCHAR);
 
             written = vips_image_write(part.get_image(), packed.get_image()) == 0;
         }
@@ -271,7 +276,7 @@ namespace tiv::Decode {
         return written;
     }
 
-    bool Vips::write_rgba(const Prepared &prepared, Bitmap *out, Decode::Abort *abort) {
+    bool Vips::write_rgba(const Prepared &prepared, Bitmap *out, Abort *abort) {
         Bitmap held = Bitmap::allocate(prepared.image.width(), prepared.image.height(), prepared.encoding);
 
         if (!write_rows(prepared, 0, held.height(), held.data(), abort)) {
@@ -283,7 +288,7 @@ namespace tiv::Decode {
         return true;
     }
 
-    bool Vips::probe(const std::filesystem::path &file, Decode::Info *info, std::string *error) {
+    bool Vips::probe(const std::filesystem::path &file, Info *info, std::string *error) {
         ensure();
 
         try {
@@ -308,7 +313,8 @@ namespace tiv::Decode {
         }
     }
 
-    bool Vips::load(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Decode::Abort *abort, const Via via, const Tone::Source source,
+    bool Vips::load(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out,
+                    std::string *error, Abort *abort, const Via via, const Tone::Source source,
                     const Tone::Display &display) {
         ensure();
 
@@ -317,16 +323,22 @@ namespace tiv::Decode {
 
             if (via == Via::Thumbnail || via == Via::Scaled) {
                 const VipsSize size = via == Via::Scaled ? VIPS_SIZE_BOTH : VIPS_SIZE_DOWN;
-                const bool swapped = vips_image_get_orientation_swap(VImage::new_from_file(file.string().c_str()).get_image()) != 0;
+                const bool swapped =
+                        vips_image_get_orientation_swap(VImage::new_from_file(file.string().c_str()).get_image()) != 0;
 
                 image = VImage::thumbnail(file.string().c_str(), swapped ? boxHeight : boxWidth,
-                                          VImage::option()->set("height", swapped ? boxWidth : boxHeight)->set("size", size)->set("no_rotate", true));
+                                          VImage::option()
+                                                  ->set("height", swapped ? boxWidth : boxHeight)
+                                                  ->set("size", size)
+                                                  ->set("no_rotate", true));
             } else {
-                image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
+                image = VImage::new_from_file(file.string().c_str(),
+                                              VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
 
                 if (via == Via::Shrink) {
                     const bool swapped = vips_image_get_orientation_swap(image.get_image()) != 0;
-                    const int factor = shrink_factor(image.width(), image.height(), swapped ? boxHeight : boxWidth, swapped ? boxWidth : boxHeight);
+                    const int factor = shrink_factor(image.width(), image.height(), swapped ? boxHeight : boxWidth,
+                                                     swapped ? boxWidth : boxHeight);
 
                     if (factor > 1) {
                         image = image.shrink(factor, factor);
@@ -352,7 +364,8 @@ namespace tiv::Decode {
         }
     }
 
-    bool Vips::load_buffer(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out, std::string *error, Decode::Abort *abort) {
+    bool Vips::load_buffer(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out,
+                           std::string *error, Abort *abort) {
         ensure();
 
         try {
@@ -374,13 +387,13 @@ namespace tiv::Decode {
         }
     }
 
-    Tone::Source Vips::container_tone(const Decode::Format kind, const std::span<const std::uint8_t> data) {
+    Tone::Source Vips::container_tone(const Format kind, const std::span<const std::uint8_t> data) {
         switch (kind) {
-            case Decode::Format::Png:
+            case Format::Png:
                 return Png::tone(data);
-            case Decode::Format::Jxl:
+            case Format::Jxl:
                 return Jxl::tone(data);
-            case Decode::Format::Heif:
+            case Format::Heif:
                 return Heif::colour(data).tone;
             default:
                 break;
@@ -392,6 +405,6 @@ namespace tiv::Decode {
     Tone::Source Vips::container_tone(const std::filesystem::path &file) {
         Mapped mapped;
 
-        return Mapped::open(file, &mapped) ? container_tone(Decode::sniff(mapped.data()), mapped.data()) : Tone::Source{};
+        return Mapped::open(file, &mapped) ? container_tone(sniff(mapped.data()), mapped.data()) : Tone::Source{};
     }
 }

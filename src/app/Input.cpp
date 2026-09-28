@@ -71,7 +71,9 @@ namespace tiv {
 
             case SDL_EVENT_MOUSE_WHEEL: {
                 // Down is next. SDL reports wheel up as positive, and sums fine wheels into whole notches.
-                const int notches = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? event.wheel.integer_y : -event.wheel.integer_y;
+                // SDL_MouseWheelEvent: https://wiki.libsdl.org/SDL3/SDL_MouseWheelEvent
+                const int notches = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? event.wheel.integer_y
+                                                                                    : -event.wheel.integer_y;
 
                 _wheel += notches;
 
@@ -155,7 +157,7 @@ namespace tiv {
     void Input::follow(const SDL_MouseMotionEvent &motion) {
         SDL_Window *window = SDL_GetWindowFromID(motion.windowID);
 
-        // Grabbed from the first motion rather than the press, so a plain click never confines the cursor.
+        // Grabbed on the first motion, so a plain click never confines the cursor.
         if (!_held) {
             SDL_SetWindowMouseGrab(window, true);
             _held = true;
@@ -169,10 +171,11 @@ namespace tiv {
         const bool relative = SDL_GetWindowRelativeMouseMode(window);
         // Leaving takes a few units, so a cursor wobbling on an edge does not flip modes on every motion.
         const float margin = relative ? EDGE_RELEASE : 1.0F;
-        const bool edge = motion.x < margin || motion.y < margin || motion.x >= static_cast<float>(width) - margin ||
-                          motion.y >= static_cast<float>(height) - margin;
+        const bool edge = motion.x < margin || motion.y < margin || motion.x >= static_cast<float>(width) - margin
+                          || motion.y >= static_cast<float>(height) - margin;
 
-        // Relative mode reports where the cursor would be, clamped to the window, and SDL warps it there on the way out.
+        // Relative mode reports where the cursor would be, clamped to the window, and SDL warps it
+        // there on the way out.
         if (edge != relative) {
             SDL_SetWindowRelativeMouseMode(window, edge);
         }

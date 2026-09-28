@@ -48,7 +48,8 @@ namespace tiv {
         Refiner &operator=(Refiner &&) = delete;
 
         // The part is in pixels of the image at the scale.
-        void render(std::uint64_t generation, const std::filesystem::path &file, double scale, int x, int y, int width, int height);
+        void render(std::uint64_t generation, const std::filesystem::path &file, double scale, int x, int y, int width,
+                    int height);
         void cancel();
 
         // Main thread. False when nothing new has arrived.

@@ -36,6 +36,12 @@
 
 namespace tiv::Decode {
     namespace {
+        // The events are flags in a C enum, which ORs as int.
+        template <typename... Events>
+        int event_mask(const Events... events) {
+            return static_cast<int>((static_cast<unsigned>(events) | ...));
+        }
+
         struct JxlHandle {
             JxlDecoder *decoder = JxlDecoderCreate(nullptr);
             void *runner = JxlThreadParallelRunnerCreate(nullptr, JxlThreadParallelRunnerDefaultNumWorkerThreads());
@@ -56,14 +62,18 @@ namespace tiv::Decode {
         Size jxl_size(const JxlBasicInfo &info) {
             const bool swapped = info.orientation >= JXL_ORIENT_TRANSPOSE;
 
-            return {static_cast<int>(swapped ? info.ysize : info.xsize), static_cast<int>(swapped ? info.xsize : info.ysize)};
+            return {
+                    .width = static_cast<int>(swapped ? info.ysize : info.xsize),
+                    .height = static_cast<int>(swapped ? info.xsize : info.ysize),
+            };
         }
 
         // The encoding the pixels come out in. An ICC profile alone is taken for SDR.
         Tone::Source jxl_tone(JxlDecoder *decoder) {
             JxlColorEncoding encoding;
 
-            if (JxlDecoderGetColorAsEncodedProfile(decoder, JXL_COLOR_PROFILE_TARGET_DATA, &encoding) != JXL_DEC_SUCCESS) {
+            if (JxlDecoderGetColorAsEncodedProfile(decoder, JXL_COLOR_PROFILE_TARGET_DATA, &encoding)
+                != JXL_DEC_SUCCESS) {
                 return {};
             }
 
@@ -75,7 +85,9 @@ namespace tiv::Decode {
         bool jxl_header(const std::span<const std::uint8_t> data, JxlBasicInfo *basic, Tone::Source *tone) {
             const JxlHandle handle;
 
-            if (handle.decoder == nullptr || JxlDecoderSubscribeEvents(handle.decoder, JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING) != JXL_DEC_SUCCESS
+            if (handle.decoder == nullptr
+                || JxlDecoderSubscribeEvents(handle.decoder, event_mask(JXL_DEC_BASIC_INFO, JXL_DEC_COLOR_ENCODING))
+                           != JXL_DEC_SUCCESS
                 || JxlDecoderSetInput(handle.decoder, data.data(), data.size()) != JXL_DEC_SUCCESS) {
                 return false;
             }
@@ -129,14 +141,19 @@ namespace tiv::Decode {
                 const std::size_t count = pixels * Bitmap::CHANNELS;
                 // Captured by reference, so the adjust fits in std::function without an allocation per run.
                 const std::array<std::size_t, 2> start{x, y};
-                const Tone::Adjust adjust = gain ? Tone::Adjust([this, &start](const std::size_t first, const std::span<float> rgba) { lift(start, first, rgba); }) : Tone::Adjust{};
+                const Tone::Adjust adjust =
+                        gain ? Tone::Adjust([this, &start](const std::size_t first, const std::span<float> rgba) {
+                            lift(start, first, rgba);
+                        })
+                             : Tone::Adjust{};
 
                 if (!mapper) {
                     std::memcpy(out.data(), samples, count);
                 } else if (type == JXL_TYPE_FLOAT) {
                     mapper->map(std::span(static_cast<const float *>(samples), count), Bitmap::CHANNELS, out, adjust);
                 } else {
-                    mapper->map(std::span(static_cast<const std::uint16_t *>(samples), count), Bitmap::CHANNELS, out, adjust);
+                    mapper->map(std::span(static_cast<const std::uint16_t *>(samples), count), Bitmap::CHANNELS, out,
+                                adjust);
                 }
 
                 if (landed) {
@@ -144,7 +161,8 @@ namespace tiv::Decode {
                 }
             }
 
-            void lift(const std::array<std::size_t, 2> &start, const std::size_t first, const std::span<float> rgba) const {
+            void lift(const std::array<std::size_t, 2> &start, const std::size_t first,
+                      const std::span<float> rgba) const {
                 const auto [x, y] = start;
 
                 if (!gain) {
@@ -163,22 +181,32 @@ namespace tiv::Decode {
             }
         };
 
-        void jxl_take(void *opaque, const std::size_t x, const std::size_t y, const std::size_t pixels, const void *samples) {
+        void jxl_take(void *opaque, const std::size_t x, const std::size_t y, const std::size_t pixels,
+                      const void *samples) {
             static_cast<const JxlOutput *>(opaque)->take(x, y, pixels, samples);
         }
 
         // Told the colour encoding, says how the pixels come out, or nothing for RGBA8 as stored.
         using JxlSetup = std::function<std::optional<JxlOutput>(const Tone::Source &tone, int width, int height)>;
 
-        // RGBA8 straight into the bitmap, or through the output's callback.
         bool jxl_output(JxlDecoder *decoder, Bitmap &held, JxlOutput *output) {
             if (output != nullptr) {
-                const JxlPixelFormat format{Bitmap::CHANNELS, output->type, JXL_NATIVE_ENDIAN, 0};
+                const JxlPixelFormat format{
+                        .num_channels = Bitmap::CHANNELS,
+                        .data_type = output->type,
+                        .endianness = JXL_NATIVE_ENDIAN,
+                        .align = 0,
+                };
 
                 return JxlDecoderSetImageOutCallback(decoder, &format, jxl_take, output) == JXL_DEC_SUCCESS;
             }
 
-            const JxlPixelFormat format{Bitmap::CHANNELS, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
+            const JxlPixelFormat format{
+                    .num_channels = Bitmap::CHANNELS,
+                    .data_type = JXL_TYPE_UINT8,
+                    .endianness = JXL_NATIVE_ENDIAN,
+                    .align = 0,
+            };
             std::size_t needed = 0;
 
             return JxlDecoderImageOutBufferSize(decoder, &format, &needed) == JXL_DEC_SUCCESS && needed == held.bytes()
@@ -198,7 +226,6 @@ namespace tiv::Decode {
             return true;
         }
 
-        // An output that maps writes into the bitmap, reallocated in the output's encoding.
         void jxl_bind(std::optional<JxlOutput> &output, Bitmap *held) {
             if (!output) {
                 return;
@@ -212,12 +239,15 @@ namespace tiv::Decode {
 
         // Without a setup the samples come out as stored, which a gain map wants. libjxl runs
         // with its own thread pool, which libvips does not use.
-        Direct jxl_decode(const std::span<const std::uint8_t> data, Bitmap *out, const Decode::Abort *abort, const JxlSetup &setup) {
+        Direct jxl_decode(const std::span<const std::uint8_t> data, Bitmap *out, const Abort *abort,
+                          const JxlSetup &setup) {
             const JxlHandle handle;
-            const int events = JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE | (setup ? JXL_DEC_COLOR_ENCODING : 0);
+            const int events = setup ? event_mask(JXL_DEC_BASIC_INFO, JXL_DEC_FULL_IMAGE, JXL_DEC_COLOR_ENCODING)
+                                     : event_mask(JXL_DEC_BASIC_INFO, JXL_DEC_FULL_IMAGE);
 
             if (handle.decoder == nullptr || handle.runner == nullptr
-                || JxlDecoderSetParallelRunner(handle.decoder, JxlThreadParallelRunner, handle.runner) != JXL_DEC_SUCCESS
+                || JxlDecoderSetParallelRunner(handle.decoder, JxlThreadParallelRunner, handle.runner)
+                           != JXL_DEC_SUCCESS
                 || JxlDecoderSetKeepOrientation(handle.decoder, JXL_TRUE) != JXL_DEC_SUCCESS
                 || JxlDecoderSubscribeEvents(handle.decoder, events) != JXL_DEC_SUCCESS
                 || JxlDecoderSetInput(handle.decoder, data.data(), data.size()) != JXL_DEC_SUCCESS) {
@@ -268,7 +298,8 @@ namespace tiv::Decode {
             GainMap::Jxl bundle;
             auto held = std::make_unique<JxlGain>();
 
-            if (!GainMap::read_jxl(Heif::box(data, "jhgm"), &bundle) || jxl_decode(bundle.image, &held->map, nullptr, {}) != Direct::Done) {
+            if (!GainMap::read_jxl(Heif::box(data, "jhgm"), &bundle)
+                || jxl_decode(bundle.image, &held->map, nullptr, {}) != Direct::Done) {
                 return nullptr;
             }
 
@@ -278,7 +309,8 @@ namespace tiv::Decode {
         }
 
         // HDR is tone mapped, or brought down to SDR by a gain map where there is one.
-        std::optional<JxlOutput> jxl_setup(const std::span<const std::uint8_t> data, const Tone::Source &tone, const int width, const int height, const Tone::Display &display) {
+        std::optional<JxlOutput> jxl_setup(const std::span<const std::uint8_t> data, const Tone::Source &tone,
+                                           const int width, const int height, const Tone::Display &display) {
             if (!tone.hdr()) {
                 return std::nullopt;
             }
@@ -297,7 +329,8 @@ namespace tiv::Decode {
                 held.gain.emplace(gain->metadata, &gain->map, width, height, weight);
 
                 if (!gain->metadata.inBaseColours && tone.primaries != Tone::Primaries::Bt709) {
-                    held.gainColours.emplace(Tone::convert(tone.primaries, Tone::Primaries::Bt709), Tone::convert(Tone::Primaries::Bt709, tone.primaries));
+                    held.gainColours.emplace(Tone::convert(tone.primaries, Tone::Primaries::Bt709),
+                                             Tone::convert(Tone::Primaries::Bt709, tone.primaries));
                 }
 
                 held.gainMap = std::move(gain);
@@ -306,18 +339,18 @@ namespace tiv::Decode {
             return held;
         }
 
-        // Runs libjxl hands over from many threads in no order, gathered into bands of rows that
-        // go on in order. A thread more than a few bands ahead of the one going on waits, so the
-        // bands in memory stay few while the decode outruns whatever takes them. The runs of the
-        // bands before it were claimed first by other threads, so the wait always ends.
+        // Runs libjxl hands over from many threads in no order, gathered into bands of rows that go on in order.
+        // A thread over AHEAD bands past the next one waits, so few bands stay held when the decode outruns take.
+        // Runs of the bands before it were claimed first by other threads, so the wait always ends.
         class JxlBands {
 
         public:
             static constexpr std::size_t AHEAD = 4;
 
-            JxlBands(const int width, const int height, const int rows, const Bitmap::Encoding encoding, const Decode::Take &take, const Decode::Abort *abort)
-                : _width(width), _height(height), _rows(rows), _encoding(encoding), _take(take), _abort(abort), _slots(static_cast<std::size_t>((height + rows - 1) / rows)) {
-            }
+            JxlBands(const int width, const int height, const int rows, const Bitmap::Encoding encoding,
+                     const Take &take, const Abort *abort)
+                : _width(width), _height(height), _rows(rows), _encoding(encoding), _take(take), _abort(abort),
+                  _slots(static_cast<std::size_t>((height + rows - 1) / rows)) {}
 
             std::span<std::uint8_t> place(const std::size_t x, const std::size_t y, const std::size_t pixels) {
                 const std::size_t index = y / static_cast<std::size_t>(_rows);
@@ -331,7 +364,8 @@ namespace tiv::Decode {
                     slot.remaining.store(static_cast<std::size_t>(_width) * static_cast<std::size_t>(rows));
                 });
 
-                return slot.band.row(static_cast<int>(y % static_cast<std::size_t>(_rows))).subspan(x * Bitmap::CHANNELS, pixels * Bitmap::CHANNELS);
+                return slot.band.row(static_cast<int>(y % static_cast<std::size_t>(_rows)))
+                        .subspan(x * Bitmap::CHANNELS, pixels * Bitmap::CHANNELS);
             }
 
             void landed(const std::size_t y, const std::size_t pixels) {
@@ -344,7 +378,7 @@ namespace tiv::Decode {
             }
 
             // Take said no, or the abort came, so the decode should end.
-            [[nodiscard]] bool stopped(const Decode::Abort *abort) const { return _failed.load() || aborted(abort); }
+            [[nodiscard]] bool stopped(const Abort *abort) const { return _failed.load() || aborted(abort); }
 
             void stop() {
                 _failed.store(true);
@@ -400,8 +434,8 @@ namespace tiv::Decode {
             int _height;
             int _rows;
             Bitmap::Encoding _encoding;
-            const Decode::Take &_take;
-            const Decode::Abort *_abort;
+            const Take &_take;
+            const Abort *_abort;
             std::vector<Slot> _slots;
             std::mutex _guard;
             std::condition_variable _moved;
@@ -423,44 +457,46 @@ namespace tiv::Decode {
             JxlParallelRunFunction run = nullptr;
         };
 
-        JxlParallelRetCode jxl_run(void *opaque, void *jpegxlOpaque, JxlParallelRunInit init, JxlParallelRunFunction run, const std::uint32_t start, const std::uint32_t end) {
+        JxlParallelRetCode jxl_run(void *opaque, void *jpegxlOpaque, JxlParallelRunInit init,
+                                   JxlParallelRunFunction run, const std::uint32_t start, const std::uint32_t end) {
             const auto *runner = static_cast<const JxlStoppable *>(opaque);
 
             if (runner->stopped()) {
                 return JXL_PARALLEL_RET_RUNNER_ERROR;
             }
 
-            JxlTask task{runner, jpegxlOpaque, init, run};
+            JxlTask task{.runner = runner, .opaque = jpegxlOpaque, .init = init, .run = run};
 
-            const JxlParallelRetCode code = JxlThreadParallelRunner(runner->pool, &task,
-                [](void *held, const std::size_t threads) {
-                    const auto *given = static_cast<const JxlTask *>(held);
+            const JxlParallelRetCode code = JxlThreadParallelRunner(
+                    runner->pool, &task,
+                    [](void *held, const std::size_t threads) {
+                        const auto *given = static_cast<const JxlTask *>(held);
 
-                    return given->init(given->opaque, threads);
-                },
-                [](void *held, const std::uint32_t value, const std::size_t thread) {
-                    const auto *given = static_cast<const JxlTask *>(held);
+                        return given->init(given->opaque, threads);
+                    },
+                    [](void *held, const std::uint32_t value, const std::size_t thread) {
+                        const auto *given = static_cast<const JxlTask *>(held);
 
-                    if (!given->runner->stopped()) {
-                        given->run(given->opaque, value, thread);
-                    }
-                },
-                start, end);
+                        if (!given->runner->stopped()) {
+                            given->run(given->opaque, value, thread);
+                        }
+                    },
+                    start, end);
 
             return runner->stopped() ? JXL_PARALLEL_RET_RUNNER_ERROR : code;
         }
 
         struct JxlStreamTo {
             int rows = 0;
-            const Decode::Begin *begin = nullptr;
-            const Decode::Take *take = nullptr;
-            const Decode::Abort *abort = nullptr;
+            const Begin *begin = nullptr;
+            const Take *take = nullptr;
+            const Abort *abort = nullptr;
         };
 
         // Tells begin what is coming, and points the output at bands that go on to take. An
         // image with nothing to map is copied as it comes.
-        bool jxl_start(JxlDecoder *decoder, const std::span<const std::uint8_t> data, const Tone::Display &display, const JxlStreamTo &to, std::optional<JxlOutput> &output,
-                       std::optional<JxlBands> &bands) {
+        bool jxl_start(JxlDecoder *decoder, const std::span<const std::uint8_t> data, const Tone::Display &display,
+                       const JxlStreamTo &to, std::optional<JxlOutput> &output, std::optional<JxlBands> &bands) {
             JxlBasicInfo info;
 
             if (JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS) {
@@ -481,7 +517,9 @@ namespace tiv::Decode {
             }
 
             bands.emplace(width, height, to.rows, output->encoding, *to.take, to.abort);
-            output->place = [&bands](const std::size_t x, const std::size_t y, const std::size_t pixels) { return bands->place(x, y, pixels); };
+            output->place = [&bands](const std::size_t x, const std::size_t y, const std::size_t pixels) {
+                return bands->place(x, y, pixels);
+            };
             output->landed = [&bands](const std::size_t y, const std::size_t pixels) { bands->landed(y, pixels); };
 
             return true;
@@ -498,7 +536,12 @@ namespace tiv::Decode {
                 return false;
             }
 
-            const JxlPixelFormat format{Bitmap::CHANNELS, output->type, JXL_NATIVE_ENDIAN, 0};
+            const JxlPixelFormat format{
+                    .num_channels = Bitmap::CHANNELS,
+                    .data_type = output->type,
+                    .endianness = JXL_NATIVE_ENDIAN,
+                    .align = 0,
+            };
 
             return JxlDecoderSetImageOutCallback(decoder, &format, jxl_take, &*output) == JXL_DEC_SUCCESS;
         }
@@ -523,7 +566,7 @@ namespace tiv::Decode {
         return jxl_header(data, &basic, &tone) ? tone : Tone::Source{};
     }
 
-    bool Jxl::probe(const std::span<const std::uint8_t> data, Decode::Info *info) {
+    bool Jxl::probe(const std::span<const std::uint8_t> data, Info *info) {
         JxlBasicInfo basic;
         Tone::Source tone;
 
@@ -541,10 +584,12 @@ namespace tiv::Decode {
         return true;
     }
 
-    Direct Jxl::load(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out, std::string *error, const Decode::Abort *abort, const Tone::Display &display) {
-        const Direct direct = jxl_decode(data, out, abort, [data, display](const Tone::Source &tone, const int width, const int height) {
-            return jxl_setup(data, tone, width, height, display);
-        });
+    Direct Jxl::load(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out,
+                     std::string *error, const Abort *abort, const Tone::Display &display) {
+        const Direct direct = jxl_decode(data, out, abort,
+                                         [data, display](const Tone::Source &tone, const int width, const int height) {
+                                             return jxl_setup(data, tone, width, height, display);
+                                         });
 
         if (direct == Direct::Failed) {
             fail(error, file, aborted(abort) ? "aborted" : "jxl decode failed");
@@ -553,21 +598,28 @@ namespace tiv::Decode {
         return direct;
     }
 
-    Direct Jxl::stream(const std::span<const std::uint8_t> data, const int rows, const Decode::Begin &begin, const Decode::Take &take, const Decode::Abort *abort, const Tone::Display &display) {
+    Direct Jxl::stream(const std::span<const std::uint8_t> data, const int rows, const Begin &begin, const Take &take,
+                       const Abort *abort, const Tone::Display &display) {
         const JxlHandle handle;
         std::optional<JxlBands> bands;
-        JxlStoppable runner{handle.runner, [&] { return bands ? bands->stopped(abort) : aborted(abort); }};
+        JxlStoppable runner{
+                .pool = handle.runner,
+                .stopped = [&] { return bands ? bands->stopped(abort) : aborted(abort); },
+        };
 
-        if (handle.decoder == nullptr || handle.runner == nullptr || JxlDecoderSetParallelRunner(handle.decoder, jxl_run, &runner) != JXL_DEC_SUCCESS
+        if (handle.decoder == nullptr || handle.runner == nullptr
+            || JxlDecoderSetParallelRunner(handle.decoder, jxl_run, &runner) != JXL_DEC_SUCCESS
             || JxlDecoderSetKeepOrientation(handle.decoder, JXL_TRUE) != JXL_DEC_SUCCESS
-            || JxlDecoderSubscribeEvents(handle.decoder, JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS
+            || JxlDecoderSubscribeEvents(handle.decoder,
+                                         event_mask(JXL_DEC_BASIC_INFO, JXL_DEC_COLOR_ENCODING, JXL_DEC_FULL_IMAGE))
+                       != JXL_DEC_SUCCESS
             || JxlDecoderSetInput(handle.decoder, data.data(), data.size()) != JXL_DEC_SUCCESS) {
             return Direct::Skip;
         }
 
         JxlDecoderCloseInput(handle.decoder);
 
-        const JxlStreamTo to{rows, &begin, &take, abort};
+        const JxlStreamTo to{.rows = rows, .begin = &begin, .take = &take, .abort = abort};
         std::optional<JxlOutput> output;
         // Begin is heard at the colour encoding, and from then on there is no going back to libvips.
         Direct failed = Direct::Skip;
@@ -614,6 +666,8 @@ namespace tiv::Decode {
         const double pixels = static_cast<double>(basic.xsize) * static_cast<double>(basic.ysize);
         const double band = static_cast<double>(basic.xsize) * static_cast<double>(rows) * Bitmap::CHANNELS;
 
-        return static_cast<std::uint64_t>((pixels * (basic.uses_original_profile != 0 ? JXL_LOSSLESS_BYTES : JXL_LOSSY_BYTES)) + (band * (JxlBands::AHEAD + 1)));
+        return static_cast<std::uint64_t>(
+                (pixels * (basic.uses_original_profile != 0 ? JXL_LOSSLESS_BYTES : JXL_LOSSY_BYTES))
+                + (band * (JxlBands::AHEAD + 1)));
     }
 }

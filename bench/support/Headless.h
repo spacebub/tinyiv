@@ -14,8 +14,7 @@
 
 namespace bench::Headless {
 
-    // A renderer on a hidden window, created on first use with the driver the app uses. Null
-    // when no renderer can be had.
+    // Made on first use, on a hidden window with the driver the app uses. Null when none can be made.
     [[nodiscard]] SDL_Renderer *renderer();
 
     [[nodiscard]] int max_texture();

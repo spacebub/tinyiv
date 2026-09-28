@@ -38,32 +38,53 @@ namespace tiv {
                 return {};
             }
 
-            return {x0, y0, x1 - x0, y1 - y0};
+            return {.x = x0, .y = y0, .width = x1 - x0, .height = y1 - y0};
         }
 
         Rect grow(const Rect &rect, const double by) {
-            return {rect.x - by, rect.y - by, rect.width + (2.0 * by), rect.height + (2.0 * by)};
+            return {
+                    .x = rect.x - by,
+                    .y = rect.y - by,
+                    .width = rect.width + (2.0 * by),
+                    .height = rect.height + (2.0 * by),
+            };
         }
 
         Rect whole(const Tiles &tiles) {
-            return {0.0, 0.0, static_cast<double>(tiles.width()), static_cast<double>(tiles.height())};
+            return {
+                    .x = 0.0,
+                    .y = 0.0,
+                    .width = static_cast<double>(tiles.width()),
+                    .height = static_cast<double>(tiles.height()),
+            };
         }
 
         bool contains(const Rect &outer, const Rect &inner) {
             constexpr double SLACK = 1e-6;
 
-            return inner.x >= outer.x - SLACK && inner.y >= outer.y - SLACK && inner.x + inner.width <= outer.x + outer.width + SLACK
+            return inner.x >= outer.x - SLACK && inner.y >= outer.y - SLACK
+                   && inner.x + inner.width <= outer.x + outer.width + SLACK
                    && inner.y + inner.height <= outer.y + outer.height + SLACK;
         }
 
         // The rect as a share of the outer one, which is the unit square.
         Rect within(const Rect &rect, const Rect &outer) {
-            return {(rect.x - outer.x) / outer.width, (rect.y - outer.y) / outer.height, rect.width / outer.width, rect.height / outer.height};
+            return {
+                    .x = (rect.x - outer.x) / outer.width,
+                    .y = (rect.y - outer.y) / outer.height,
+                    .width = rect.width / outer.width,
+                    .height = rect.height / outer.height,
+            };
         }
 
         // A share of the outer rect back in the outer rect's own terms.
         Rect at(const Rect &unit, const Rect &outer) {
-            return {outer.x + (unit.x * outer.width), outer.y + (unit.y * outer.height), unit.width * outer.width, unit.height * outer.height};
+            return {
+                    .x = outer.x + (unit.x * outer.width),
+                    .y = outer.y + (unit.y * outer.height),
+                    .width = unit.width * outer.width,
+                    .height = unit.height * outer.height,
+            };
         }
 
         // What is left of the outer rect around the inner one, which lies within it, as bands.
@@ -71,19 +92,28 @@ namespace tiv {
             const double right = inner.x + inner.width;
             const double bottom = inner.y + inner.height;
 
-            return {{
-                    {outer.x, outer.y, outer.width, inner.y - outer.y},
-                    {outer.x, bottom, outer.width, outer.y + outer.height - bottom},
-                    {outer.x, inner.y, inner.x - outer.x, inner.height},
-                    {right, inner.y, outer.x + outer.width - right, inner.height},
-            }};
+            return {
+                    {
+                            {.x = outer.x, .y = outer.y, .width = outer.width, .height = inner.y - outer.y},
+                            {
+                                    .x = outer.x,
+                                    .y = bottom,
+                                    .width = outer.width,
+                                    .height = outer.y + outer.height - bottom,
+                            },
+                            {.x = outer.x, .y = inner.y, .width = inner.x - outer.x, .height = inner.height},
+                            {.x = right, .y = inner.y, .width = outer.x + outer.width - right, .height = inner.height},
+                    },
+            };
         }
     }
 
-    Canvas::Canvas(SDL_Renderer *renderer, const int maxTexture, const std::size_t vramBudget) : _renderer(renderer), _maxTexture(maxTexture), _budget(vramBudget) {
+    Canvas::Canvas(SDL_Renderer *renderer, const int maxTexture, const std::size_t vramBudget)
+        : _renderer(renderer), _maxTexture(maxTexture), _budget(vramBudget) {
     }
 
-    Canvas::Held Canvas::build(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height, const int orientation, Held previous) const {
+    Canvas::Held Canvas::build(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width,
+                               const int height, const int orientation, Held previous) const {
         Held held;
 
         held.image = image;
@@ -97,9 +127,10 @@ namespace tiv {
 
             sheet.scale = static_cast<double>(level->width()) / held.width;
 
-            if (previous.image == image && previous.store == nullptr) {
+            if (previous.image == image && previous.tileCache == nullptr) {
                 const auto same = std::ranges::find_if(previous.sheets, [&](const Sheet &old) {
-                    return old.tiles != nullptr && old.tiles->width() == level->width() && old.tiles->height() == level->height();
+                    return old.tiles != nullptr && old.tiles->width() == level->width()
+                           && old.tiles->height() == level->height();
                 });
 
                 if (same != previous.sheets.end()) {
@@ -118,9 +149,10 @@ namespace tiv {
         return held;
     }
 
-    Canvas::Held Canvas::build(std::shared_ptr<const Store> store, const std::uint64_t image, const int width, const int height, const int orientation, Held previous) const {
-        // The same store again keeps every tile it has on the GPU.
-        if (previous.image == image && previous.store == store) {
+    Canvas::Held Canvas::build(std::shared_ptr<const TileCache> tileCache, const std::uint64_t image, const int width,
+                               const int height, const int orientation, Held previous) const {
+        // The same tile cache again keeps every tile it has on the GPU.
+        if (previous.image == image && previous.tileCache == tileCache) {
             previous.orientation = orientation;
 
             return previous;
@@ -132,15 +164,15 @@ namespace tiv {
         held.width = std::max(width, 1);
         held.height = std::max(height, 1);
         held.orientation = orientation;
-        held.store = std::move(store);
+        held.tileCache = std::move(tileCache);
 
-        const std::span<const Store::Level> levels = held.store->levels();
+        const std::span<const TileCache::Level> levels = held.tileCache->levels();
 
         for (std::size_t index = levels.size(); index-- > 0;) {
             Sheet sheet;
 
             sheet.scale = static_cast<double>(levels[index].width) / held.width;
-            sheet.tiles = std::make_unique<Tiles>(_renderer, held.store, static_cast<int>(index));
+            sheet.tiles = std::make_unique<Tiles>(_renderer, held.tileCache, static_cast<int>(index));
             held.sheets.push_back(std::move(sheet));
         }
 
@@ -161,11 +193,10 @@ namespace tiv {
         }
 
         // An image on disk would never finish uploading warm, so it is let go.
-        if (previous.store != nullptr) {
+        if (previous.tileCache != nullptr) {
             previous = {};
         }
 
-        // A neighbour already on the GPU is the whole point of keeping it warm.
         if (const auto warm = std::ranges::find(_warm, image, &Held::image); warm != _warm.end()) {
             Held promoted = std::move(*warm);
 
@@ -193,7 +224,8 @@ namespace tiv {
         }
     }
 
-    void Canvas::show(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height, const int orientation) {
+    void Canvas::show(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width,
+                      const int height, const int orientation) {
         if (pyramid == nullptr || pyramid->empty()) {
             return;
         }
@@ -204,25 +236,27 @@ namespace tiv {
         settle();
     }
 
-    void Canvas::show(std::shared_ptr<const Store> store, const std::uint64_t image, const int width, const int height, const int orientation) {
-        if (store == nullptr) {
+    void Canvas::show(std::shared_ptr<const TileCache> tileCache, const std::uint64_t image, const int width,
+                      const int height, const int orientation) {
+        if (tileCache == nullptr) {
             return;
         }
 
         Held previous = take_previous(image);
 
-        _current = build(std::move(store), image, width, height, orientation, std::move(previous));
+        _current = build(std::move(tileCache), image, width, height, orientation, std::move(previous));
         settle();
     }
 
     void Canvas::fetch(const Viewport &viewport) {
-        if (_current.store == nullptr || _current.sheets.empty()) {
+        if (_current.tileCache == nullptr || _current.sheets.empty()) {
             return;
         }
 
         const Rect image = viewport.image_rect();
-        const Rect visible = intersect(image, {0.0, 0.0, viewport.area_width(), viewport.area_height()});
-        std::vector<Store::Key> keys;
+        const Rect visible = intersect(
+                image, {.x = 0.0, .y = 0.0, .width = viewport.area_width(), .height = viewport.area_height()});
+        std::vector<TileCache::Key> keys;
 
         if (visible.width > 0.0 && visible.height > 0.0) {
             const std::size_t sheet = wanted(_current, viewport.zoom());
@@ -237,7 +271,7 @@ namespace tiv {
             tiles.missing(grow(area, Tiles::SIZE), &keys);
         }
 
-        _current.store->want(keys);
+        _current.tileCache->want(keys);
     }
 
     void Canvas::replace(std::shared_ptr<const Pyramid> pyramid) {
@@ -246,9 +280,12 @@ namespace tiv {
         }
 
         const auto &levels = pyramid->levels;
-        const bool same = levels.size() == _current.sheets.size() && std::ranges::equal(std::views::reverse(levels), _current.sheets, [](const auto &level, const Sheet &sheet) {
-            return level->width() == sheet.tiles->width() && level->height() == sheet.tiles->height();
-        });
+        const bool same = levels.size() == _current.sheets.size()
+                          && std::ranges::equal(std::views::reverse(levels), _current.sheets,
+                                                [](const auto &level, const Sheet &sheet) {
+                                                    return level->width() == sheet.tiles->width()
+                                                           && level->height() == sheet.tiles->height();
+                                                });
 
         if (!same) {
             show(std::move(pyramid), _current.image, _current.width, _current.height, _current.orientation);
@@ -267,7 +304,8 @@ namespace tiv {
         _current.orientation = orientation;
     }
 
-    void Canvas::warm(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width, const int height, const int orientation) {
+    void Canvas::warm(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width,
+                      const int height, const int orientation) {
         if (pyramid == nullptr || pyramid->empty() || image == _current.image) {
             return;
         }
@@ -297,16 +335,27 @@ namespace tiv {
             return;
         }
 
-        const Rect area{x / scale, y / scale, bitmap->width() / scale, bitmap->height() / scale};
+        const Rect area{
+                .x = x / scale,
+                .y = y / scale,
+                .width = bitmap->width() / scale,
+                .height = bitmap->height() / scale,
+        };
 
-        _detail = {_current.image, scale, area, std::make_unique<Tiles>(_renderer, _maxTexture, std::move(bitmap))};
+        _detail = {
+                .image = _current.image,
+                .scale = scale,
+                .area = area,
+                .tiles = std::make_unique<Tiles>(_renderer, _maxTexture, std::move(bitmap)),
+        };
 
         // Whole, so it never has holes to fall back from.
         _detail.tiles->upload(whole(*_detail.tiles), ~std::size_t{0}, _frame);
     }
 
     bool Canvas::refined(const double zoom, const Rect &area) const {
-        return _detail.tiles != nullptr && _detail.image == _current.image && _detail.scale == zoom && contains(_detail.area, area);
+        return _detail.tiles != nullptr && _detail.image == _current.image && _detail.scale == zoom
+               && contains(_detail.area, area);
     }
 
     void Canvas::keep(const std::span<const std::uint64_t> images) {
@@ -333,7 +382,12 @@ namespace tiv {
         const Tiles &tiles = *held.sheets.at(sheet).tiles;
         const Rect unit = oriented(within(screen, image), Orient::inverse(held.orientation));
 
-        return {unit.x * tiles.width(), unit.y * tiles.height(), unit.width * tiles.width(), unit.height * tiles.height()};
+        return {
+                .x = unit.x * tiles.width(),
+                .y = unit.y * tiles.height(),
+                .width = unit.width * tiles.width(),
+                .height = unit.height * tiles.height(),
+        };
     }
 
     std::size_t Canvas::fit_sheet(const Held &held) const {
@@ -354,15 +408,18 @@ namespace tiv {
         }
 
         const Rect image = viewport.image_rect();
-        const Rect visible = intersect(image, {0.0, 0.0, viewport.area_width(), viewport.area_height()});
+        const Rect visible = intersect(
+                image, {.x = 0.0, .y = 0.0, .width = viewport.area_width(), .height = viewport.area_height()});
         const std::size_t sheet = wanted(_current, viewport.zoom());
 
-        if (visible.width > 0.0 && _current.sheets.at(sheet).tiles->uploadable(area_of(_current, sheet, visible, image))) {
+        if (visible.width > 0.0
+            && _current.sheets.at(sheet).tiles->uploadable(area_of(_current, sheet, visible, image))) {
             return true;
         }
 
         return std::ranges::any_of(_warm, [&](const Held &held) {
-            return std::ranges::any_of(std::span(held.sheets).first(fit_sheet(held) + 1), [](const Sheet &s) { return !s.tiles->complete(); });
+            return std::ranges::any_of(std::span(held.sheets).first(fit_sheet(held) + 1),
+                                       [](const Sheet &s) { return !s.tiles->complete(); });
         });
     }
 
@@ -374,7 +431,7 @@ namespace tiv {
 
         if (!_current.sheets.empty()) {
             const Rect image = viewport.image_rect();
-            const Rect visible = intersect(image, {0.0, 0.0, _areaWidth, _areaHeight});
+            const Rect visible = intersect(image, {.x = 0.0, .y = 0.0, .width = _areaWidth, .height = _areaHeight});
             const std::size_t sheet = wanted(_current, viewport.zoom());
             Tiles &tiles = *_current.sheets.at(sheet).tiles;
 
@@ -390,7 +447,8 @@ namespace tiv {
                 if (spent < budget && sheet > 0) {
                     Tiles &below = *_current.sheets.at(sheet - 1).tiles;
 
-                    spent += below.upload(grow(area_of(_current, sheet - 1, visible, image), Tiles::SIZE), budget - spent, _frame);
+                    spent += below.upload(grow(area_of(_current, sheet - 1, visible, image), Tiles::SIZE),
+                                          budget - spent, _frame);
                 }
             }
         }
@@ -428,7 +486,8 @@ namespace tiv {
         }
 
         const Rect image = viewport.image_rect();
-        const Rect visible = intersect(image, {0.0, 0.0, viewport.area_width(), viewport.area_height()});
+        const Rect visible = intersect(
+                image, {.x = 0.0, .y = 0.0, .width = viewport.area_width(), .height = viewport.area_height()});
 
         if (visible.width <= 0.0 || visible.height <= 0.0) {
             return;
@@ -442,7 +501,12 @@ namespace tiv {
             return;
         }
 
-        const Rect stored{_detail.area.x / _current.width, _detail.area.y / _current.height, _detail.area.width / _current.width, _detail.area.height / _current.height};
+        const Rect stored{
+                .x = _detail.area.x / _current.width,
+                .y = _detail.area.y / _current.height,
+                .width = _detail.area.width / _current.width,
+                .height = _detail.area.height / _current.height,
+        };
         const Rect placed = at(oriented(stored, _current.orientation), image);
         const Rect over = intersect(visible, placed);
 
@@ -461,7 +525,12 @@ namespace tiv {
 
         Tiles &tiles = *_detail.tiles;
         const Rect unit = oriented(within(over, placed), Orient::inverse(_current.orientation));
-        const Rect area{unit.x * tiles.width(), unit.y * tiles.height(), unit.width * tiles.width(), unit.height * tiles.height()};
+        const Rect area{
+                .x = unit.x * tiles.width(),
+                .y = unit.y * tiles.height(),
+                .width = unit.width * tiles.width(),
+                .height = unit.height * tiles.height(),
+        };
 
         tiles.draw(area, placed, _current.orientation, _frame, [](const Rect &) {});
     }
@@ -477,11 +546,12 @@ namespace tiv {
 
     // Whatever the sheet is missing under the screen rect is drawn from the one below it.
     void Canvas::draw_sheet(Held &held, const std::size_t index, const Rect &screen, const Rect &image) {
-        held.sheets.at(index).tiles->draw(area_of(held, index, screen, image), image, held.orientation, _frame, [&](const Rect &missing) {
-            if (index > 0) {
-                draw_sheet(held, index - 1, missing, image);
-            }
-        });
+        held.sheets.at(index).tiles->draw(area_of(held, index, screen, image), image, held.orientation, _frame,
+                                          [&](const Rect &missing) {
+                                              if (index > 0) {
+                                                  draw_sheet(held, index - 1, missing, image);
+                                              }
+                                          });
     }
 
     // Over the budget, tiles nobody drew this frame go: the neighbours' fine levels first,
@@ -516,13 +586,14 @@ namespace tiv {
 
     std::size_t Canvas::vram() const {
         const auto sum = [](const Held &held) {
-            return std::accumulate(held.sheets.begin(), held.sheets.end(), std::size_t{0}, [](const std::size_t total, const Sheet &sheet) {
-                return total + sheet.tiles->resident_bytes();
-            });
+            return std::accumulate(
+                    held.sheets.begin(), held.sheets.end(), std::size_t{0},
+                    [](const std::size_t total, const Sheet &sheet) { return total + sheet.tiles->resident_bytes(); });
         };
 
         const std::size_t detail = _detail.tiles != nullptr ? _detail.tiles->resident_bytes() : 0;
 
-        return std::accumulate(_warm.begin(), _warm.end(), sum(_current) + detail, [&](const std::size_t total, const Held &held) { return total + sum(held); });
+        return std::accumulate(_warm.begin(), _warm.end(), sum(_current) + detail,
+                               [&](const std::size_t total, const Held &held) { return total + sum(held); });
     }
 }

@@ -31,7 +31,8 @@ namespace tiv {
         // The smallest integer shrink that brings every frame together within the bytes.
         int frame_shrink(const int width, const int height, const int frames, const std::size_t maxBytes) {
             const auto bytes = [&](const int factor) {
-                return static_cast<std::size_t>((width + factor - 1) / factor) * static_cast<std::size_t>((height + factor - 1) / factor) * Bitmap::CHANNELS
+                return static_cast<std::size_t>((width + factor - 1) / factor)
+                       * static_cast<std::size_t>((height + factor - 1) / factor) * Bitmap::CHANNELS
                        * static_cast<std::size_t>(frames);
             };
 
@@ -52,15 +53,18 @@ namespace tiv {
         }
     }
 
-    bool Decode::load_frames(const std::filesystem::path &file, const std::size_t maxBytes, std::vector<Frame> *out, std::string *error, Abort *abort) {
+    bool Decode::load_frames(const std::filesystem::path &file, const std::size_t maxBytes, std::vector<Frame> *out,
+                             std::string *error, Abort *abort) {
         Vips::ensure();
 
         try {
-            // Sequential, so the frames stream through one by one instead of the whole strip decoding up front.
-            VImage strip = VImage::new_from_file(file.string().c_str(), VImage::option()->set("n", -1)->set("access", VIPS_ACCESS_SEQUENTIAL));
+            // Sequential, so the frames stream through one by one and the strip never decodes whole up front.
+            VImage strip = VImage::new_from_file(file.string().c_str(),
+                                                 VImage::option()->set("n", -1)->set("access", VIPS_ACCESS_SEQUENTIAL));
             const int height = vips_image_get_page_height(strip.get_image());
             const int frames = strip.height() / height;
-            const std::vector<int> delays = strip.get_typeof("delay") != 0 ? strip.get_array_int("delay") : std::vector<int>{};
+            const std::vector<int> delays =
+                    strip.get_typeof("delay") != 0 ? strip.get_array_int("delay") : std::vector<int>{};
             const int factor = frame_shrink(strip.width(), height, frames, maxBytes);
             const Tone::Source source = Vips::container_tone(file);
             std::vector<Frame> held;

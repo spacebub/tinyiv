@@ -83,7 +83,7 @@ namespace tiv {
             return end == std::string_view::npos ? end : end + closing.size();
         }
 
-        // Past the prolog: declarations, comments and a doctype.
+        // Past the prolog: declarations, comments and a doctype. Spec: XML 1.0, section 2.8.
         std::size_t skip_prolog(const std::string_view text) {
             std::size_t at = text.starts_with("\xEF\xBB\xBF") ? 3 : 0;
 
@@ -107,7 +107,8 @@ namespace tiv {
         }
 
         std::size_t skip_name(const std::string_view text, std::size_t at) {
-            while (peek(text, at) != '\0' && !space(peek(text, at)) && peek(text, at) != '=' && peek(text, at) != '>' && peek(text, at) != '/') {
+            while (peek(text, at) != '\0' && !space(peek(text, at)) && peek(text, at) != '=' && peek(text, at) != '>'
+                   && peek(text, at) != '/') {
                 ++at;
             }
 
@@ -115,7 +116,8 @@ namespace tiv {
         }
 
         // One name="value" pair from at, returning just past it, or npos when malformed.
-        std::size_t read_attribute(const std::string_view text, const std::size_t at, std::string_view *key, std::string_view *value) {
+        std::size_t read_attribute(const std::string_view text, const std::size_t at, std::string_view *key,
+                                   std::string_view *value) {
             const std::size_t nameEnd = skip_name(text, at);
             std::size_t pos = skip_space(text, nameEnd);
 
@@ -208,7 +210,8 @@ namespace tiv {
                     text.remove_prefix(1);
                 }
 
-                const auto [end, failed] = std::from_chars(std::to_address(text.begin()), std::to_address(text.end()), *number);
+                const auto [end, failed] =
+                        std::from_chars(std::to_address(text.begin()), std::to_address(text.end()), *number);
 
                 if (failed != std::errc{}) {
                     return false;
@@ -238,9 +241,9 @@ namespace tiv {
         }
 
         // Without a view box librsvg takes the intrinsic size for one, which is the whole
-        // image before the scale.
+        // image before the scale. Spec: https://www.w3.org/TR/SVG2/coords.html#ComputingAViewportsTransform
         bool place(const Root &root, const double scale, const int wholeWidth, const int wholeHeight, Placement *out) {
-            ViewBox box{0.0, 0.0, wholeWidth / scale, wholeHeight / scale};
+            ViewBox box{.x = 0.0, .y = 0.0, .width = wholeWidth / scale, .height = wholeHeight / scale};
 
             if (!root.viewBox.empty() && !parse_view_box(root.viewBox, &box)) {
                 return false;
@@ -257,14 +260,17 @@ namespace tiv {
                 out->scaleY = uniform;
             }
 
-            out->offsetX = ((wholeWidth - (box.width * out->scaleX)) * align(root.aspect, "x") / 2.0) - (box.x * out->scaleX);
-            out->offsetY = ((wholeHeight - (box.height * out->scaleY)) * align(root.aspect, "Y") / 2.0) - (box.y * out->scaleY);
+            out->offsetX =
+                    ((wholeWidth - (box.width * out->scaleX)) * align(root.aspect, "x") / 2.0) - (box.x * out->scaleX);
+            out->offsetY = ((wholeHeight - (box.height * out->scaleY)) * align(root.aspect, "Y") / 2.0)
+                           - (box.y * out->scaleY);
 
             return true;
         }
     }
 
-    std::string Svg::narrow(const std::span<const std::uint8_t> document, const double scale, const int wholeWidth, const int wholeHeight, const int x, const int y, const int width, const int height) {
+    std::string Svg::narrow(const std::span<const std::uint8_t> document, const double scale, const int wholeWidth,
+                            const int wholeHeight, const int x, const int y, const int width, const int height) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the mapped file is text.
         const std::string_view text(reinterpret_cast<const char *>(document.data()), document.size());
         Root root;
@@ -279,8 +285,10 @@ namespace tiv {
         narrowed.reserve(text.size() + 256);
         narrowed += text.substr(0, root.attributes);
         narrowed += root.kept;
-        narrowed += std::format(R"( width="{}" height="{}" viewBox="{} {} {} {}" preserveAspectRatio="none")", width, height, (x - placement.offsetX) / placement.scaleX, (y - placement.offsetY) / placement.scaleY,
-                                width / placement.scaleX, height / placement.scaleY);
+        narrowed += std::format(R"( width="{}" height="{}" viewBox="{} {} {} {}" preserveAspectRatio="none")", width,
+                                height, (x - placement.offsetX) / placement.scaleX,
+                                (y - placement.offsetY) / placement.scaleY, width / placement.scaleX,
+                                height / placement.scaleY);
         narrowed += text.substr(root.close);
 
         return narrowed;

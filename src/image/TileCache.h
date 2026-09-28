@@ -6,8 +6,8 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
-#ifndef TIV_IMAGE_STORE_H
-#define TIV_IMAGE_STORE_H
+#ifndef TIV_IMAGE_TILECACHE_H
+#define TIV_IMAGE_TILECACHE_H
 
 
 #include <atomic>
@@ -32,11 +32,10 @@
 #include "image/decode/Decode.h"
 
 namespace tiv {
-    // An image too large for memory, as a pyramid of tiles in a file on disk. The file is made
-    // once, by decoding the image top to bottom, and kept, so opening the image again is
-    // instant. Tiles are read on background threads as the view asks for them and held in a
-    // small cache, so what the image costs in memory is what the screen shows, whatever its size.
-    class Store {
+    // An image too large for memory, as a pyramid of tiles in a file on disk, made once by decoding
+    // top to bottom and kept so reopening is instant. Tiles are read on background threads as the
+    // view asks for them and cached, so memory follows what the screen shows, whatever the image's size.
+    class TileCache {
 
     public:
         // Pixels a side of a tile, the same as the GPU tiles, so one read fills one texture.
@@ -73,18 +72,20 @@ namespace tiv {
 
         // The pyramid made for the file as it is now and shown on the display, if there is one.
         // The display only tells pyramids of an HDR image apart.
-        [[nodiscard]] static std::shared_ptr<Store> open(const std::filesystem::path &file, const Tone::Display &display = {});
+        [[nodiscard]] static std::shared_ptr<TileCache> open(const std::filesystem::path &file,
+                                                             const Tone::Display &display = {});
 
         // Decodes the file into a new pyramid on disk and opens it. Progress goes from 0 to 1.
-        [[nodiscard]] static std::shared_ptr<Store> build(const std::filesystem::path &file, const Tone::Display &display, std::atomic<float> *progress, std::string *error = nullptr,
-                                                          Decode::Abort *abort = nullptr);
+        [[nodiscard]] static std::shared_ptr<TileCache>
+        build(const std::filesystem::path &file, const Tone::Display &display, std::atomic<float> *progress,
+              std::string *error = nullptr, Decode::Abort *abort = nullptr);
 
-        ~Store();
+        ~TileCache();
 
-        Store(const Store &) = delete;
-        Store(Store &&) = delete;
-        Store &operator=(const Store &) = delete;
-        Store &operator=(Store &&) = delete;
+        TileCache(const TileCache &) = delete;
+        TileCache(TileCache &&) = delete;
+        TileCache &operator=(const TileCache &) = delete;
+        TileCache &operator=(TileCache &&) = delete;
 
         // As stored, of the finest level.
         [[nodiscard]] int width() const { return _levels.front().width; }
@@ -123,7 +124,7 @@ namespace tiv {
             std::uint64_t bytes = 0;
         };
 
-        Store() = default;
+        TileCache() = default;
 
         bool load(const std::filesystem::path &path);
         void start();
@@ -155,4 +156,4 @@ namespace tiv {
 }
 
 
-#endif //TIV_IMAGE_STORE_H
+#endif //TIV_IMAGE_TILECACHE_H

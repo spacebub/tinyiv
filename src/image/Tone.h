@@ -77,8 +77,10 @@ namespace tiv::Tone {
         void linear(std::span<const float> in, int channels, std::span<float> out) const;
 
         // Four bytes a pixel out, which may be where 8 bit samples came in.
-        void map(std::span<const std::uint8_t> in, int channels, std::span<std::uint8_t> out, const Adjust &adjust = {}) const;
-        void map(std::span<const std::uint16_t> in, int channels, std::span<std::uint8_t> out, const Adjust &adjust = {}) const;
+        void map(std::span<const std::uint8_t> in, int channels, std::span<std::uint8_t> out,
+                 const Adjust &adjust = {}) const;
+        void map(std::span<const std::uint16_t> in, int channels, std::span<std::uint8_t> out,
+                 const Adjust &adjust = {}) const;
         void map(std::span<const float> in, int channels, std::span<std::uint8_t> out, const Adjust &adjust = {}) const;
 
     private:
