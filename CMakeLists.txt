@@ -18,7 +18,12 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+
+# The IPO flag and TIV_COMPILE_FLAGS land after CMAKE_CXX_FLAGS on the command line, where the
+# last one wins, so each default steps aside for one the user sets there.
+if (NOT CMAKE_CXX_FLAGS MATCHES "-f(no-)?lto")
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+endif ()
 
 option(TIV_SANITIZE "Build with the address and undefined sanitizers" OFF)
 option(TIV_BENCHMARKS "Build the benchmark suite in bench/" OFF)
@@ -56,9 +61,15 @@ else ()
             "-Wpedantic"
             "-fstack-protector-strong"
             "-fno-plt"
-            "-march=x86-64-v3"
-            "$<$<CONFIG:DEBUG>:-Og>"
-            "$<$<CONFIG:RELEASE>:-O2;-ffunction-sections;-fdata-sections;-fvisibility=hidden>")
+            "$<$<CONFIG:RELEASE>:-ffunction-sections;-fdata-sections;-fvisibility=hidden>")
+
+    if (NOT CMAKE_CXX_FLAGS MATCHES "-march=")
+        list(APPEND TIV_COMPILE_FLAGS "-march=x86-64-v3")
+    endif ()
+
+    if (NOT CMAKE_CXX_FLAGS MATCHES "(^| )-O")
+        list(APPEND TIV_COMPILE_FLAGS "$<$<CONFIG:DEBUG>:-Og>" "$<$<CONFIG:RELEASE>:-O2>")
+    endif ()
 
     add_link_options("$<$<CONFIG:RELEASE>:-Wl,--gc-sections;-Wl,--as-needed;-Wl,-O1;-s>")
 endif ()
