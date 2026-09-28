@@ -71,6 +71,8 @@ target_include_directories(tinyiv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(tinyiv PRIVATE ${TIV_COMPILE_FLAGS})
 # The libvips 7 compatibility macros rename plain identifiers such as error_exit, which libjpeg uses.
 target_compile_definitions(tinyiv PRIVATE VIPS_DISABLE_COMPAT)
+# Shown in the status bar while no image is open.
+target_compile_definitions(tinyiv PRIVATE TIV_VERSION="${PROJECT_VERSION}")
 target_link_libraries(tinyiv PRIVATE SDL3::SDL3 PkgConfig::VIPS PkgConfig::CODECS)
 
 set_target_properties(tinyiv PROPERTIES WIN32_EXECUTABLE ON)

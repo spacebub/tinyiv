@@ -51,8 +51,8 @@ namespace tiv {
         constexpr std::array<char, 8> MAGIC{'T', 'I', 'V', 'T', 'I', 'L', 'E', 'S'};
         // The same layout with PQ tiles, which RGBA8 files never had to say.
         constexpr std::array<char, 8> MAGIC_PQ{'T', 'I', 'V', 'P', 'Q', 'T', 'I', 'L'};
-        // 2: tiles are filtered and compressed.
-        constexpr std::uint32_t VERSION = 2;
+        // 2: tiles are filtered and compressed. 3: marked with the image's contents, not its time.
+        constexpr std::uint32_t VERSION = 3;
         constexpr std::uint32_t MAX_LEVELS = 32;
         // Far past any image, and far enough from the limit of an int that sums of sides stay within it.
         constexpr std::uint32_t MAX_SIDE = std::uint32_t{1} << 30U;
@@ -68,6 +68,12 @@ namespace tiv {
         constexpr int MAX_ENCODERS = 16;
         // Guesses the tiles at a third of their raw size, to know how much room to make before any are written.
         constexpr std::uint64_t EXPECTED_RATIO = 3;
+        // What of an image is read to tell it apart: its ends, where the headers and the last
+        // of the data sit, and blocks spread evenly between them. A file this small is read whole.
+        constexpr std::uint64_t EDGE_BYTES = std::uint64_t{64} * 1024;
+        constexpr std::uint64_t SAMPLE_BYTES = std::uint64_t{4} * 1024;
+        constexpr std::uint64_t SAMPLES = 32;
+        constexpr std::uint64_t FNV_BASIS = 14695981039346656037ULL;
 
         // Little endian on every machine tinyiv runs on, so written as it lies in memory.
         struct Header {
@@ -77,7 +83,7 @@ namespace tiv {
             std::uint32_t tile = 0;
             std::uint32_t levels = 0;
             std::uint64_t sourceSize = 0;
-            std::int64_t sourceTime = 0;
+            std::uint64_t sourceContents = 0;
             // Where the level sizes start, and after them every tile's offset.
             std::uint64_t index = 0;
         };
@@ -97,39 +103,15 @@ namespace tiv {
             std::uint32_t height = 0;
         };
 
-        // Which version of the file a pyramid was made from.
-        struct Identity {
-            std::uint64_t size = 0;
-            std::int64_t time = 0;
-        };
-
-        bool identify(const std::filesystem::path &file, Identity *out) {
-            std::error_code failure;
-
-            out->size = std::filesystem::file_size(file, failure);
-
-            if (failure) {
-                return false;
-            }
-
-            const auto time = std::filesystem::last_write_time(file, failure);
-
-            out->time = time.time_since_epoch().count();
-
-            return !failure;
-        }
-
         void fail(std::string *error, const std::filesystem::path &file, const std::string_view why) {
             if (error != nullptr) {
                 *error = file.string() + ": " + std::string(why);
             }
         }
 
-        // FNV-1a.
-        std::uint64_t hash(const std::span<const char8_t> text) {
-            std::uint64_t held = 14695981039346656037ULL;
-
-            for (const char8_t c : text) {
+        // FNV-1a, carried on from what came before.
+        std::uint64_t hash(const std::span<const std::byte> data, std::uint64_t held = FNV_BASIS) {
+            for (const std::byte c : data) {
                 held ^= static_cast<std::uint8_t>(c);
                 held *= 1099511628211ULL;
             }
@@ -152,21 +134,6 @@ namespace tiv {
 
         std::u8string pq_tag(const Tone::Display &display) {
             return display.hdr() ? utf8(std::format("|pq|{:.2f}", display.headroom)) : std::u8string{};
-        }
-
-        // Named for the file and the version of it on disk, so a changed file never finds an old
-        // pyramid, and for the headroom an HDR one was mapped into.
-        std::filesystem::path name_of(const std::filesystem::path &file, const Identity &identity, const Tone::Display &display) {
-            std::error_code failure;
-            std::filesystem::path full = std::filesystem::weakly_canonical(file, failure);
-
-            if (failure) {
-                full = std::filesystem::absolute(file, failure);
-            }
-
-            const std::u8string text = full.generic_u8string() + utf8(std::format("|{}|{}", identity.size, identity.time)) + pq_tag(display);
-
-            return std::format("{:016x}{}", hash(text), SUFFIX);
         }
 
         std::filesystem::path from_utf8(const char *text) {
@@ -211,7 +178,8 @@ namespace tiv {
         public:
             explicit Reader(const std::filesystem::path &file)
 #ifdef _WIN32
-                : _handle(CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, nullptr))
+                // Shared for writing too, as the image it reads to identify may be open in an editor.
+                : _handle(CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, nullptr))
 #else
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
                 : _fd(::open(file.c_str(), O_RDONLY | O_CLOEXEC))
@@ -282,6 +250,96 @@ namespace tiv {
             int _fd = -1;
 #endif
         };
+
+        // Which image a pyramid was made from, by what is in it rather than where it lies or when
+        // it was written, so a pyramid beside the image serves it after any copy, move or rename,
+        // and on any system that mounts the drive.
+        struct Identity {
+            std::uint64_t size = 0;
+            std::uint64_t contents = 0;
+        };
+
+        bool identify(const std::filesystem::path &file, Identity *out) {
+            std::error_code failure;
+            const std::uint64_t size = std::filesystem::file_size(file, failure);
+            const Reader reader(file);
+
+            if (failure || !reader.valid()) {
+                return false;
+            }
+
+            std::vector<std::byte> block;
+            std::uint64_t held = FNV_BASIS;
+
+            const auto take = [&](const std::uint64_t offset, const std::uint64_t bytes) {
+                block.resize(static_cast<std::size_t>(bytes));
+
+                if (!reader.read(offset, block.data(), block.size())) {
+                    return false;
+                }
+
+                held = hash(block, held);
+
+                return true;
+            };
+
+            bool read = true;
+
+            if (size <= (2 * EDGE_BYTES) + (SAMPLES * SAMPLE_BYTES)) {
+                read = take(0, size);
+            } else {
+                const std::uint64_t between = size - (2 * EDGE_BYTES) - SAMPLE_BYTES;
+
+                read = take(0, EDGE_BYTES);
+
+                for (std::uint64_t i = 0; read && i < SAMPLES; ++i) {
+                    read = take(EDGE_BYTES + (between * i / (SAMPLES - 1)), SAMPLE_BYTES);
+                }
+
+                read = read && take(size - EDGE_BYTES, EDGE_BYTES);
+            }
+
+            out->size = size;
+            out->contents = held;
+
+            return read;
+        }
+
+        // Named for the image's contents, so a changed image never finds an old pyramid, and for
+        // the headroom an HDR one was mapped into.
+        std::filesystem::path name_of(const Identity &identity, const Tone::Display &display) {
+            const std::u8string text = utf8(std::format("{}|{:016x}", identity.size, identity.contents)) + pq_tag(display);
+
+            return std::format("{:016x}{}", hash(std::as_bytes(std::span(text))), SUFFIX);
+        }
+
+        // A pyramid of the same image made for another headroom, as another system shows it, by
+        // what its header says it was made from. Its highlights roll off where that display's
+        // did, which is better than a pass over the whole image to make one for this display.
+        std::filesystem::path made_for(const std::filesystem::path &dir, const Identity &identity, const Tone::Display &display) {
+            std::error_code failure;
+
+            for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(dir, failure)) {
+                if (!entry.is_regular_file(failure) || entry.path().extension() != SUFFIX) {
+                    continue;
+                }
+
+                const Reader reader(entry.path());
+                Header header;
+
+                if (!reader.valid() || !reader.read(0, &header, sizeof header)) {
+                    continue;
+                }
+
+                const bool pq = header.magic == MAGIC_PQ;
+
+                if (header.version == VERSION && header.sourceSize == identity.size && header.sourceContents == identity.contents && pq == display.hdr()) {
+                    return entry.path();
+                }
+            }
+
+            return {};
+        }
 
         // Gathers writes into a large buffer and puts each down at its offset, as the Reader reads.
         class Writer {
@@ -802,10 +860,15 @@ namespace tiv {
             return nullptr;
         }
 
-        const std::filesystem::path path = location(file) / name_of(file, identity, display);
+        const std::filesystem::path dir = location(file);
+        std::filesystem::path path = dir / name_of(identity, display);
         std::error_code failure;
 
         if (!std::filesystem::is_regular_file(path, failure)) {
+            path = made_for(dir, identity, display);
+        }
+
+        if (path.empty()) {
             return nullptr;
         }
 
@@ -835,7 +898,7 @@ namespace tiv {
         }
 
         const std::filesystem::path dir = location(file);
-        const std::filesystem::path finished = dir / name_of(file, identity, display);
+        const std::filesystem::path finished = dir / name_of(identity, display);
         std::filesystem::path part = finished;
 
         part += PART;
@@ -850,7 +913,7 @@ namespace tiv {
         header.version = VERSION;
         header.tile = TILE;
         header.sourceSize = identity.size;
-        header.sourceTime = identity.time;
+        header.sourceContents = identity.contents;
 
         const auto begin = [&](const int width, const int height, const bool alpha, const Bitmap::Encoding encoding) {
             const int channels = channels_for(alpha, encoding);

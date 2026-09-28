@@ -177,6 +177,8 @@ namespace tiv {
             std::size_t estimate = 0;
             // Writing tiles to disk, which stops once the file is no longer the current one.
             bool streaming = false;
+            // What the image is, once streaming, for showing it again while the tiles are written.
+            Decode::Info info;
         };
 
         static constexpr int FAR = 1 << 20;

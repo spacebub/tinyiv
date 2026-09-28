@@ -29,6 +29,16 @@
 
 namespace tiv {
     namespace {
+        // A file up to this size is read ahead whole, for the decoder about to go through it.
+        // A larger one is streamed, or only sniffed and probed, so just its head is, where the
+        // headers lie: asking for all of an image larger than memory fills it and stalls the disk.
+        constexpr std::size_t READ_AHEAD_WHOLE = std::size_t{1} << 30U;
+        constexpr std::size_t READ_AHEAD_HEAD = std::size_t{16} << 20U;
+
+        std::size_t read_ahead(const std::size_t size) {
+            return size <= READ_AHEAD_WHOLE ? size : READ_AHEAD_HEAD;
+        }
+
         void fail(std::string *error, const std::filesystem::path &file, const std::string &why) {
             if (error != nullptr) {
                 *error = file.string() + ": " + why;
@@ -129,7 +139,7 @@ namespace tiv {
         }
 
         // Decoders read front to back, and the read ahead hides the disk.
-        WIN32_MEMORY_RANGE_ENTRY range{memory, size};
+        WIN32_MEMORY_RANGE_ENTRY range{memory, read_ahead(size)};
 
         PrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0);
 
@@ -180,7 +190,7 @@ namespace tiv {
 
         // Decoders read front to back, and the read ahead hides the disk.
         madvise(memory, size, MADV_SEQUENTIAL);
-        madvise(memory, size, MADV_WILLNEED);
+        madvise(memory, read_ahead(size), MADV_WILLNEED);
 
         out->_data = static_cast<const std::uint8_t *>(memory);
         out->_size = size;

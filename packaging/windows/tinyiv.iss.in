@@ -53,6 +53,10 @@ Source: "{#SourceDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
+; A box on the last page, ticked, that opens tinyiv once the setup closes. Not in a silent install.
+[Run]
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+
 ; Windows lets no installer choose the default app for a type. These put tinyiv in each type's
 ; Open with list and under Default apps, where the user makes it the default.
 [Registry]

@@ -22,8 +22,8 @@ namespace tiv {
     // 2 shows the image at its own size, the wheel and Left and Right walk the folder, Home
     // and End jump to its ends, R reads the image from disk again, [ and ] turn the image
     // left and right, ; and ' flip it vertically and horizontally, Ctrl+S saves how it is
-    // turned, S switches streaming mode, Space plays or pauses an animation, comma
-    // and period step it a frame, Ctrl+H shows all of this.
+    // turned, S switches streaming mode, I shows or hides the status bar, Space plays or
+    // pauses an animation, comma and period step it a frame, Ctrl+H shows all of this.
     class Input {
 
     public:
@@ -42,6 +42,7 @@ namespace tiv {
             FlipHorizontal,
             Save,
             ToggleStream,
+            ToggleBar,
             ToggleHelp,
             TogglePlay,
             FrameBack,

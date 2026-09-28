@@ -63,6 +63,8 @@ namespace tiv {
         bool make_renderer(bool linear);
         void follow_output(const Loader::Result &result);
         void set_fullscreen(bool on);
+        [[nodiscard]] bool bar_shown() const;
+        void toggle_bar();
 
         // Direction is the way the wheel was going, so prefetch leans that way.
         void show(int index, int direction);
@@ -101,8 +103,9 @@ namespace tiv {
         // Tagged leads with the streaming mode when it is on.
         [[nodiscard]] std::string bar_left(bool tagged = true) const;
         [[nodiscard]] std::string failure_text(const std::string &error) const;
-        // Fullscreen shows the streaming mode for a moment after it switches.
+        // The streaming mode shows for a moment after it switches, in the bar or as a badge.
         [[nodiscard]] bool flashing() const;
+        [[nodiscard]] std::string mode_text() const;
         [[nodiscard]] std::string bar_right() const;
 
         // What was last sent to the refiner, so a request that failed is not repeated.
@@ -171,6 +174,9 @@ namespace tiv {
         Ask _asked;
 
         bool _fullscreen = false;
+        // Whether the status bar shows, apart for each, as I switches it for the one in use.
+        bool _barWindowed = true;
+        bool _barFullscreen = false;
         bool _running = true;
         bool _dirty = true;
         int _repaints = 0;

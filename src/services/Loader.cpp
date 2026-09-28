@@ -216,6 +216,10 @@ namespace tiv {
             if (const auto found = _cache.find(current); found != _cache.end()) {
                 found->second.used = _request.sequence;
                 post_cached(found->second);
+            } else if (const auto job = std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == current && other.streaming && !other.abort->requested(); }); job != _jobs.end()) {
+                // Shown again while its tiles are being written, say when the mode switched as
+                // the job started. It said so for the request before, which the view has dropped.
+                post({generation, Kind::Building, job->info, nullptr, {}, false, nullptr, nullptr});
             }
 
             // What the images left behind read of their files goes, what is on disk stays.
@@ -728,6 +732,7 @@ namespace tiv {
 
             if (const auto found = std::ranges::find_if(_jobs, [&](const Job &other) { return other.file == job.file; }); found != _jobs.end()) {
                 found->streaming = true;
+                found->info = entry.info;
             }
 
             build = entry.store == nullptr && job.file == _request.current;

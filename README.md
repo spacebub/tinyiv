@@ -16,7 +16,7 @@ Supports HDR images directly and via tone mapping.
 Runs on x86-64-v3 CPUs (AVX2, BMI2), such as Intel Haswell and AMD Excavator or newer.
 Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 
-## Keys
+## Keybinds
 
 | Input                   | Action                        |
 |-------------------------|-------------------------------|
@@ -32,10 +32,11 @@ Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 | ;  '                    | Flip vertically, horizontally |
 | Ctrl+S                  | Save rotation and flips       |
 | S                       | Streaming mode                |
+| I                       | Show, hide the status bar     |
 | Space                   | Play, pause animation         |
 | ,  .                    | Previous, next frame          |
 | Click, drag on play bar | Play, pause, seek             |
-| Ctrl+H                  | Show, hide the keys           |
+| Ctrl+H                  | Show, hide the keybinds       |
 | Esc  Q  Ctrl+D          | Quit                          |
 
 Dropping a file on the window opens its folder. Started without a file, the window waits

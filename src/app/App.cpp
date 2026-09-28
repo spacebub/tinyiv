@@ -67,7 +67,7 @@ namespace tiv {
         constexpr SDL_Color BACKGROUND{0, 0, 0, 255};
 
         // Keys apart by two spaces, words within one by one.
-        constexpr std::array<StatusBar::Row, 16> HELP = {{
+        constexpr std::array<StatusBar::Row, 17> HELP = {{
                 {"Wheel  ←  →", "Previous, next image"},
                 {"Home  End", "First, last image"},
                 {"R", "Reload from disk"},
@@ -80,6 +80,7 @@ namespace tiv {
                 {";  '", "Flip vertically, horizontally"},
                 {"Ctrl+S", "Save turns and flips"},
                 {"S", "Streaming mode on, off"},
+                {"I", "Status bar on, off"},
                 {"Space", "Play, pause animation"},
                 {",  .", "Previous, next frame"},
                 {"Ctrl+H", "Show, hide this help"},
@@ -346,7 +347,7 @@ namespace tiv {
 
         SDL_GetWindowSizeInPixels(_window, &width, &height);
 
-        const int bar = _fullscreen ? 0 : StatusBar::height(SDL_GetWindowDisplayScale(_window));
+        const int bar = bar_shown() ? StatusBar::height(SDL_GetWindowDisplayScale(_window)) : 0;
 
         _viewport.set_area(width, height - bar);
         _repaints = REPAINTS;
@@ -358,6 +359,18 @@ namespace tiv {
 
         SDL_SetWindowFullscreen(_window, on);
         layout();
+    }
+
+    bool App::bar_shown() const {
+        return _fullscreen ? _barFullscreen : _barWindowed;
+    }
+
+    void App::toggle_bar() {
+        bool &shown = _fullscreen ? _barFullscreen : _barWindowed;
+
+        shown = !shown;
+        layout();
+        _dirty = true;
     }
 
     void App::show(const int index, const int direction) {
@@ -536,6 +549,9 @@ namespace tiv {
                 break;
             case Input::Action::ToggleStream:
                 toggle_stream();
+                break;
+            case Input::Action::ToggleBar:
+                toggle_bar();
                 break;
             case Input::Action::ToggleHelp:
                 _help = !_help;
@@ -945,12 +961,10 @@ namespace tiv {
         }
 
         show(_folder.index(), _direction);
+    }
 
-        if (on) {
-            _message = "Streaming mode on";
-        } else {
-            _message = "Streaming mode off";
-        }
+    std::string App::mode_text() const {
+        return _loader->streaming_all() ? "Streaming mode on" : "Streaming mode off";
     }
 
     void App::save() {
@@ -1034,13 +1048,13 @@ namespace tiv {
             StatusBar::table(_renderer, {0.0, 0.0, static_cast<double>(width), static_cast<double>(height)}, scale, HELP);
         }
 
-        if (!_fullscreen) {
+        if (bar_shown()) {
             const int bar = StatusBar::height(scale);
 
             StatusBar::draw(_renderer, {0.0, static_cast<double>(height - bar), static_cast<double>(width), static_cast<double>(bar)}, scale, bar_left(), bar_right(), _loading);
         } else if (flashing()) {
             // No bar to carry the mode, so switching it says so for a moment.
-            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, _loader->streaming_all() ? "Streaming mode on" : "Streaming mode off", false);
+            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, mode_text(), false);
         } else if (_loading) {
             // Where the bar would be, for as long as something is still on its way.
             StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, bar_left(false), true);
@@ -1128,8 +1142,9 @@ namespace tiv {
     }
 
     std::string App::bar_right() const {
+        // Opposite the name, while there is nothing else to say.
         if (_folder.count() == 0) {
-            return {};
+            return "v" TIV_VERSION;
         }
 
         const Size size = shown();
@@ -1138,6 +1153,11 @@ namespace tiv {
         // Ahead of any message, which would hide how far it is.
         if (_building && _info.width != 0) {
             return std::format("{}x{}, {}, {}, writing tiles {:.0f}%", size.width, size.height, format, human_size(_bytes), _loader->progress() * 100.0F);
+        }
+
+        // Switching the mode says so for a moment, as the badge does in fullscreen.
+        if (flashing()) {
+            return mode_text();
         }
 
         if (!_message.empty()) {
@@ -1152,6 +1172,6 @@ namespace tiv {
             return std::format("{}x{}, {} {}/{}, {}", size.width, size.height, format, _playback.frame() + 1, _playback.frames(), human_size(_bytes));
         }
 
-        return std::format("{}x{}, {}, {}{}", size.width, size.height, format, human_size(_bytes), _streamed && !_loader->streaming_all() ? ", from disk" : "");
+        return std::format("{}x{}, {}, {}{}", size.width, size.height, format, human_size(_bytes), _streamed && !_loader->streaming_all() ? ", streaming" : "");
     }
 }
