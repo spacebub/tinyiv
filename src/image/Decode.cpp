@@ -64,6 +64,9 @@ namespace tiv {
         // The direct decoders check for an abort every this many rows.
         constexpr int ABORT_ROWS = 64;
 
+        // What a band of wide PNG rows waiting for the tone mapper may take.
+        constexpr std::size_t PNG_BAND_BYTES = std::size_t{1} << 20;
+
         // Browsers play frame delays this short at the default, and animations are made for browsers.
         constexpr int SHORTEST_DELAY = 10;
         constexpr int DEFAULT_DELAY = 100;
@@ -845,7 +848,29 @@ namespace tiv {
             return Direct::Done;
         }
 
-        // The base rendition lifted by its gain map as far as the display's headroom goes, into PQ.
+        // Bands of rows of the height on up to MAX_VIPS_THREADS threads, until an abort.
+        void parallel_rows(const int height, const std::function<void(int from, int to)> &each, const Decode::Abort *abort) {
+            const int bands = (height + ABORT_ROWS - 1) / ABORT_ROWS;
+            const int wanted = std::min(MAX_VIPS_THREADS, static_cast<int>(std::thread::hardware_concurrency()));
+            std::atomic<int> next = 0;
+
+            const auto work = [&] {
+                for (int band = next++; band < bands && !aborted(abort); band = next++) {
+                    each(band * ABORT_ROWS, std::min((band + 1) * ABORT_ROWS, height));
+                }
+            };
+
+            std::vector<std::jthread> workers;
+
+            for (int i = 1; i < std::min(bands, std::max(wanted, 1)); ++i) {
+                workers.emplace_back(work);
+            }
+
+            work();
+        }
+
+        // The base rendition lifted by its gain map as far as the display's headroom goes, into
+        // PQ in place. Cut short by an abort, it leaves rows of both encodings.
         bool jpeg_lift(const std::span<const std::uint8_t> data, const Tone::Display &display, Bitmap *base, const Decode::Abort *abort) {
             GainMap::Jpeg gain;
             Bitmap map;
@@ -863,21 +888,20 @@ namespace tiv {
 
             const GainMap::Applier applier(gain.metadata, &map, base->width(), base->height(), weight);
             const Tone::Mapper mapper({}, display);
-            Bitmap lifted = Bitmap::allocate(base->width(), base->height(), Bitmap::Encoding::Pq);
 
-            for (int y = 0; y < base->height(); ++y) {
-                if (y % ABORT_ROWS == 0 && aborted(abort)) {
-                    return false;
+            parallel_rows(base->height(), [&](const int from, const int to) {
+                for (int y = from; y < to; ++y) {
+                    const std::span<std::uint8_t> row = base->row(y);
+
+                    mapper.map(std::span<const std::uint8_t>(row), Bitmap::CHANNELS, row, [&applier, y](const std::size_t first, const std::span<float> rgba) {
+                        applier.apply(static_cast<int>(first), y, rgba);
+                    });
                 }
+            }, abort);
 
-                mapper.map(std::span<const std::uint8_t>(base->row(y)), Bitmap::CHANNELS, lifted.row(y), [&applier, y](const std::size_t first, const std::span<float> rgba) {
-                    applier.apply(static_cast<int>(first), y, rgba);
-                });
-            }
+            base->set_encoding(Bitmap::Encoding::Pq);
 
-            *base = std::move(lifted);
-
-            return true;
+            return !aborted(abort);
         }
 
         // The base rendition, which an HDR display shows lifted by the gain map if there is one.
@@ -885,8 +909,11 @@ namespace tiv {
                          const Decode::Fit fit, const Tone::Display &display) {
             const Direct direct = jpeg_decode(file, data, boxWidth, boxHeight, out, error, abort, fit);
 
-            if (direct == Direct::Done && display.hdr()) {
-                jpeg_lift(data, display, out, abort);
+            if (direct == Direct::Done && display.hdr() && !jpeg_lift(data, display, out, abort) && aborted(abort)) {
+                *out = {};
+                fail(error, file, "aborted");
+
+                return Direct::Failed;
             }
 
             return direct;
@@ -987,29 +1014,158 @@ namespace tiv {
             return true;
         }
 
-        // Rows come out RGBA8, through the tone mapper when png_open made them wide.
-        struct PngRows {
-            const Tone::Mapper *mapper = nullptr;
-            std::vector<std::uint16_t> wide;
+        // Rows come out RGBA8, through the tone mapper when png_open made them wide. Wide rows
+        // gather in bands that a thread of its own maps while libpng reads the next, since the
+        // mapping would add a tenth to the decode.
+        class PngRows {
 
-            PngRows(const Tone::Mapper *toneMapper, const int width) : mapper(toneMapper), wide(mapper != nullptr ? static_cast<std::size_t>(width) * Bitmap::CHANNELS : 0) {
+        public:
+            // Hears each row in order, where rows have nowhere else to go. Mapped rows come from the mapping thread.
+            using Landed = std::function<void(std::span<const std::uint8_t> row)>;
+
+            PngRows(const Tone::Mapper *mapper, const int width, Landed landed = {})
+                : _mapper(mapper), _pitch(static_cast<std::size_t>(width) * Bitmap::CHANNELS), _landed(std::move(landed)) {
+                if (_mapper == nullptr) {
+                    return;
+                }
+
+                _rows = static_cast<int>(std::clamp<std::size_t>(PNG_BAND_BYTES / (_pitch * sizeof(std::uint16_t)), 1, ABORT_ROWS));
+
+                for (Band &band : _bands) {
+                    band.wide.resize(_pitch * static_cast<std::size_t>(_rows));
+                    band.out.resize(static_cast<std::size_t>(_rows));
+                }
+
+                if (_landed) {
+                    _scratch.resize(_pitch);
+                }
+
+                _worker = std::jthread([this] { work(); });
             }
 
-            [[nodiscard]] std::size_t bytes(const int width) const {
-                return static_cast<std::size_t>(width) * Bitmap::CHANNELS * (mapper != nullptr ? sizeof(std::uint16_t) : 1);
-            }
+            PngRows(const PngRows &) = delete;
+            PngRows &operator=(const PngRows &) = delete;
+            PngRows(PngRows &&) = delete;
+            PngRows &operator=(PngRows &&) = delete;
 
+            ~PngRows() { finish(); }
+
+            [[nodiscard]] std::size_t bytes() const { return _pitch * (_mapper != nullptr ? sizeof(std::uint16_t) : 1); }
+
+            // Into out, or through out to landed when there is one. Mapped rows arrive once their
+            // band is done, which finish() waits for.
             void read(png_structp png, const std::span<std::uint8_t> out) {
-                if (mapper == nullptr) {
+                if (_mapper == nullptr) {
                     png_read_row(png, out.data(), nullptr);
+
+                    if (_landed) {
+                        _landed(out);
+                    }
 
                     return;
                 }
 
+                Band &band = _bands.at(_filling);
+
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): libpng writes the 16 bit samples as bytes.
-                png_read_row(png, reinterpret_cast<png_bytep>(wide.data()), nullptr);
-                mapper->map(wide, Bitmap::CHANNELS, out);
+                png_read_row(png, reinterpret_cast<png_bytep>(std::span(band.wide).subspan(_pitch * static_cast<std::size_t>(band.rows), _pitch).data()), nullptr);
+                band.out.at(static_cast<std::size_t>(band.rows)) = out;
+
+                if (++band.rows == _rows) {
+                    hand_over();
+                }
             }
+
+            void finish() {
+                if (!_worker.joinable()) {
+                    return;
+                }
+
+                if (_bands.at(_filling).rows > 0) {
+                    hand_over();
+                }
+
+                {
+                    const std::scoped_lock hold(_guard);
+
+                    _closing = true;
+                }
+
+                _moved.notify_all();
+                _worker.join();
+            }
+
+        private:
+            struct Band {
+                std::vector<std::uint16_t> wide;
+                std::vector<std::span<std::uint8_t>> out;
+                int rows = 0;
+                bool full = false;
+            };
+
+            void hand_over() {
+                {
+                    const std::scoped_lock hold(_guard);
+
+                    _bands.at(_filling).full = true;
+                }
+
+                _moved.notify_all();
+                _filling ^= 1U;
+
+                std::unique_lock hold(_guard);
+
+                _moved.wait(hold, [this] { return !_bands.at(_filling).full; });
+            }
+
+            // Takes the bands in the order they fill, so a band not yet full once closing is the last.
+            void work() {
+                for (std::size_t slot = 0;; slot ^= 1U) {
+                    Band &band = _bands.at(slot);
+
+                    {
+                        std::unique_lock hold(_guard);
+
+                        _moved.wait(hold, [&] { return band.full || _closing; });
+
+                        if (!band.full) {
+                            return;
+                        }
+                    }
+
+                    for (int row = 0; row < band.rows; ++row) {
+                        const auto at = static_cast<std::size_t>(row);
+                        const std::span<std::uint8_t> out = _landed ? std::span(_scratch) : band.out.at(at);
+
+                        _mapper->map(std::span<const std::uint16_t>(band.wide).subspan(_pitch * at, _pitch), Bitmap::CHANNELS, out);
+
+                        if (_landed) {
+                            _landed(out);
+                        }
+                    }
+
+                    {
+                        const std::scoped_lock hold(_guard);
+
+                        band.rows = 0;
+                        band.full = false;
+                    }
+
+                    _moved.notify_all();
+                }
+            }
+
+            const Tone::Mapper *_mapper;
+            std::size_t _pitch;
+            Landed _landed;
+            int _rows = 0;
+            std::array<Band, 2> _bands;
+            std::size_t _filling = 0;
+            std::vector<std::uint8_t> _scratch;
+            std::mutex _guard;
+            std::condition_variable _moved;
+            bool _closing = false;
+            std::jthread _worker;
         };
 
         // Wide rows only for images that are not interlaced, whose passes build on the rows before.
@@ -1025,7 +1181,7 @@ namespace tiv {
 
             png_read_update_info(handle.png, handle.info);
 
-            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes(target.width()) || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
+            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes() || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
                 return false;
             }
 
@@ -1040,6 +1196,7 @@ namespace tiv {
             }
 
             png_read_end(handle.png, nullptr);
+            rows.finish();
 
             return true;
         }
@@ -1050,8 +1207,8 @@ namespace tiv {
             const auto width = static_cast<int>(png_get_image_width(handle.png, handle.info));
             const auto height = static_cast<int>(png_get_image_height(handle.png, handle.info));
             std::vector<std::uint8_t> row(static_cast<std::size_t>(width) * Bitmap::CHANNELS);
-            PngRows rows(mapper, width);
             BoxShrink shrink(width, height, factor, &target);
+            PngRows rows(mapper, width, [&shrink](const std::span<const std::uint8_t> mapped) { shrink.push(mapped); });
 
             // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp): libpng reports errors by longjmp only.
             if (setjmp(png_jmpbuf(handle.png)) != 0) {
@@ -1060,7 +1217,7 @@ namespace tiv {
 
             png_read_update_info(handle.png, handle.info);
 
-            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes(width) || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
+            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes() || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
                 return false;
             }
 
@@ -1070,10 +1227,10 @@ namespace tiv {
                 }
 
                 rows.read(handle.png, row);
-                shrink.push(row);
             }
 
             png_read_end(handle.png, nullptr);
+            rows.finish();
 
             return true;
         }
@@ -1403,13 +1560,16 @@ namespace tiv {
             void take(const std::size_t x, const std::size_t y, const std::size_t pixels, const void *samples) const {
                 const std::span<std::uint8_t> out = place(x, y, pixels);
                 const std::size_t count = pixels * Bitmap::CHANNELS;
+                // Captured by reference, so the adjust fits in std::function without an allocation per run.
+                const std::array<std::size_t, 2> start{x, y};
+                const Tone::Adjust adjust = gain ? Tone::Adjust([this, &start](const std::size_t first, const std::span<float> rgba) { lift(start, first, rgba); }) : Tone::Adjust{};
 
                 if (!mapper) {
                     std::memcpy(out.data(), samples, count);
                 } else if (type == JXL_TYPE_FLOAT) {
-                    mapper->map(std::span(static_cast<const float *>(samples), count), Bitmap::CHANNELS, out, adjust(x, y));
+                    mapper->map(std::span(static_cast<const float *>(samples), count), Bitmap::CHANNELS, out, adjust);
                 } else {
-                    mapper->map(std::span(static_cast<const std::uint16_t *>(samples), count), Bitmap::CHANNELS, out, adjust(x, y));
+                    mapper->map(std::span(static_cast<const std::uint16_t *>(samples), count), Bitmap::CHANNELS, out, adjust);
                 }
 
                 if (landed) {
@@ -1417,22 +1577,22 @@ namespace tiv {
                 }
             }
 
-            [[nodiscard]] Tone::Adjust adjust(const std::size_t x, const std::size_t y) const {
+            void lift(const std::array<std::size_t, 2> &start, const std::size_t first, const std::span<float> rgba) const {
+                const auto [x, y] = start;
+
                 if (!gain) {
-                    return {};
+                    return;
                 }
 
-                return [this, x, y](const std::size_t first, const std::span<float> rgba) {
-                    if (gainColours) {
-                        Tone::transform(gainColours->first, rgba);
-                    }
+                if (gainColours) {
+                    Tone::transform(gainColours->first, rgba);
+                }
 
-                    gain->apply(static_cast<int>(x + first), static_cast<int>(y), rgba);
+                gain->apply(static_cast<int>(x + first), static_cast<int>(y), rgba);
 
-                    if (gainColours) {
-                        Tone::transform(gainColours->second, rgba);
-                    }
-                };
+                if (gainColours) {
+                    Tone::transform(gainColours->second, rgba);
+                }
             }
         };
 
@@ -1634,12 +1794,19 @@ namespace tiv {
                 std::atomic<bool> whole = false;
             };
 
-            // An abort sends no notice, so the wait looks for one now and then.
+            // An abort sends no notice, so the wait looks for one now and then. Nearly every run
+            // is within reach, which the lock-free look sees.
             void wait_for(const std::size_t index) {
                 constexpr auto LOOK = std::chrono::milliseconds(20);
+                const auto near = [&] { return index < _next.load() + AHEAD || _failed.load(); };
+
+                if (near()) {
+                    return;
+                }
+
                 std::unique_lock hold(_guard);
 
-                while (!_moved.wait_for(hold, LOOK, [&] { return index < _next + AHEAD || _failed.load(); })) {
+                while (!_moved.wait_for(hold, LOOK, near)) {
                     if (aborted(_abort)) {
                         return;
                     }
@@ -1671,7 +1838,7 @@ namespace tiv {
             std::vector<Slot> _slots;
             std::mutex _guard;
             std::condition_variable _moved;
-            std::size_t _next = 0;
+            std::atomic<std::size_t> _next = 0;
             std::atomic<bool> _failed = false;
         };
 

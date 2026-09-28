@@ -41,6 +41,9 @@ namespace tiv {
 
         [[nodiscard]] Encoding encoding() const { return _encoding; }
 
+        // For pixels rewritten in place into another encoding, which takes the same four bytes.
+        void set_encoding(const Encoding encoding) { _encoding = encoding; }
+
         // The channels of a Pq word, red first, alpha from 0 to 3.
         [[nodiscard]] static constexpr std::array<std::uint32_t, 4> unpack(const std::uint32_t word) {
             return {word & PQ_MASK, (word >> 10) & PQ_MASK, (word >> 20) & PQ_MASK, word >> 30};

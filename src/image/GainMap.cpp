@@ -460,6 +460,7 @@ namespace tiv {
     }
 
     // The map is sampled between its pixels, the way a smaller map is stretched over the image.
+    // One channel is sampled once for all three.
     void GainMap::Applier::apply(const int x, const int y, const std::span<float> rgba) const {
         const int mapWidth = _map->width();
         const int mapHeight = _map->height();
@@ -469,6 +470,10 @@ namespace tiv {
         const float ty = fy - static_cast<float>(y0);
         const std::span<const std::uint8_t> above = _map->row(y0);
         const std::span<const std::uint8_t> below = _map->row(y1);
+        const std::size_t bands = _metadata.channels == 1 ? 1 : 3;
+        const std::array<float, 3> &base = _metadata.baseOffset;
+        const std::array<float, 3> &alternate = _metadata.alternateOffset;
+        const std::array<const float *, 3> factors{_factors.at(0).data(), _factors.at(1).data(), _factors.at(2).data()};
 
         for (std::size_t at = 0; at + 4 <= rgba.size(); at += 4) {
             const std::size_t pixel = at / 4;
@@ -476,17 +481,20 @@ namespace tiv {
             const auto x0 = static_cast<std::size_t>(fx);
             const std::size_t x1 = std::min(x0 + 1, static_cast<std::size_t>(mapWidth - 1));
             const float tx = fx - static_cast<float>(x0);
+            std::array<std::size_t, 3> steps{};
 
-            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,bugprone-incorrect-roundings): the rows hold every x0 and x1, and nothing is negative.
-            for (std::size_t c = 0; c < 3; ++c) {
-                const std::size_t band = _metadata.channels == 1 ? 0 : c;
+            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic,bugprone-incorrect-roundings): the rows hold every x0 and x1, the steps stay within the factors, and nothing is negative.
+            for (std::size_t band = 0; band < bands; ++band) {
                 const float top = std::lerp(static_cast<float>(above[(x0 * 4) + band]), static_cast<float>(above[(x1 * 4) + band]), tx);
                 const float bottom = std::lerp(static_cast<float>(below[(x0 * 4) + band]), static_cast<float>(below[(x1 * 4) + band]), tx);
-                const auto step = static_cast<std::size_t>((std::lerp(top, bottom, ty) * static_cast<float>(GAIN_STEPS - 1) / 255.0F) + 0.5F);
 
-                rgba[at + c] = ((rgba[at + c] + _metadata.baseOffset.at(c)) * _factors.at(c).at(step)) - _metadata.alternateOffset.at(c);
+                steps[band] = static_cast<std::size_t>((std::lerp(top, bottom, ty) * static_cast<float>(GAIN_STEPS - 1) / 255.0F) + 0.5F);
             }
-            // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,bugprone-incorrect-roundings)
+
+            for (std::size_t c = 0; c < 3; ++c) {
+                rgba[at + c] = ((rgba[at + c] + base[c]) * factors[c][steps[bands == 1 ? 0 : c]]) - alternate[c];
+            }
+            // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic,bugprone-incorrect-roundings)
         }
     }
 }
