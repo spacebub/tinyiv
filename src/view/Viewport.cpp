@@ -64,6 +64,11 @@ namespace tiv {
         _y = (_areaHeight - (_imageHeight * _zoom)) / 2.0;
     }
 
+    void Viewport::centre() {
+        _x = (_areaWidth - (_imageWidth * _zoom)) / 2.0;
+        _y = (_areaHeight - (_imageHeight * _zoom)) / 2.0;
+    }
+
     void Viewport::pan(const double dx, const double dy) {
         _x += dx;
         _y += dy;

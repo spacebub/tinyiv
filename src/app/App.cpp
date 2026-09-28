@@ -74,7 +74,7 @@ namespace tiv {
                 {"Left drag", "Pan"},
                 {"Right drag ↑ ↓", "Zoom in, out"},
                 {"↑  ↓", "Zoom in, out a step"},
-                {"1  2", "Fit, actual size"},
+                {"0  1  2", "Centre, fit, actual size"},
                 {"F  F11  Double click", "Fullscreen"},
                 {"[  ]", "Turn left, right"},
                 {";  '", "Flip vertically, horizontally"},

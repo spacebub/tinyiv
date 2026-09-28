@@ -98,6 +98,10 @@ namespace tiv {
                 viewport.zoom_centred(1.0 / ZOOM_STEP);
 
                 return Action::Redraw;
+            case SDLK_0:
+                viewport.centre();
+
+                return Action::Redraw;
             case SDLK_1:
                 viewport.fit();
 

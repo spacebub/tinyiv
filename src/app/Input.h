@@ -18,7 +18,7 @@
 #include "view/Viewport.h"
 
 namespace tiv {
-    // The fixed scheme: left drag pans, right drag zooms, Up and Down zoom a step, 1 fits and
+    // The fixed scheme: left drag pans, right drag zooms, Up and Down zoom a step, 0 centres, 1 fits and
     // 2 shows the image at its own size, the wheel and Left and Right walk the folder, Home
     // and End jump to its ends, R reads the image from disk again, [ and ] turn the image
     // left and right, ; and ' flip it vertically and horizontally, Ctrl+S saves how it is

@@ -40,6 +40,9 @@ namespace tiv {
         // Whole image visible and centred, small images scaled up.
         void fit();
 
+        // Centres the image at the current zoom.
+        void centre();
+
         void pan(double dx, double dy);
 
         // Later zoom_by() calls keep the image point under (x, y) fixed there.
