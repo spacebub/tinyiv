@@ -3,15 +3,15 @@
 A small, very fast, GPU rendered image viewer. It decodes on background threads, keeps the
 image on the GPU as tiles of a mipmap pyramid, and prefetches the folder around the file, so
 stepping is instant and gigapixel files pan without a stutter. An image too large for memory
-streams from a pyramid of tiles written to disk on first open, so it opens at full resolution
-whatever its size. One window, one folder, one image. No configuration, no editing, no extra
-features.
+streams from a pyramid of tiles written to disk on first open, so it opens at full resolution whatever its size. One window, one folder, one image. No configuration, no editing, no extra features.
 
 Every format libvips reads is shown. JPEG, PNG, WebP, JPEG XL, BMP, ICO and ICNS go through
 their own decoders, with a cheap DCT scaled preview for large JPEGs. ICO and ICNS show their
 largest icon. SVG and PDF render again at the zoom on screen once the view rests, so they
 stay sharp at any zoom. Animated GIF and WebP play in a loop, with a bar along the bottom to
 pause and seek. A file nothing can read says so in place of the image.
+
+Supports HDR images directly and via tone mapping.
 
 Runs on x86-64-v3 CPUs (AVX2, BMI2), such as Intel Haswell and AMD Excavator or newer.
 Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
@@ -26,12 +26,12 @@ Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 | Left drag               | Pan                           |
 | Right drag ↑ ↓          | Zoom in, out                  |
 | ↑  ↓                    | Zoom in, out a step           |
-| 1  2                    | Fit, actual size              |
+| 0  1  2                 | Center, fit, actual size      |
 | F  F11  Double click    | Fullscreen                    |
-| [  ]                    | Turn left, right              |
+| [  ]                    | Rotate left, right            |
 | ;  '                    | Flip vertically, horizontally |
-| Ctrl+S                  | Save turns and flips          |
-| S                       | Streaming mode on, off        |
+| Ctrl+S                  | Save rotation and flips       |
+| S                       | Streaming mode                |
 | Space                   | Play, pause animation         |
 | ,  .                    | Previous, next frame          |
 | Click, drag on play bar | Play, pause, seek             |
@@ -39,11 +39,11 @@ Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 | Esc  Q  Ctrl+D          | Quit                          |
 
 Dropping a file on the window opens its folder. Started without a file, the window waits
-for one. Stepping a frame pauses the animation.
+for one.
 
-Turning and flipping only change how the image is drawn. Ctrl+S writes the result into the
+Rotating and flipping only change how the image is drawn. Ctrl+S writes the result into the
 file's orientation tag, for JPEG, PNG, WebP and TIFF, and leaves the pixel data byte for
-byte: turning back and saving again gives back the identical file.
+byte: rotating back and saving again gives back the identical file.
 
 ## License
 
