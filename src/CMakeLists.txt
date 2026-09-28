@@ -13,20 +13,10 @@ add_executable(tinyiv
         image/Animation.h
         image/Bitmap.cpp
         image/Bitmap.h
-        image/Bmp.cpp
-        image/Bmp.h
         image/Channels.cpp
         image/Channels.h
-        image/Decode.cpp
-        image/Decode.h
         image/Exif.cpp
         image/Exif.h
-        image/GainMap.cpp
-        image/GainMap.h
-        image/Heif.cpp
-        image/Heif.h
-        image/Icon.cpp
-        image/Icon.h
         image/Mapped.cpp
         image/Mapped.h
         image/Orient.cpp
@@ -41,10 +31,36 @@ add_executable(tinyiv
         image/Simd.h
         image/Store.cpp
         image/Store.h
-        image/Svg.cpp
-        image/Svg.h
         image/Tone.cpp
         image/Tone.h
+
+        image/decode/Bmp.cpp
+        image/decode/Bmp.h
+        image/decode/Decode.cpp
+        image/decode/Decode.h
+        image/decode/Frames.cpp
+        image/decode/GainMap.cpp
+        image/decode/GainMap.h
+        image/decode/Heif.cpp
+        image/decode/Heif.h
+        image/decode/Icon.cpp
+        image/decode/Icon.h
+        image/decode/Jpeg.cpp
+        image/decode/Jpeg.h
+        image/decode/Jxl.cpp
+        image/decode/Jxl.h
+        image/decode/Png.cpp
+        image/decode/Png.h
+        image/decode/Render.cpp
+        image/decode/Stream.cpp
+        image/decode/Support.cpp
+        image/decode/Support.h
+        image/decode/Svg.cpp
+        image/decode/Svg.h
+        image/decode/Vips.cpp
+        image/decode/Vips.h
+        image/decode/WebP.cpp
+        image/decode/WebP.h
 
         render/Canvas.cpp
         render/Canvas.h

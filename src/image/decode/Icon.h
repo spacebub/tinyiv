@@ -6,8 +6,8 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
-#ifndef TIV_IMAGE_ICON_H
-#define TIV_IMAGE_ICON_H
+#ifndef TIV_DECODE_ICON_H
+#define TIV_DECODE_ICON_H
 
 
 #include <cstdint>
@@ -44,4 +44,4 @@ namespace tiv::Icon {
 }
 
 
-#endif //TIV_IMAGE_ICON_H
+#endif //TIV_DECODE_ICON_H

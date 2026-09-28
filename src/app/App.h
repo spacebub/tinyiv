@@ -20,8 +20,8 @@
 
 #include "app/Input.h"
 #include "gallery/Folder.h"
-#include "image/Decode.h"
 #include "image/Tone.h"
+#include "image/decode/Decode.h"
 #include "render/Canvas.h"
 #include "services/Loader.h"
 #include "services/Refiner.h"

@@ -41,9 +41,9 @@
 
 #include "image/Bitmap.h"
 #include "image/Channels.h"
-#include "image/Decode.h"
 #include "image/Pyramid.h"
 #include "image/Store.h"
+#include "image/decode/Decode.h"
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic): tiles are cut from rows by offset.
 namespace tiv {

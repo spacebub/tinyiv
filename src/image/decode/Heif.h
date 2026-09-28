@@ -6,8 +6,8 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
-#ifndef TIV_IMAGE_HEIF_H
-#define TIV_IMAGE_HEIF_H
+#ifndef TIV_DECODE_HEIF_H
+#define TIV_DECODE_HEIF_H
 
 
 #include <cstdint>
@@ -35,4 +35,4 @@ namespace tiv::Heif {
 }
 
 
-#endif //TIV_IMAGE_HEIF_H
+#endif //TIV_DECODE_HEIF_H

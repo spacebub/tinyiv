@@ -18,7 +18,7 @@
 #include "support/Headless.h"
 #include "support/Register.h"
 
-#include "image/Decode.h"
+#include "image/decode/Decode.h"
 
 namespace {
     int run(int argc, char **argv) {

@@ -15,7 +15,7 @@
 #include <utility>
 
 #include "image/Bitmap.h"
-#include "image/Icon.h"
+#include "image/decode/Icon.h"
 
 namespace tiv {
     namespace {

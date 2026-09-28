@@ -28,8 +28,8 @@
 #include <vector>
 
 #include "image/Bitmap.h"
-#include "image/Decode.h"
 #include "image/Tone.h"
+#include "image/decode/Decode.h"
 
 namespace tiv {
     // An image too large for memory, as a pyramid of tiles in a file on disk. The file is made

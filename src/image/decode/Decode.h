@@ -6,8 +6,8 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
-#ifndef TIV_IMAGE_DECODE_H
-#define TIV_IMAGE_DECODE_H
+#ifndef TIV_DECODE_DECODE_H
+#define TIV_DECODE_DECODE_H
 
 
 #include <atomic>
@@ -156,4 +156,4 @@ namespace tiv::Decode {
 }
 
 
-#endif //TIV_IMAGE_DECODE_H
+#endif //TIV_DECODE_DECODE_H

@@ -13,7 +13,7 @@
 #include <filesystem>
 #include <string>
 
-#include "image/Decode.h"
+#include "image/decode/Decode.h"
 
 namespace tiv::Reorient {
 

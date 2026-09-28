@@ -19,7 +19,7 @@
 #include <thread>
 
 #include "image/Bitmap.h"
-#include "image/Decode.h"
+#include "image/decode/Decode.h"
 
 namespace tiv {
     // The thread that renders part of a scalable image at the zoom on screen. Only the latest

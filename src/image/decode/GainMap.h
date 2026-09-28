@@ -6,8 +6,8 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
-#ifndef TIV_IMAGE_GAIN_MAP_H
-#define TIV_IMAGE_GAIN_MAP_H
+#ifndef TIV_DECODE_GAIN_MAP_H
+#define TIV_DECODE_GAIN_MAP_H
 
 
 #include <array>
@@ -90,4 +90,4 @@ namespace tiv::GainMap {
 }
 
 
-#endif //TIV_IMAGE_GAIN_MAP_H
+#endif //TIV_DECODE_GAIN_MAP_H

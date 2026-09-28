@@ -18,7 +18,7 @@
 #include "support/Register.h"
 
 #include "image/Bitmap.h"
-#include "image/Bmp.h"
+#include "image/decode/Bmp.h"
 
 namespace bench {
     namespace {

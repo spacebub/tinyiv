@@ -15,7 +15,7 @@
 #include <tuple>
 
 #include "app/App.h"
-#include "image/Decode.h"
+#include "image/decode/Decode.h"
 
 namespace {
     int run(const std::span<char *> args) {

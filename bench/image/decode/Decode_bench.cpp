@@ -19,7 +19,7 @@
 #include "support/Register.h"
 
 #include "image/Bitmap.h"
-#include "image/Decode.h"
+#include "image/decode/Decode.h"
 #include "services/Loader.h"
 
 namespace bench {

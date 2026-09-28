@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "image/Bitmap.h"
-#include "image/GainMap.h"
+#include "image/decode/GainMap.h"
 
 namespace tiv {
     namespace {

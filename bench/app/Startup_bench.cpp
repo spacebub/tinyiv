@@ -17,7 +17,7 @@
 #include "support/Register.h"
 
 #include "gallery/Folder.h"
-#include "image/Decode.h"
+#include "image/decode/Decode.h"
 
 namespace bench {
     namespace {

@@ -24,10 +24,10 @@
 #endif
 
 #include "image/Bitmap.h"
-#include "image/Bmp.h"
-#include "image/Decode.h"
 #include "image/Shrink.h"
 #include "image/Simd.h"
+#include "image/decode/Bmp.h"
+#include "image/decode/Decode.h"
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast,portability-simd-intrinsics): the kernels walk rows with intrinsics.
 namespace tiv {

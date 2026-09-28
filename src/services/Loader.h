@@ -25,10 +25,10 @@
 #include <vector>
 
 #include "image/Animation.h"
-#include "image/Decode.h"
 #include "image/Pyramid.h"
 #include "image/Store.h"
 #include "image/Tone.h"
+#include "image/decode/Decode.h"
 
 namespace tiv {
     // The threads that decode. Requests coalesce to the latest, the files around it decode

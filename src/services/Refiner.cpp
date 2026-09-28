@@ -15,7 +15,7 @@
 #include <SDL3/SDL.h>
 
 #include "image/Bitmap.h"
-#include "image/Decode.h"
+#include "image/decode/Decode.h"
 #include "services/Refiner.h"
 
 namespace tiv {

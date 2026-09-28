@@ -13,8 +13,8 @@
 #include <string_view>
 #include <vector>
 
-#include "image/Heif.h"
 #include "image/Tone.h"
+#include "image/decode/Heif.h"
 
 namespace tiv {
     namespace {

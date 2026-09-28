@@ -6,8 +6,8 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
-#ifndef TIV_IMAGE_SVG_H
-#define TIV_IMAGE_SVG_H
+#ifndef TIV_DECODE_SVG_H
+#define TIV_DECODE_SVG_H
 
 
 #include <cstdint>
@@ -24,4 +24,4 @@ namespace tiv::Svg {
 }
 
 
-#endif //TIV_IMAGE_SVG_H
+#endif //TIV_DECODE_SVG_H

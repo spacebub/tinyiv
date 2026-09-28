@@ -27,10 +27,10 @@
 
 #include "image/Animation.h"
 #include "image/Bitmap.h"
-#include "image/Decode.h"
 #include "image/Orient.h"
 #include "image/Pyramid.h"
 #include "image/Store.h"
+#include "image/decode/Decode.h"
 #include "services/Loader.h"
 #include "services/Memory.h"
 

@@ -16,7 +16,7 @@
 #include <string_view>
 #include <system_error>
 
-#include "image/Svg.h"
+#include "image/decode/Svg.h"
 
 namespace tiv {
     namespace {

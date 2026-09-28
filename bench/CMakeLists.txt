@@ -48,9 +48,10 @@ add_executable(tiv_bench
         support/Register.h
 
         image/Bitmap_bench.cpp
-        image/Bmp_bench.cpp
-        image/Decode_bench.cpp
         image/Pyramid_bench.cpp
+
+        image/decode/Bmp_bench.cpp
+        image/decode/Decode_bench.cpp
 
         render/Upload_bench.cpp
 

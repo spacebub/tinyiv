@@ -22,10 +22,10 @@
 
 #include <webp/decode.h>
 
-#include "image/Decode.h"
 #include "image/Exif.h"
 #include "image/Mapped.h"
 #include "image/Reorient.h"
+#include "image/decode/Decode.h"
 
 namespace tiv {
     namespace {

@@ -6,8 +6,8 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
-#ifndef TIV_IMAGE_BMP_H
-#define TIV_IMAGE_BMP_H
+#ifndef TIV_DECODE_BMP_H
+#define TIV_DECODE_BMP_H
 
 
 #include <array>
@@ -18,7 +18,7 @@
 #include <span>
 
 #include "image/Bitmap.h"
-#include "image/Decode.h"
+#include "image/decode/Decode.h"
 
 namespace tiv::Bmp {
 
@@ -113,4 +113,4 @@ namespace tiv::Bmp {
 }
 
 
-#endif //TIV_IMAGE_BMP_H
+#endif //TIV_DECODE_BMP_H
