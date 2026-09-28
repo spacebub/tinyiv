@@ -240,6 +240,11 @@ namespace tiv {
     bool App::open_window(std::string *error) {
         // The identifier is the window's app id, which is how the desktop finds the icon.
         SDL_SetAppMetadata("tinyiv", "0.1.0", "tinyiv");
+        // Drags at the window edge run in relative mode, where motion is otherwise raw and a pan would lag the pointer.
+        SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "1");
+        SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_CURSOR_VISIBLE, "1");
+        // Centring would pull the visible cursor to the middle of the window where the system confines it.
+        SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_CENTER, "0");
 
         if (!SDL_Init(SDL_INIT_VIDEO)) {
             *error = SDL_GetError();

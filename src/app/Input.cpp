@@ -36,7 +36,8 @@ namespace tiv {
                     _drag = Drag::Pan;
                 } else if (event.button.button == SDL_BUTTON_RIGHT) {
                     _drag = Drag::Zoom;
-                    _pressY = y;
+                    _pressZoom = viewport.zoom();
+                    _zoomTravel = 0.0;
 
                     viewport.begin_zoom(x, y);
                 }
@@ -46,25 +47,27 @@ namespace tiv {
 
             case SDL_EVENT_MOUSE_BUTTON_UP:
                 _drag = Drag::None;
+                release(event.button.windowID);
 
                 return Action::None;
 
             case SDL_EVENT_MOUSE_MOTION:
+                if (_drag == Drag::None) {
+                    return Action::None;
+                }
+
+                follow(event.motion);
+
                 if (_drag == Drag::Pan) {
                     viewport.pan(event.motion.xrel * density, event.motion.yrel * density);
-
-                    return Action::Redraw;
+                } else {
+                    _zoomTravel += event.motion.yrel * density;
+                    viewport.zoom_by(std::exp(-_zoomTravel * ZOOM_PER_PIXEL));
+                    // Travel past the zoom limits is dropped, so turning back acts at once.
+                    _zoomTravel = -std::log(viewport.zoom() / _pressZoom) / ZOOM_PER_PIXEL;
                 }
 
-                if (_drag == Drag::Zoom) {
-                    const double dy = (event.motion.y * density) - _pressY;
-
-                    viewport.zoom_by(std::exp(-dy * ZOOM_PER_PIXEL));
-
-                    return Action::Redraw;
-                }
-
-                return Action::None;
+                return Action::Redraw;
 
             case SDL_EVENT_MOUSE_WHEEL: {
                 // Down is next. SDL reports wheel up as positive, and sums fine wheels into whole notches.
@@ -140,6 +143,42 @@ namespace tiv {
                 return Action::FrameForward;
             default:
                 return Action::None;
+        }
+    }
+
+    void Input::follow(const SDL_MouseMotionEvent &motion) {
+        SDL_Window *window = SDL_GetWindowFromID(motion.windowID);
+
+        // Grabbed from the first motion rather than the press, so a plain click never confines the cursor.
+        if (!_held) {
+            SDL_SetWindowMouseGrab(window, true);
+            _held = true;
+        }
+
+        int width = 0;
+        int height = 0;
+
+        SDL_GetWindowSize(window, &width, &height);
+
+        const bool relative = SDL_GetWindowRelativeMouseMode(window);
+        // Leaving takes a few units, so a cursor wobbling on an edge does not flip modes on every motion.
+        const float margin = relative ? EDGE_RELEASE : 1.0F;
+        const bool edge = motion.x < margin || motion.y < margin || motion.x >= static_cast<float>(width) - margin ||
+                          motion.y >= static_cast<float>(height) - margin;
+
+        // Relative mode reports where the cursor would be, clamped to the window, and SDL warps it there on the way out.
+        if (edge != relative) {
+            SDL_SetWindowRelativeMouseMode(window, edge);
+        }
+    }
+
+    void Input::release(const SDL_WindowID window) {
+        if (_held) {
+            SDL_Window *handle = SDL_GetWindowFromID(window);
+
+            SDL_SetWindowRelativeMouseMode(handle, false);
+            SDL_SetWindowMouseGrab(handle, false);
+            _held = false;
         }
     }
 
