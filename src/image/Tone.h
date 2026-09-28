@@ -88,6 +88,8 @@ namespace tiv::Tone {
         Display _display;
         const float *_table = nullptr;
         Matrix _toOutput{};
+        // The Y row of the source's primaries, for HLG.
+        std::array<float, 3> _luma{};
         bool _convert = false;
         bool _rolledOff = true;
     };

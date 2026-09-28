@@ -275,15 +275,124 @@ namespace tiv {
             }
         }
 
-        // HLG's OOTF, which brightens by the luminance of the scene: BT.2100, table 5.
-        void hlg_display(const Tone::Primaries primaries, std::span<float> rgba) {
-            const Matrix xyz = to_xyz(primaries);
-            const float kr = xyz.at(3);
-            const float kg = xyz.at(4);
-            const float kb = xyz.at(5);
-            const float scale = HLG_PEAK_NITS / SDR_WHITE_NITS;
+        using Luma = std::array<float, 3>;
 
-            for (std::size_t at = 0; at + 4 <= rgba.size(); at += 4) {
+        // The Y row of the primaries' RGB to XYZ.
+        Luma luma_of(const Tone::Primaries primaries) {
+            const Matrix xyz = to_xyz(primaries);
+
+            return {xyz.at(3), xyz.at(4), xyz.at(5)};
+        }
+
+#if defined(__x86_64__) || defined(_M_X64)
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast,portability-simd-intrinsics): the kernels walk the rows with intrinsics.
+        // For positive x, by polynomials fitted to log2 over [1, 2) and exp2 over [0, 1), within 1e-5.
+        TIV_AVX2 __m256 log2_avx2(const __m256 x) {
+            const __m256i bits = _mm256_castps_si256(x);
+            const __m256 exponent = _mm256_cvtepi32_ps(_mm256_sub_epi32(_mm256_srli_epi32(bits, 23), _mm256_set1_epi32(127)));
+            const __m256 t = _mm256_sub_ps(_mm256_castsi256_ps(_mm256_or_si256(_mm256_and_si256(bits, _mm256_set1_epi32(0x7FFFFF)), _mm256_set1_epi32(0x3F800000))), _mm256_set1_ps(1.0F));
+            __m256 p = _mm256_set1_ps(0.04392957F);
+
+            p = _mm256_add_ps(_mm256_mul_ps(p, t), _mm256_set1_ps(-0.18983641F));
+            p = _mm256_add_ps(_mm256_mul_ps(p, t), _mm256_set1_ps(0.41156681F));
+            p = _mm256_add_ps(_mm256_mul_ps(p, t), _mm256_set1_ps(-0.70725636F));
+            p = _mm256_add_ps(_mm256_mul_ps(p, t), _mm256_set1_ps(1.44159271F));
+            p = _mm256_add_ps(_mm256_mul_ps(p, t), _mm256_set1_ps(0.00001435F));
+
+            return _mm256_add_ps(exponent, p);
+        }
+
+        TIV_AVX2 __m256 exp2_avx2(const __m256 x) {
+            const __m256 clamped = _mm256_max_ps(x, _mm256_set1_ps(-126.0F));
+            const __m256 whole = _mm256_floor_ps(clamped);
+            const __m256 f = _mm256_sub_ps(clamped, whole);
+            __m256 p = _mm256_set1_ps(0.01368400F);
+
+            p = _mm256_add_ps(_mm256_mul_ps(p, f), _mm256_set1_ps(0.05171783F));
+            p = _mm256_add_ps(_mm256_mul_ps(p, f), _mm256_set1_ps(0.24162116F));
+            // NOLINTNEXTLINE(modernize-use-std-numbers): a fitted coefficient, near ln 2 but not it.
+            p = _mm256_add_ps(_mm256_mul_ps(p, f), _mm256_set1_ps(0.69296962F));
+            p = _mm256_add_ps(_mm256_mul_ps(p, f), _mm256_set1_ps(1.00000359F));
+
+            const __m256i scale = _mm256_slli_epi32(_mm256_add_epi32(_mm256_cvtps_epi32(whole), _mm256_set1_epi32(127)), 23);
+
+            return _mm256_mul_ps(p, _mm256_castsi256_ps(scale));
+        }
+
+        // Interleaved RGBA of eight pixels into planes and back: the even pixels land in the low lane, the odd in the high.
+        struct Planes {
+            __m256 r;
+            __m256 g;
+            __m256 b;
+            __m256 a;
+        };
+
+        TIV_AVX2 Planes split_avx2(const float *in) {
+            const __m256 p0 = _mm256_loadu_ps(in);
+            const __m256 p1 = _mm256_loadu_ps(in + 8);
+            const __m256 p2 = _mm256_loadu_ps(in + 16);
+            const __m256 p3 = _mm256_loadu_ps(in + 24);
+            const __m256 t0 = _mm256_unpacklo_ps(p0, p1);
+            const __m256 t1 = _mm256_unpackhi_ps(p0, p1);
+            const __m256 t2 = _mm256_unpacklo_ps(p2, p3);
+            const __m256 t3 = _mm256_unpackhi_ps(p2, p3);
+
+            return {_mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0)), _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2)), _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0)),
+                    _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(3, 2, 3, 2))};
+        }
+
+        TIV_AVX2 void join_avx2(const Planes &planes, float *out) {
+            const __m256 rg0 = _mm256_unpacklo_ps(planes.r, planes.g);
+            const __m256 rg1 = _mm256_unpackhi_ps(planes.r, planes.g);
+            const __m256 ba0 = _mm256_unpacklo_ps(planes.b, planes.a);
+            const __m256 ba1 = _mm256_unpackhi_ps(planes.b, planes.a);
+
+            _mm256_storeu_ps(out, _mm256_shuffle_ps(rg0, ba0, _MM_SHUFFLE(1, 0, 1, 0)));
+            _mm256_storeu_ps(out + 8, _mm256_shuffle_ps(rg0, ba0, _MM_SHUFFLE(3, 2, 3, 2)));
+            _mm256_storeu_ps(out + 16, _mm256_shuffle_ps(rg1, ba1, _MM_SHUFFLE(1, 0, 1, 0)));
+            _mm256_storeu_ps(out + 24, _mm256_shuffle_ps(rg1, ba1, _MM_SHUFFLE(3, 2, 3, 2)));
+        }
+
+        TIV_AVX2 std::size_t hlg_avx2(const Luma &luma, float *rgba, const std::size_t pixels, const float scale) {
+            const auto [lr, lg, lb] = luma;
+            const __m256 kr = _mm256_set1_ps(lr);
+            const __m256 kg = _mm256_set1_ps(lg);
+            const __m256 kb = _mm256_set1_ps(lb);
+            const __m256 zero = _mm256_setzero_ps();
+            std::size_t done = 0;
+
+            for (; done + 8 <= pixels; done += 8) {
+                float *at = rgba + (done * 4);
+                Planes planes = split_avx2(at);
+                const __m256 luminance = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(kr, planes.r), _mm256_mul_ps(kg, planes.g)), _mm256_mul_ps(kb, planes.b));
+                const __m256 power = exp2_avx2(_mm256_mul_ps(log2_avx2(luminance), _mm256_set1_ps(HLG_GAMMA - 1.0F)));
+                const __m256 gain = _mm256_and_ps(_mm256_cmp_ps(luminance, zero, _CMP_GT_OQ), _mm256_mul_ps(power, _mm256_set1_ps(scale)));
+
+                planes.r = _mm256_mul_ps(planes.r, gain);
+                planes.g = _mm256_mul_ps(planes.g, gain);
+                planes.b = _mm256_mul_ps(planes.b, gain);
+                join_avx2(planes, at);
+            }
+
+            return done;
+        }
+
+        // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast,portability-simd-intrinsics)
+#endif
+
+        // HLG's OOTF, which brightens by the luminance of the scene: BT.2100, table 5.
+        void hlg_display(const Luma &luma, std::span<float> rgba) {
+            const auto [kr, kg, kb] = luma;
+            const float scale = HLG_PEAK_NITS / SDR_WHITE_NITS;
+            std::size_t first = 0;
+
+#if defined(__x86_64__) || defined(_M_X64)
+            if (Simd::avx2()) {
+                first = hlg_avx2(luma, rgba.data(), rgba.size() / 4, scale) * 4;
+            }
+#endif
+
+            for (std::size_t at = first; at + 4 <= rgba.size(); at += 4) {
                 const float luminance = (kr * rgba[at]) + (kg * rgba[at + 1]) + (kb * rgba[at + 2]);
                 const float gain = luminance > 0.0F ? scale * std::pow(luminance, HLG_GAMMA - 1.0F) : 0.0F;
 
@@ -376,32 +485,45 @@ namespace tiv {
         }
 
         // Both encoders eight pixels at a time, the same arithmetic as the scalar loops, which
-        // take whatever is left over. Returns how many pixels it did.
-        TIV_AVX2 std::size_t encode_avx2(const float *rgba, std::uint8_t *out, const std::size_t pixels, const bool pq, const float headroom, const bool rolledOff) {
+        // take whatever is left over. The matrix, if any, goes first. Returns how many pixels it did.
+        template <bool Pq, bool Convert>
+        TIV_AVX2 std::size_t encode_avx2(const float *rgba, std::uint8_t *out, const std::size_t pixels, const float headroom, const bool rolledOff, const Matrix &matrix) {
             const __m256 knee = _mm256_set1_ps(KNEE * headroom);
             const __m256 room = _mm256_set1_ps(headroom - (KNEE * headroom));
             const __m256 one = _mm256_set1_ps(1.0F);
             const __m256 half = _mm256_set1_ps(0.5F);
-            const __m256 alphaTop = _mm256_set1_ps(pq ? 3.0F : 255.0F);
+            const __m256 alphaTop = _mm256_set1_ps(Pq ? 3.0F : 255.0F);
             // The transpose leaves the even pixels in the low lane and the odd ones in the high.
             const __m256i order = _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7);
-            const int *table = pq ? reinterpret_cast<const int *>(pq_table().data()) : reinterpret_cast<const int *>(srgb_table().data());
+            const int *table = Pq ? reinterpret_cast<const int *>(pq_table().data()) : reinterpret_cast<const int *>(srgb_table().data());
+            const auto [c0, c1, c2, c3, c4, c5, c6, c7, c8] = matrix;
+            const __m256 m0 = _mm256_set1_ps(c0);
+            const __m256 m1 = _mm256_set1_ps(c1);
+            const __m256 m2 = _mm256_set1_ps(c2);
+            const __m256 m3 = _mm256_set1_ps(c3);
+            const __m256 m4 = _mm256_set1_ps(c4);
+            const __m256 m5 = _mm256_set1_ps(c5);
+            const __m256 m6 = _mm256_set1_ps(c6);
+            const __m256 m7 = _mm256_set1_ps(c7);
+            const __m256 m8 = _mm256_set1_ps(c8);
             std::size_t done = 0;
 
             for (; done + 8 <= pixels; done += 8) {
-                const float *in = rgba + (done * 4);
-                const __m256 p0 = _mm256_loadu_ps(in);
-                const __m256 p1 = _mm256_loadu_ps(in + 8);
-                const __m256 p2 = _mm256_loadu_ps(in + 16);
-                const __m256 p3 = _mm256_loadu_ps(in + 24);
-                const __m256 t0 = _mm256_unpacklo_ps(p0, p1);
-                const __m256 t1 = _mm256_unpackhi_ps(p0, p1);
-                const __m256 t2 = _mm256_unpacklo_ps(p2, p3);
-                const __m256 t3 = _mm256_unpackhi_ps(p2, p3);
-                __m256 r = finite_avx2(_mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0)));
-                __m256 g = finite_avx2(_mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2)));
-                __m256 b = finite_avx2(_mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0)));
-                const __m256 a = _mm256_min_ps(finite_avx2(_mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(3, 2, 3, 2))), one);
+                const Planes in = split_avx2(rgba + (done * 4));
+                __m256 r = in.r;
+                __m256 g = in.g;
+                __m256 b = in.b;
+
+                if constexpr (Convert) {
+                    r = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(m0, in.r), _mm256_mul_ps(m1, in.g)), _mm256_mul_ps(m2, in.b));
+                    g = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(m3, in.r), _mm256_mul_ps(m4, in.g)), _mm256_mul_ps(m5, in.b));
+                    b = _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(m6, in.r), _mm256_mul_ps(m7, in.g)), _mm256_mul_ps(m8, in.b));
+                }
+
+                r = finite_avx2(r);
+                g = finite_avx2(g);
+                b = finite_avx2(b);
+                const __m256 a = _mm256_min_ps(finite_avx2(in.a), one);
 
                 if (rolledOff) {
                     const __m256 peak = _mm256_max_ps(r, _mm256_max_ps(g, b));
@@ -415,12 +537,12 @@ namespace tiv {
                 }
 
                 const __m256i alpha = _mm256_cvttps_epi32(_mm256_add_ps(_mm256_mul_ps(a, alphaTop), half));
-                const int shift = pq ? 10 : 8;
-                __m256i word = look_up_avx2(table, slots_avx2(r, pq), pq);
+                const int shift = Pq ? 10 : 8;
+                __m256i word = look_up_avx2(table, slots_avx2(r, Pq), Pq);
 
-                word = _mm256_or_si256(word, _mm256_slli_epi32(look_up_avx2(table, slots_avx2(g, pq), pq), shift));
-                word = _mm256_or_si256(word, _mm256_slli_epi32(look_up_avx2(table, slots_avx2(b, pq), pq), shift * 2));
-                word = _mm256_or_si256(word, _mm256_slli_epi32(alpha, pq ? 30 : 24));
+                word = _mm256_or_si256(word, _mm256_slli_epi32(look_up_avx2(table, slots_avx2(g, Pq), Pq), shift));
+                word = _mm256_or_si256(word, _mm256_slli_epi32(look_up_avx2(table, slots_avx2(b, Pq), Pq), shift * 2));
+                word = _mm256_or_si256(word, _mm256_slli_epi32(alpha, Pq ? 30 : 24));
 
                 _mm256_storeu_si256(reinterpret_cast<__m256i *>(out + (done * 4)), _mm256_permutevar8x32_epi32(word, order));
             }
@@ -431,10 +553,18 @@ namespace tiv {
 #endif
 
         // How far the vector kernel got, for the scalar loop to go on from.
-        std::size_t encode_vector(const std::span<const float> rgba, const std::span<std::uint8_t> out, const bool pq, const float headroom, const bool rolledOff) {
+        std::size_t encode_vector(const std::span<const float> rgba, const std::span<std::uint8_t> out, const bool pq, const float headroom, const bool rolledOff, const Matrix *matrix) {
 #if defined(__x86_64__) || defined(_M_X64)
             if (Simd::avx2()) {
-                return encode_avx2(rgba.data(), out.data(), std::min(rgba.size(), out.size()) / 4, pq, headroom, rolledOff);
+                const std::size_t pixels = std::min(rgba.size(), out.size()) / 4;
+
+                if (pq) {
+                    return matrix != nullptr ? encode_avx2<true, true>(rgba.data(), out.data(), pixels, headroom, rolledOff, *matrix)
+                                             : encode_avx2<true, false>(rgba.data(), out.data(), pixels, headroom, rolledOff, Matrix{});
+                }
+
+                return matrix != nullptr ? encode_avx2<false, true>(rgba.data(), out.data(), pixels, headroom, rolledOff, *matrix)
+                                         : encode_avx2<false, false>(rgba.data(), out.data(), pixels, headroom, rolledOff, Matrix{});
             }
 #else
             (void) rgba;
@@ -447,14 +577,14 @@ namespace tiv {
             return 0;
         }
 
-        void encode_srgb(const std::span<const float> rgba, const std::span<std::uint8_t> out, const bool rolledOff) {
+        void encode_srgb(const std::span<const float> rgba, const std::span<std::uint8_t> out, const bool rolledOff, const std::size_t from) {
             constexpr float ROOM = 1.0F - KNEE;
             constexpr std::size_t BLOCK = 64;
             const SrgbTable &srgb = srgb_table();
             const std::size_t pixels = std::min(rgba.size(), out.size()) / 4;
             std::array<std::uint16_t, BLOCK * 4> slots{};
 
-            for (std::size_t first = encode_vector(rgba, out, false, 1.0F, rolledOff); first < pixels; first += BLOCK) {
+            for (std::size_t first = from; first < pixels; first += BLOCK) {
                 const std::size_t count = std::min(BLOCK, pixels - first);
                 const std::span<const float> in = rgba.subspan(first * 4, count * 4);
 
@@ -486,7 +616,7 @@ namespace tiv {
         }
 
         // By the same roll off, up to the headroom, into the words Bitmap::Encoding::Pq describes.
-        void encode_pq(const std::span<const float> rgba, const std::span<std::uint8_t> out, const float headroom, const bool rolledOff) {
+        void encode_pq(const std::span<const float> rgba, const std::span<std::uint8_t> out, const float headroom, const bool rolledOff, const std::size_t from) {
             constexpr std::size_t BLOCK = 64;
             constexpr auto TOP = static_cast<float>(ENCODED - 1);
             const float knee = KNEE * headroom;
@@ -495,7 +625,7 @@ namespace tiv {
             const std::size_t pixels = std::min(rgba.size(), out.size()) / 4;
             std::array<std::uint16_t, BLOCK * 4> slots{};
 
-            for (std::size_t first = encode_vector(rgba, out, true, headroom, rolledOff); first < pixels; first += BLOCK) {
+            for (std::size_t first = from; first < pixels; first += BLOCK) {
                 const std::size_t count = std::min(BLOCK, pixels - first);
                 const std::span<const float> in = rgba.subspan(first * 4, count * 4);
 
@@ -570,7 +700,7 @@ namespace tiv {
     Tone::Mapper::Mapper(const Source source, const Display display, const bool rolledOff)
         : _source(source), _display(display), _table(table_for(source.transfer).data()),
           _toOutput(convert(source.primaries, display.hdr() ? Primaries::Bt2020 : Primaries::Bt709)),
-          _convert(source.primaries != (display.hdr() ? Primaries::Bt2020 : Primaries::Bt709)), _rolledOff(rolledOff) {
+          _luma(luma_of(source.primaries)), _convert(source.primaries != (display.hdr() ? Primaries::Bt2020 : Primaries::Bt709)), _rolledOff(rolledOff) {
     }
 
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static): an overload of the others, which read the source.
@@ -586,27 +716,35 @@ namespace tiv {
         spread(in, channels, out, [this](const std::uint16_t sample) { return _table[sample]; });
 
         if (_source.transfer == Transfer::Hlg) {
-            hlg_display(_source.primaries, out);
+            hlg_display(_luma, out);
         }
     }
 
     void Tone::Mapper::linear(const std::span<const float> in, const int channels, const std::span<float> out) const {
-        spread(in, channels, out, [this](const float sample) { return decode(_source.transfer, sample); });
+        if (_source.transfer == Transfer::Linear || _source.transfer == Transfer::Sdr) {
+            spread(in, channels, out, [](const float sample) { return sample; });
+        } else {
+            spread(in, channels, out, [this](const float sample) { return decode(_source.transfer, sample); });
+        }
 
         if (_source.transfer == Transfer::Hlg) {
-            hlg_display(_source.primaries, out);
+            hlg_display(_luma, out);
         }
     }
 
     void Tone::Mapper::finish(const std::span<float> rgba, const std::span<std::uint8_t> out) const {
+        const bool pq = _display.hdr();
+        const float headroom = pq ? _display.headroom : 1.0F;
+        const std::size_t done = encode_vector(rgba, out, pq, headroom, _rolledOff, _convert ? &_toOutput : nullptr);
+
         if (_convert) {
-            apply_matrix(_toOutput, rgba);
+            apply_matrix(_toOutput, rgba.subspan(std::min(done * 4, rgba.size())));
         }
 
-        if (_display.hdr()) {
-            encode_pq(rgba, out, _display.headroom, _rolledOff);
+        if (pq) {
+            encode_pq(rgba, out, headroom, _rolledOff, done);
         } else {
-            encode_srgb(rgba, out, _rolledOff);
+            encode_srgb(rgba, out, _rolledOff, done);
         }
     }
 
