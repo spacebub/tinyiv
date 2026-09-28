@@ -402,7 +402,6 @@ namespace tiv {
 
     void App::run() {
         while (_running) {
-            SDL_Event event{};
             // Asks for the tiles on disk the view meets before deciding there is nothing to do.
             _canvas->fetch(_viewport);
 
@@ -411,17 +410,10 @@ namespace tiv {
             // Nothing to upload or repaint means nothing to do until something happens, except
             // that a loading indicator has to keep moving and an animation has frames due.
             if (idle) {
-                give_back();
-
-                const int wait = wait_ms();
-
-                if (wait < 0 ? SDL_WaitEvent(&event) : SDL_WaitEventTimeout(&event, wait)) {
-                    handle(event);
-                } else {
-                    // Every timeout is a deadline that changes the frame, such as the badge going away.
-                    _dirty = true;
-                }
+                wait_for_event();
             }
+
+            SDL_Event event{};
 
             while (_running && SDL_PollEvent(&event)) {
                 handle(event);
@@ -1055,6 +1047,20 @@ namespace tiv {
         }
 
         SDL_RenderPresent(_renderer);
+    }
+
+    void App::wait_for_event() {
+        give_back();
+
+        SDL_Event event{};
+        const int wait = wait_ms();
+
+        if (wait < 0 ? SDL_WaitEvent(&event) : SDL_WaitEventTimeout(&event, wait)) {
+            handle(event);
+        } else {
+            // Every timeout is a deadline that changes the frame, such as the badge going away.
+            _dirty = true;
+        }
     }
 
     int App::wait_ms() const {

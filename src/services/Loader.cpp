@@ -85,6 +85,43 @@ namespace tiv {
         std::size_t pyramid_bytes(const Box box) {
             return static_cast<std::size_t>(box.width) * static_cast<std::size_t>(box.height) * Bitmap::CHANNELS * 4 / 3;
         }
+
+        struct Plan {
+            Box box;
+            Decode::Fit fit = Decode::Fit::Cheap;
+            bool whole = true;
+            std::size_t estimate = 0;
+        };
+
+        Plan plan(const Decode::Info &info, const bool wantsWhole, const bool over, const std::size_t budget, const int screenWidth, const int screenHeight) {
+            const bool scalable = Decode::scalable(info.kind);
+            const std::size_t nativeBytes = static_cast<std::size_t>(info.pixels()) * Bitmap::CHANNELS;
+            // WebP and JXL have no cheaper decode than the native size, which is halved down after,
+            // as long as the transient bitmap fits the budget.
+            const bool nativeThenHalve = over && (info.kind == Decode::Format::WebP || info.kind == Decode::Format::Jxl) && nativeBytes <= budget;
+
+            Plan planned;
+
+            if (scalable) {
+                planned.box = filled(info, screenWidth, screenHeight);
+            } else if (!wantsWhole && Decode::scales_cheaply(info.kind)) {
+                planned.box = fitted(info, screenWidth, screenHeight);
+                planned.whole = false;
+            } else if (over && !nativeThenHalve) {
+                planned.box = capped(info);
+                planned.fit = Decode::Fit::Force;
+            } else {
+                planned.box = capped(info);
+            }
+
+            planned.estimate = pyramid_bytes(planned.whole && !scalable ? capped(info) : planned.box);
+
+            if (planned.whole && nativeThenHalve) {
+                planned.estimate += nativeBytes;
+            }
+
+            return planned;
+        }
     }
 
     std::int64_t Loader::max_pixels() {
@@ -93,7 +130,7 @@ namespace tiv {
             const std::int64_t half = static_cast<std::int64_t>(SDL_GetSystemRAM()) * 1024 * 1024 / 2;
 
             // A pyramid is four bytes a pixel and a third again.
-            return std::max(half * 3 / (Bitmap::CHANNELS * 4), MIN_PIXELS);
+            return std::max(half * 3 / (Bitmap::CHANNELS * std::int64_t{4}), MIN_PIXELS);
         }();
 
         return held;
@@ -596,36 +633,11 @@ namespace tiv {
         }
 
         const bool scalable = Decode::scalable(entry.info.kind);
-        const bool cheap = Decode::scales_cheaply(entry.info.kind);
         bool over = entry.info.pixels() > max_pixels();
-        const std::size_t nativeBytes = static_cast<std::size_t>(entry.info.pixels()) * Bitmap::CHANNELS;
-        // WebP and JXL have no cheaper decode than the native size, which is halved down after,
-        // as long as the transient bitmap fits the budget.
-        const bool nativeThenHalve = over && (entry.info.kind == Decode::Format::WebP || entry.info.kind == Decode::Format::Jxl) && nativeBytes <= _budget;
+        const Plan planned = plan(entry.info, job.whole, over, _budget, screenWidth, screenHeight);
+        bool whole = planned.whole;
 
-        Box box{};
-        Decode::Fit fit = Decode::Fit::Cheap;
-        bool whole = true;
-
-        if (scalable) {
-            box = filled(entry.info, screenWidth, screenHeight);
-        } else if (!job.whole && cheap) {
-            box = fitted(entry.info, screenWidth, screenHeight);
-            whole = false;
-        } else if (over && !nativeThenHalve) {
-            box = capped(entry.info);
-            fit = Decode::Fit::Force;
-        } else {
-            box = capped(entry.info);
-        }
-
-        std::size_t estimate = pyramid_bytes(whole && !scalable ? capped(entry.info) : box);
-
-        if (whole && nativeThenHalve) {
-            estimate += nativeBytes;
-        }
-
-        if (!admit(job, estimate)) {
+        if (!admit(job, planned.estimate)) {
             return;
         }
 
@@ -663,7 +675,7 @@ namespace tiv {
             }
         };
 
-        bool loaded = produce(box, fit, max_pixels());
+        bool loaded = produce(planned.box, planned.fit, max_pixels());
 
         // The system had too little left for the whole image, so it streams down to the size
         // every machine is expected to hold.
@@ -673,22 +685,14 @@ namespace tiv {
             loaded = produce(capped(entry.info, MIN_PIXELS), Decode::Fit::Force, MIN_PIXELS);
         }
 
-        if (!loaded) {
-            if (abort.requested()) {
-                drop();
-            } else {
-                store(job.file, std::move(entry));
-            }
-
-            return;
-        }
-
-        entry.whole = whole;
-
         if (abort.requested()) {
             drop();
 
             return;
+        }
+
+        if (loaded) {
+            entry.whole = whole;
         }
 
         store(job.file, std::move(entry));

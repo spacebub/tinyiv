@@ -93,6 +93,7 @@ namespace tiv {
         void refine();
         void frame();
 
+        void wait_for_event();
         // Milliseconds the loop may sleep, or -1 for until the next event.
         [[nodiscard]] int wait_ms() const;
         [[nodiscard]] Rect play_bar() const;
