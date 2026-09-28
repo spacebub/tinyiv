@@ -67,8 +67,8 @@ namespace tiv {
             int row = 0;
         };
 
-        // The folder the file's pyramid goes in: one on the file's own drive where it can be
-        // made, else the user's cache.
+        // The folder the file's pyramid goes in: one beside the file where it can be made, else
+        // the user's cache.
         [[nodiscard]] static std::filesystem::path location(const std::filesystem::path &file);
 
         // The pyramid made for the file as it is now and shown on the display, if there is one.

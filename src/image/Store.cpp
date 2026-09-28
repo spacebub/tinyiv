@@ -199,7 +199,15 @@ namespace tiv {
 
             std::filesystem::create_directories(dir, failure);
 
-            return !failure && std::filesystem::is_directory(dir, failure);
+            if (failure || !std::filesystem::is_directory(dir, failure)) {
+                return false;
+            }
+#ifdef _WIN32
+            return true;
+#else
+            // A folder another user made on a shared drive is there but cannot take our files.
+            return ::access(dir.c_str(), W_OK | X_OK) == 0;
+#endif
         }
 
         // Reads at an offset, so each reader thread has its own handle and none waits on another's seek.
@@ -682,24 +690,17 @@ namespace tiv {
     }
 
     std::filesystem::path Store::location(const std::filesystem::path &file) {
-#ifdef _WIN32
         std::error_code failure;
-        const std::filesystem::path root = std::filesystem::absolute(file, failure).root_path();
 
-        if (!failure && !root.empty()) {
-            const std::filesystem::path dir = root / ".tinyiv-cache";
+        if (const std::filesystem::path folder = std::filesystem::absolute(file, failure).parent_path(); !failure && !folder.empty()) {
+            std::filesystem::path dir = folder / "tinyiv-cache";
 
             if (usable(dir)) {
-                SetFileAttributesW(dir.c_str(), FILE_ATTRIBUTE_HIDDEN);
-
                 return dir;
             }
         }
-#else
-        (void) file;
-#endif
 
-        const std::filesystem::path dir = user_cache();
+        std::filesystem::path dir = user_cache();
 
         if (!dir.empty() && usable(dir)) {
             return dir;
