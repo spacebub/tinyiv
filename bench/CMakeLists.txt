@@ -72,6 +72,7 @@ if (NOT WIN32)
     tiv_embed(tiv_bench icon256 ${CMAKE_SOURCE_DIR}/assets/tinyiv-256.png)
 endif ()
 target_compile_definitions(tiv_bench PRIVATE VIPS_DISABLE_COMPAT)
+target_compile_definitions(tiv_bench PRIVATE TIV_VERSION="${PROJECT_VERSION}")
 target_link_libraries(tiv_bench PRIVATE SDL3::SDL3 PkgConfig::VIPS PkgConfig::CODECS benchmark::benchmark)
 
 if (TIV_SANITIZE)
