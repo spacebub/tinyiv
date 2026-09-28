@@ -12,7 +12,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <format>
@@ -147,14 +146,12 @@ namespace tiv {
             return encoding == Bitmap::Encoding::Pq ? MAGIC_PQ : MAGIC;
         }
 
+        std::u8string utf8(const std::string_view text) {
+            return {text.begin(), text.end()};
+        }
+
         std::u8string pq_tag(const Tone::Display &display) {
-            if (!display.hdr()) {
-                return {};
-            }
-
-            const std::string tag = std::format("|pq|{:.2f}", display.headroom);
-
-            return {tag.begin(), tag.end()};
+            return display.hdr() ? utf8(std::format("|pq|{:.2f}", display.headroom)) : std::u8string{};
         }
 
         // Named for the file and the version of it on disk, so a changed file never finds an old
@@ -167,15 +164,13 @@ namespace tiv {
                 full = std::filesystem::absolute(file, failure);
             }
 
-            const std::u8string text = full.generic_u8string() + u8"|" + reinterpret_cast<const char8_t *>(std::to_string(identity.size).c_str()) + u8"|"
-                                       + reinterpret_cast<const char8_t *>(std::to_string(identity.time).c_str())
-                                       + pq_tag(display);
+            const std::u8string text = full.generic_u8string() + utf8(std::format("|{}|{}", identity.size, identity.time)) + pq_tag(display);
 
             return std::format("{:016x}{}", hash(text), SUFFIX);
         }
 
         std::filesystem::path from_utf8(const char *text) {
-            return {reinterpret_cast<const char8_t *>(text)};
+            return utf8(text);
         }
 
         std::filesystem::path user_cache() {
@@ -214,13 +209,14 @@ namespace tiv {
         class Reader {
 
         public:
-            explicit Reader(const std::filesystem::path &file) {
+            explicit Reader(const std::filesystem::path &file)
 #ifdef _WIN32
-                _handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, nullptr);
+                : _handle(CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, nullptr))
 #else
                 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
-                _fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
+                : _fd(::open(file.c_str(), O_RDONLY | O_CLOEXEC))
 #endif
+            {
             }
 
             ~Reader() {
@@ -287,21 +283,19 @@ namespace tiv {
 #endif
         };
 
+        // Gathers writes into a large buffer and puts each down at its offset, as the Reader reads.
         class Writer {
 
         public:
-            explicit Writer(const std::filesystem::path &file) : _buffer(WRITE_BUFFER) {
+            explicit Writer(const std::filesystem::path &file)
 #ifdef _WIN32
-                if (_wfopen_s(&_file, file.c_str(), L"wb") != 0) {
-                    _file = nullptr;
-                }
+                : _handle(CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_FLAG_SEQUENTIAL_SCAN, nullptr))
 #else
-                _file = std::fopen(file.c_str(), "wb");
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
+                : _fd(::open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644))
 #endif
-
-                if (_file != nullptr) {
-                    std::setvbuf(_file, _buffer.data(), _IOFBF, _buffer.size());
-                }
+            {
+                _buffer.reserve(WRITE_BUFFER);
             }
 
             ~Writer() {
@@ -313,36 +307,102 @@ namespace tiv {
             Writer &operator=(const Writer &) = delete;
             Writer &operator=(Writer &&) = delete;
 
-            [[nodiscard]] bool ok() const { return _file != nullptr && _ok; }
+            [[nodiscard]] bool ok() const { return valid() && _ok; }
             [[nodiscard]] std::uint64_t at() const { return _at; }
 
             void write(const void *data, const std::size_t bytes) {
-                if (ok() && std::fwrite(data, 1, bytes, _file) != bytes) {
-                    _ok = false;
-                }
+                const auto *from = static_cast<const std::uint8_t *>(data);
 
                 _at += bytes;
+
+                if (_buffer.size() + bytes > WRITE_BUFFER) {
+                    flush();
+                }
+
+                if (bytes >= WRITE_BUFFER) {
+                    put(_flushed, from, bytes);
+                    _flushed += bytes;
+                } else {
+                    _buffer.insert(_buffer.end(), from, from + bytes);
+                }
             }
 
             // Writes over the start of the file, once the rest is down.
             void patch(const void *data, const std::size_t bytes) {
-                if (ok() && (std::fflush(_file) != 0 || std::fseek(_file, 0, SEEK_SET) != 0 || std::fwrite(data, 1, bytes, _file) != bytes)) {
-                    _ok = false;
-                }
+                flush();
+                put(0, static_cast<const std::uint8_t *>(data), bytes);
             }
 
             bool close() {
-                if (_file != nullptr) {
-                    _ok = std::fclose(_file) == 0 && _ok;
-                    _file = nullptr;
+                flush();
+#ifdef _WIN32
+                if (_handle != INVALID_HANDLE_VALUE) {
+                    _ok = CloseHandle(_handle) != 0 && _ok;
+                    _handle = INVALID_HANDLE_VALUE;
                 }
-
+#else
+                if (_fd >= 0) {
+                    _ok = ::close(_fd) == 0 && _ok;
+                    _fd = -1;
+                }
+#endif
                 return _ok;
             }
 
         private:
-            std::FILE *_file = nullptr;
-            std::vector<char> _buffer;
+            [[nodiscard]] bool valid() const {
+#ifdef _WIN32
+                return _handle != INVALID_HANDLE_VALUE;
+#else
+                return _fd >= 0;
+#endif
+            }
+
+            void flush() {
+                put(_flushed, _buffer.data(), _buffer.size());
+                _flushed += _buffer.size();
+                _buffer.clear();
+            }
+
+            void put(std::uint64_t offset, const std::uint8_t *from, std::size_t bytes) {
+                while (ok() && bytes > 0) {
+                    constexpr std::size_t MAX_CHUNK = std::size_t{1} << 30;
+                    const std::size_t chunk = std::min(bytes, MAX_CHUNK);
+#ifdef _WIN32
+                    OVERLAPPED where{};
+                    DWORD done = 0;
+
+                    where.Offset = static_cast<DWORD>(offset & 0xFFFFFFFFU);
+                    where.OffsetHigh = static_cast<DWORD>(offset >> 32U);
+
+                    if (WriteFile(_handle, from, static_cast<DWORD>(chunk), &done, &where) == 0 || done == 0) {
+                        _ok = false;
+
+                        return;
+                    }
+#else
+                    const ssize_t done = ::pwrite(_fd, from, chunk, static_cast<off_t>(offset));
+
+                    if (done <= 0) {
+                        _ok = false;
+
+                        return;
+                    }
+#endif
+                    from += done;
+                    offset += static_cast<std::uint64_t>(done);
+                    bytes -= static_cast<std::size_t>(done);
+                }
+            }
+
+#ifdef _WIN32
+            HANDLE _handle = INVALID_HANDLE_VALUE;
+#else
+            int _fd = -1;
+#endif
+            std::vector<std::uint8_t> _buffer;
+            // Where the buffer goes when next put down.
+            std::uint64_t _flushed = 0;
             std::uint64_t _at = 0;
             bool _ok = true;
         };
@@ -443,8 +503,8 @@ namespace tiv {
         class Builder {
 
         public:
-            Builder(Writer &out, std::vector<Store::Level> levels, const int channels, const Bitmap::Encoding encoding)
-                : _out(out), _channels(channels), _encoding(encoding), _slots(static_cast<std::size_t>(std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_ENCODERS))) {
+            Builder(Writer &out, const std::vector<Store::Level> &levels, const int channels, const Bitmap::Encoding encoding)
+                : _out(&out), _channels(channels), _encoding(encoding), _slots(static_cast<std::size_t>(std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_ENCODERS))) {
                 const std::size_t raw = static_cast<std::size_t>(Store::TILE) * Store::TILE * static_cast<std::size_t>(channels);
 
                 for (Encoded &slot : _slots) {
@@ -483,7 +543,7 @@ namespace tiv {
                     feed(0, pixels.data() + (pitch * static_cast<std::size_t>(y)));
                 }
 
-                return _out.ok() && !_failed;
+                return _out->ok() && !_failed;
             }
 
             // Every level whole, and where each tile went written after them.
@@ -497,14 +557,14 @@ namespace tiv {
                 for (const State &state : _states) {
                     const LevelSize size{static_cast<std::uint32_t>(state.level.width), static_cast<std::uint32_t>(state.level.height)};
 
-                    _out.write(&size, sizeof size);
+                    _out->write(&size, sizeof size);
                 }
 
                 for (const State &state : _states) {
-                    _out.write(state.spans.data(), state.spans.size() * sizeof(Placed));
+                    _out->write(state.spans.data(), state.spans.size() * sizeof(Placed));
                 }
 
-                return _out.ok() && !_failed;
+                return _out->ok() && !_failed;
             }
 
         private:
@@ -576,8 +636,8 @@ namespace tiv {
                         const Encoded &slot = _slots.at(static_cast<std::size_t>(column - first));
 
                         _failed = _failed || !slot.ok;
-                        state.spans.at((static_cast<std::size_t>(state.tileRow) * static_cast<std::size_t>(level.columns)) + static_cast<std::size_t>(column)) = {_out.at(), slot.size};
-                        _out.write(slot.packed.data(), slot.size);
+                        state.spans.at((static_cast<std::size_t>(state.tileRow) * static_cast<std::size_t>(level.columns)) + static_cast<std::size_t>(column)) = {_out->at(), slot.size};
+                        _out->write(slot.packed.data(), slot.size);
                     }
                 }
 
@@ -586,8 +646,7 @@ namespace tiv {
             }
 
             // A row of a level below the finest.
-            void push(const std::size_t index, const std::uint8_t *row) {
-                State &state = _states.at(index);
+            void gather(State &state, const std::uint8_t *row) {
                 const std::size_t pitch = static_cast<std::size_t>(state.level.width) * Bitmap::CHANNELS;
 
                 std::memcpy(state.band.data() + (pitch * static_cast<std::size_t>(state.filled)), row, pitch);
@@ -597,44 +656,69 @@ namespace tiv {
                     write_band(state, state.band.data(), state.filled);
                     state.filled = 0;
                 }
-
-                feed(index, row);
             }
 
-            // Pairs the level's rows into the next one. An odd last row pairs with itself.
-            void feed(const std::size_t index, const std::uint8_t *row) {
-                if (index + 1 >= _states.size()) {
-                    return;
-                }
+            // Pairs the level's rows into the next one, and on down as long as each pair completes
+            // a row. An odd last row pairs with itself.
+            void feed(std::size_t index, const std::uint8_t *row) {
+                for (; index + 1 < _states.size(); ++index) {
+                    State &state = _states.at(index);
+                    const std::size_t pitch = static_cast<std::size_t>(state.level.width) * Bitmap::CHANNELS;
 
-                State &state = _states.at(index);
-                const std::size_t pitch = static_cast<std::size_t>(state.level.width) * Bitmap::CHANNELS;
+                    ++state.paired;
 
-                ++state.paired;
+                    if (state.holding) {
+                        Pyramid::halve_row(state.held.data(), row, state.half.data(), state.level.width, Pyramid::Kernel::Auto, _encoding);
+                    } else if (state.paired == state.level.height) {
+                        Pyramid::halve_row(row, row, state.half.data(), state.level.width, Pyramid::Kernel::Auto, _encoding);
+                    } else {
+                        std::memcpy(state.held.data(), row, pitch);
+                        state.holding = true;
 
-                if (!state.holding) {
-                    std::memcpy(state.held.data(), row, pitch);
-                    state.holding = true;
-                } else {
-                    Pyramid::halve_row(state.held.data(), row, state.half.data(), state.level.width, Pyramid::Kernel::Auto, _encoding);
+                        return;
+                    }
+
                     state.holding = false;
-                    push(index + 1, state.half.data());
-                }
-
-                if (state.holding && state.paired == state.level.height) {
-                    Pyramid::halve_row(state.held.data(), state.held.data(), state.half.data(), state.level.width, Pyramid::Kernel::Auto, _encoding);
-                    state.holding = false;
-                    push(index + 1, state.half.data());
+                    row = state.half.data();
+                    gather(_states.at(index + 1), row);
                 }
             }
 
-            Writer &_out;
+            Writer *_out;
             int _channels;
             Bitmap::Encoding _encoding;
             std::vector<State> _states;
             std::vector<Encoded> _slots;
             bool _failed = false;
         };
+
+        bool sound(const Header &header, const std::uintmax_t size) {
+            const bool known = header.magic == MAGIC || header.magic == MAGIC_PQ;
+            const bool channels = header.channels == 3 || header.channels == Bitmap::CHANNELS;
+            const bool levels = header.levels > 0 && header.levels <= MAX_LEVELS;
+
+            return known && header.version == VERSION && header.tile == Store::TILE && channels && levels && header.index < size;
+        }
+
+        // Every tile has to lie before the index, and be no larger than it could compress to.
+        bool tiles_fit(const std::span<const Placed> placed, const Store::Level &level, const Header &header) {
+            std::size_t i = 0;
+
+            for (const Placed &tile : placed) {
+                const int column = static_cast<int>(i % static_cast<std::size_t>(level.columns));
+                const int row = static_cast<int>(i / static_cast<std::size_t>(level.columns));
+                const auto width = static_cast<std::uint64_t>(std::min(Store::TILE, level.width - (column * Store::TILE)));
+                const auto height = static_cast<std::uint64_t>(std::min(Store::TILE, level.height - (row * Store::TILE)));
+
+                if (tile.offset + tile.bytes > header.index || tile.bytes > ZSTD_compressBound(width * height * header.channels)) {
+                    return false;
+                }
+
+                ++i;
+            }
+
+            return true;
+        }
 
         // What a reader thread keeps between tiles.
         struct Decoder {
@@ -770,7 +854,7 @@ namespace tiv {
 
         const auto begin = [&](const int width, const int height, const bool alpha, const Bitmap::Encoding encoding) {
             const int channels = channels_for(alpha, encoding);
-            std::vector<Level> levels = level_sizes(width, height);
+            const std::vector<Level> levels = level_sizes(width, height);
             const std::uint64_t bytes = pyramid_bytes(levels, channels) / EXPECTED_RATIO;
 
             if (!make_room(dir, bytes)) {
@@ -793,7 +877,7 @@ namespace tiv {
             total = height;
             // Written again once the index is down.
             out->write(&header, sizeof header);
-            builder = std::make_unique<Builder>(*out, std::move(levels), channels, encoding);
+            builder = std::make_unique<Builder>(*out, levels, channels, encoding);
 
             return true;
         };
@@ -872,8 +956,7 @@ namespace tiv {
             return false;
         }
 
-        if ((header.magic != MAGIC && header.magic != MAGIC_PQ) || header.version != VERSION || header.tile != TILE || (header.channels != 3 && header.channels != Bitmap::CHANNELS)
-            || header.levels == 0 || header.levels > MAX_LEVELS || header.index >= size) {
+        if (!sound(header, size)) {
             return false;
         }
 
@@ -904,7 +987,7 @@ namespace tiv {
 
             std::vector<Placed> placed(count);
 
-            if (!reader.read(at, placed.data(), placed.size() * sizeof(Placed))) {
+            if (!reader.read(at, placed.data(), placed.size() * sizeof(Placed)) || !tiles_fit(placed, held, header)) {
                 return false;
             }
 
@@ -914,18 +997,7 @@ namespace tiv {
 
             spans.reserve(count);
 
-            // Every tile has to lie before the index, and be no larger than it could compress to.
-            for (std::size_t i = 0; i < placed.size(); ++i) {
-                const Key key{static_cast<int>(_levels.size()), static_cast<int>(i % static_cast<std::size_t>(held.columns)), static_cast<int>(i / static_cast<std::size_t>(held.columns))};
-                const std::uint64_t tileWidth = static_cast<std::uint64_t>(std::min(TILE, width - (key.column * TILE)));
-                const std::uint64_t tileHeight = static_cast<std::uint64_t>(std::min(TILE, height - (key.row * TILE)));
-
-                const Placed &tile = placed.at(i);
-
-                if (tile.offset + tile.bytes > header.index || tile.bytes > ZSTD_compressBound(tileWidth * tileHeight * header.channels)) {
-                    return false;
-                }
-
+            for (const Placed &tile : placed) {
                 spans.push_back({tile.offset, tile.bytes});
             }
 
