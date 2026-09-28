@@ -38,11 +38,12 @@ namespace tiv {
 #endif
     }
 
-    Bitmap Bitmap::allocate(const int width, const int height) {
+    Bitmap Bitmap::allocate(const int width, const int height, const Encoding encoding) {
         Bitmap held;
 
         held._width = width;
         held._height = height;
+        held._encoding = encoding;
 
         const std::size_t wanted = held.bytes();
 

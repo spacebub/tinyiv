@@ -10,8 +10,10 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cctype>
 #include <cmath>
+#include <condition_variable>
 #include <csetjmp>
 #include <cstddef>
 #include <cstdint>
@@ -280,11 +282,12 @@ namespace tiv {
         struct Prepared {
             VImage image;
             std::optional<Tone::Mapper> mapper;
+            Bitmap::Encoding encoding = Bitmap::Encoding::Srgb;
         };
 
         // Float samples are linear light whatever the file says. Wider integers carry their
         // transfer in the container, which the caller has read.
-        Prepared prepare(VImage image, Tone::Source source) {
+        Prepared prepare(VImage image, Tone::Source source, const Tone::Display &display = {}) {
             if (image.coding() == VIPS_CODING_RAD) {
                 image = image.rad2float();
             }
@@ -294,7 +297,7 @@ namespace tiv {
             }
 
             if (!source.hdr()) {
-                return {to_rgba(image), std::nullopt};
+                return {to_rgba(image), std::nullopt, Bitmap::Encoding::Srgb};
             }
 
             if (image.bands() > Bitmap::CHANNELS) {
@@ -309,7 +312,7 @@ namespace tiv {
                 image = image.cast(VIPS_FORMAT_USHORT);
             }
 
-            return {image, Tone::Mapper(source)};
+            return {image, Tone::Mapper(source, display), display.hdr() ? Bitmap::Encoding::Pq : Bitmap::Encoding::Srgb};
         }
 
         // Where libvips hands over the rows of an HDR image, in order, for the tone mapper.
@@ -319,19 +322,41 @@ namespace tiv {
             int bands = 0;
         };
 
+        // A region this large maps on several threads, since libvips hands regions over one at a time.
+        constexpr std::size_t PARALLEL_PIXELS = std::size_t{1} << 20;
+
         template <typename Sample>
-        int map_region(VipsRegion *region, VipsRect *area, void *opaque) {
-            const auto *sink = static_cast<const MappedSink *>(opaque);
+        void map_rows(VipsRegion *region, const VipsRect *area, const MappedSink *sink, const int from, const int to) {
             const auto samples = static_cast<std::size_t>(area->width) * static_cast<std::size_t>(sink->bands);
             const std::size_t pitch = static_cast<std::size_t>(area->width) * Bitmap::CHANNELS;
 
-            for (int y = area->top; y < area->top + area->height; ++y) {
+            for (int y = from; y < to; ++y) {
                 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast): libvips hands the region over as raw rows.
                 const std::span in(reinterpret_cast<const Sample *>(VIPS_REGION_ADDR(region, area->left, y)), samples);
                 const std::span out(sink->target + (pitch * static_cast<std::size_t>(y)), pitch);
                 // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast)
 
                 sink->mapper->map(in, sink->bands, out);
+            }
+        }
+
+        template <typename Sample>
+        int map_region(VipsRegion *region, VipsRect *area, void *opaque) {
+            const auto *sink = static_cast<const MappedSink *>(opaque);
+            const std::size_t pixels = static_cast<std::size_t>(area->width) * static_cast<std::size_t>(area->height);
+            const int wanted = std::min(MAX_VIPS_THREADS, static_cast<int>(std::thread::hardware_concurrency()));
+            const int threads = pixels >= PARALLEL_PIXELS ? std::clamp(wanted, 1, area->height) : 1;
+            const int slice = (area->height + threads - 1) / threads;
+            const int bottom = area->top + area->height;
+
+            {
+                std::vector<std::jthread> workers;
+
+                for (int from = area->top + slice; from < bottom; from += slice) {
+                    workers.emplace_back(map_rows<Sample>, region, area, sink, from, std::min(from + slice, bottom));
+                }
+
+                map_rows<Sample>(region, area, sink, area->top, std::min(area->top + slice, bottom));
             }
 
             return 0;
@@ -415,7 +440,7 @@ namespace tiv {
         }
 
         bool write_rgba(const Prepared &prepared, Bitmap *out, Decode::Abort *abort) {
-            Bitmap held = Bitmap::allocate(prepared.image.width(), prepared.image.height());
+            Bitmap held = Bitmap::allocate(prepared.image.width(), prepared.image.height(), prepared.encoding);
 
             if (!write_rows(prepared, 0, held.height(), held.data(), abort)) {
                 return false;
@@ -426,7 +451,8 @@ namespace tiv {
             return true;
         }
 
-        bool load_vips(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Decode::Abort *abort, const Via via, const Tone::Source source) {
+        bool load_vips(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Decode::Abort *abort, const Via via, const Tone::Source source,
+                       const Tone::Display &display) {
             ensure_vips();
 
             try {
@@ -451,7 +477,7 @@ namespace tiv {
                     }
                 }
 
-                if (!write_rgba(prepare(image, source), out, abort)) {
+                if (!write_rgba(prepare(image, source, display), out, abort)) {
                     fail(error, file, vips_error());
 
                     return false;
@@ -773,7 +799,7 @@ namespace tiv {
             return true;
         }
 
-        Direct load_jpeg(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit) {
+        Direct jpeg_decode(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit) {
             JpegHandle handle;
 
             if (!jpeg_open(handle, data)) {
@@ -817,6 +843,53 @@ namespace tiv {
             *out = std::move(held);
 
             return Direct::Done;
+        }
+
+        // The base rendition lifted by its gain map as far as the display's headroom goes, into PQ.
+        bool jpeg_lift(const std::span<const std::uint8_t> data, const Tone::Display &display, Bitmap *base, const Decode::Abort *abort) {
+            GainMap::Jpeg gain;
+            Bitmap map;
+
+            if (!GainMap::find_jpeg(data, &gain)) {
+                return false;
+            }
+
+            const float weight = gain.metadata.weight(std::log2(display.headroom));
+            constexpr int WHOLE = std::numeric_limits<int>::max();
+
+            if (weight == 0.0F || jpeg_decode("gain map", gain.image, WHOLE, WHOLE, &map, nullptr, abort, Decode::Fit::Cheap) != Direct::Done) {
+                return false;
+            }
+
+            const GainMap::Applier applier(gain.metadata, &map, base->width(), base->height(), weight);
+            const Tone::Mapper mapper({}, display);
+            Bitmap lifted = Bitmap::allocate(base->width(), base->height(), Bitmap::Encoding::Pq);
+
+            for (int y = 0; y < base->height(); ++y) {
+                if (y % ABORT_ROWS == 0 && aborted(abort)) {
+                    return false;
+                }
+
+                mapper.map(std::span<const std::uint8_t>(base->row(y)), Bitmap::CHANNELS, lifted.row(y), [&applier, y](const std::size_t first, const std::span<float> rgba) {
+                    applier.apply(static_cast<int>(first), y, rgba);
+                });
+            }
+
+            *base = std::move(lifted);
+
+            return true;
+        }
+
+        // The base rendition, which an HDR display shows lifted by the gain map if there is one.
+        Direct load_jpeg(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort,
+                         const Decode::Fit fit, const Tone::Display &display) {
+            const Direct direct = jpeg_decode(file, data, boxWidth, boxHeight, out, error, abort, fit);
+
+            if (direct == Direct::Done && display.hdr()) {
+                jpeg_lift(data, display, out, abort);
+            }
+
+            return direct;
         }
 
         // --- PNG ---
@@ -1058,7 +1131,8 @@ namespace tiv {
             return width > 0 && height > 0;
         }
 
-        Direct load_png(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit) {
+        Direct load_png(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit,
+                        const Tone::Display &display = {}) {
             PngHandle handle;
             PngReader reader{data, 0};
             const Tone::Source tone = png_tone(data);
@@ -1078,9 +1152,10 @@ namespace tiv {
                 return Direct::Skip;
             }
 
-            const std::optional<Tone::Mapper> mapper = tone.hdr() ? std::optional(Tone::Mapper(tone)) : std::nullopt;
+            const std::optional<Tone::Mapper> mapper = tone.hdr() ? std::optional(Tone::Mapper(tone, display)) : std::nullopt;
             const Tone::Mapper *mapping = mapper ? &*mapper : nullptr;
-            Bitmap held = Bitmap::allocate((width + factor - 1) / factor, (height + factor - 1) / factor);
+            const Bitmap::Encoding encoding = tone.hdr() && display.hdr() ? Bitmap::Encoding::Pq : Bitmap::Encoding::Srgb;
+            Bitmap held = Bitmap::allocate((width + factor - 1) / factor, (height + factor - 1) / factor, encoding);
             const bool read = factor > 1 ? png_read_shrunk(handle, held, factor, mapping, abort) : png_read(handle, held, mapping, abort);
 
             if (!read) {
@@ -1307,59 +1382,73 @@ namespace tiv {
             Bitmap map;
         };
 
-        // Where libjxl hands over decoded pixels of an HDR image, a run of a row at a time from
-        // several threads.
-        struct JxlMapped {
-            Tone::Mapper mapper;
-            Bitmap *target = nullptr;
-            JxlDataType type = JXL_TYPE_UINT16;
+        // Where a run of pixels libjxl hands over goes, and what hears it has landed.
+        using JxlPlace = std::function<std::span<std::uint8_t>(std::size_t x, std::size_t y, std::size_t pixels)>;
+        using JxlLanded = std::function<void(std::size_t y, std::size_t pixels)>;
+
+        // How libjxl's pixels become four bytes a pixel, a run of a row at a time from several
+        // threads: copied as RGBA8, or through the tone mapper and a gain map.
+        struct JxlOutput {
+            std::optional<Tone::Mapper> mapper;
+            JxlDataType type = JXL_TYPE_UINT8;
+            Bitmap::Encoding encoding = Bitmap::Encoding::Srgb;
             // Held apart, as the applier keeps the map's address.
             std::unique_ptr<JxlGain> gainMap;
             std::optional<GainMap::Applier> gain;
             // Into the colour space the gains apply in and back, when that is not the base's own.
             std::optional<std::pair<Tone::Matrix, Tone::Matrix>> gainColours;
+            JxlPlace place;
+            JxlLanded landed;
 
             void take(const std::size_t x, const std::size_t y, const std::size_t pixels, const void *samples) const {
-                const std::span<std::uint8_t> out = target->row(static_cast<int>(y)).subspan(x * Bitmap::CHANNELS, pixels * Bitmap::CHANNELS);
-                Tone::Adjust adjust;
-
-                if (gain) {
-                    adjust = [this, x, y](const std::size_t first, const std::span<float> rgba) {
-                        if (gainColours) {
-                            Tone::transform(gainColours->first, rgba);
-                        }
-
-                        gain->apply(static_cast<int>(x + first), static_cast<int>(y), rgba);
-
-                        if (gainColours) {
-                            Tone::transform(gainColours->second, rgba);
-                        }
-                    };
-                }
-
+                const std::span<std::uint8_t> out = place(x, y, pixels);
                 const std::size_t count = pixels * Bitmap::CHANNELS;
 
-                if (type == JXL_TYPE_FLOAT) {
-                    mapper.map(std::span(static_cast<const float *>(samples), count), Bitmap::CHANNELS, out, adjust);
+                if (!mapper) {
+                    std::memcpy(out.data(), samples, count);
+                } else if (type == JXL_TYPE_FLOAT) {
+                    mapper->map(std::span(static_cast<const float *>(samples), count), Bitmap::CHANNELS, out, adjust(x, y));
                 } else {
-                    mapper.map(std::span(static_cast<const std::uint16_t *>(samples), count), Bitmap::CHANNELS, out, adjust);
+                    mapper->map(std::span(static_cast<const std::uint16_t *>(samples), count), Bitmap::CHANNELS, out, adjust(x, y));
                 }
+
+                if (landed) {
+                    landed(y, pixels);
+                }
+            }
+
+            [[nodiscard]] Tone::Adjust adjust(const std::size_t x, const std::size_t y) const {
+                if (!gain) {
+                    return {};
+                }
+
+                return [this, x, y](const std::size_t first, const std::span<float> rgba) {
+                    if (gainColours) {
+                        Tone::transform(gainColours->first, rgba);
+                    }
+
+                    gain->apply(static_cast<int>(x + first), static_cast<int>(y), rgba);
+
+                    if (gainColours) {
+                        Tone::transform(gainColours->second, rgba);
+                    }
+                };
             }
         };
 
         void jxl_take(void *opaque, const std::size_t x, const std::size_t y, const std::size_t pixels, const void *samples) {
-            static_cast<const JxlMapped *>(opaque)->take(x, y, pixels, samples);
+            static_cast<const JxlOutput *>(opaque)->take(x, y, pixels, samples);
         }
 
-        // Told the colour encoding and the bitmap the pixels go to, says how HDR is mapped into it.
-        using JxlSetup = std::function<std::optional<JxlMapped>(const Tone::Source &tone, Bitmap *target)>;
+        // Told the colour encoding, says how the pixels come out, or nothing for RGBA8 as stored.
+        using JxlSetup = std::function<std::optional<JxlOutput>(const Tone::Source &tone, int width, int height)>;
 
-        // RGBA8 straight into the bitmap, or through the tone mapper's callback.
-        bool jxl_output(JxlDecoder *decoder, Bitmap &held, JxlMapped *mapped) {
-            if (mapped != nullptr) {
-                const JxlPixelFormat format{Bitmap::CHANNELS, mapped->type, JXL_NATIVE_ENDIAN, 0};
+        // RGBA8 straight into the bitmap, or through the output's callback.
+        bool jxl_output(JxlDecoder *decoder, Bitmap &held, JxlOutput *output) {
+            if (output != nullptr) {
+                const JxlPixelFormat format{Bitmap::CHANNELS, output->type, JXL_NATIVE_ENDIAN, 0};
 
-                return JxlDecoderSetImageOutCallback(decoder, &format, jxl_take, mapped) == JXL_DEC_SUCCESS;
+                return JxlDecoderSetImageOutCallback(decoder, &format, jxl_take, output) == JXL_DEC_SUCCESS;
             }
 
             const JxlPixelFormat format{Bitmap::CHANNELS, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
@@ -1382,6 +1471,18 @@ namespace tiv {
             return true;
         }
 
+        // An output that maps writes into the bitmap, reallocated in the output's encoding.
+        void jxl_bind(std::optional<JxlOutput> &output, Bitmap *held) {
+            if (!output) {
+                return;
+            }
+
+            *held = Bitmap::allocate(held->width(), held->height(), output->encoding);
+            output->place = [held](const std::size_t x, const std::size_t y, const std::size_t pixels) {
+                return held->row(static_cast<int>(y)).subspan(x * Bitmap::CHANNELS, pixels * Bitmap::CHANNELS);
+            };
+        }
+
         // Without a setup the samples come out as stored, which a gain map wants. libjxl runs
         // with its own thread pool, which libvips does not use.
         Direct jxl_decode(const std::span<const std::uint8_t> data, Bitmap *out, const Decode::Abort *abort, const JxlSetup &setup) {
@@ -1399,7 +1500,7 @@ namespace tiv {
             JxlDecoderCloseInput(handle.decoder);
 
             Bitmap held;
-            std::optional<JxlMapped> mapped;
+            std::optional<JxlOutput> output;
 
             for (;;) {
                 if (aborted(abort)) {
@@ -1414,9 +1515,10 @@ namespace tiv {
                     }
                 } else if (status == JXL_DEC_COLOR_ENCODING) {
                     // Basic info comes first, so the bitmap is there.
-                    mapped = setup(jxl_tone(handle.decoder), &held);
+                    output = setup(jxl_tone(handle.decoder), held.width(), held.height());
+                    jxl_bind(output, &held);
                 } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
-                    if (held.empty() || !jxl_output(handle.decoder, held, mapped ? &*mapped : nullptr)) {
+                    if (held.empty() || !jxl_output(handle.decoder, held, output ? &*output : nullptr)) {
                         return Direct::Skip;
                     }
                 } else if (status == JXL_DEC_FULL_IMAGE || status == JXL_DEC_SUCCESS) {
@@ -1449,18 +1551,23 @@ namespace tiv {
         }
 
         // HDR is tone mapped, or brought down to SDR by a gain map where there is one.
-        std::optional<JxlMapped> jxl_setup(const std::span<const std::uint8_t> data, const Tone::Source &tone, Bitmap *target) {
+        std::optional<JxlOutput> jxl_setup(const std::span<const std::uint8_t> data, const Tone::Source &tone, const int width, const int height, const Tone::Display &display) {
             if (!tone.hdr()) {
                 return std::nullopt;
             }
 
             std::unique_ptr<JxlGain> gain = jxl_gain(data);
-            const float weight = gain != nullptr ? gain->metadata.weight(0.0F) : 0.0F;
-            const JxlDataType type = tone.transfer == Tone::Transfer::Linear ? JXL_TYPE_FLOAT : JXL_TYPE_UINT16;
-            JxlMapped held{Tone::Mapper(tone, weight == 0.0F), target, type, nullptr, std::nullopt, std::nullopt};
+            const float weight = gain != nullptr ? gain->metadata.weight(std::log2(display.headroom)) : 0.0F;
+            // Brought down to SDR, the gain map leaves nothing to roll off, and clipping keeps its colours.
+            const bool rolledOff = weight == 0.0F || display.hdr();
+            JxlOutput held;
+
+            held.mapper.emplace(tone, display, rolledOff);
+            held.type = tone.transfer == Tone::Transfer::Linear ? JXL_TYPE_FLOAT : JXL_TYPE_UINT16;
+            held.encoding = display.hdr() ? Bitmap::Encoding::Pq : Bitmap::Encoding::Srgb;
 
             if (gain != nullptr && weight != 0.0F) {
-                held.gain.emplace(gain->metadata, &gain->map, target->width(), target->height(), weight);
+                held.gain.emplace(gain->metadata, &gain->map, width, height, weight);
 
                 if (!gain->metadata.inBaseColours && tone.primaries != Tone::Primaries::Bt709) {
                     held.gainColours.emplace(Tone::convert(tone.primaries, Tone::Primaries::Bt709), Tone::convert(Tone::Primaries::Bt709, tone.primaries));
@@ -1472,10 +1579,256 @@ namespace tiv {
             return held;
         }
 
+        // Runs libjxl hands over from many threads in no order, gathered into bands of rows that
+        // go on in order. A thread more than a few bands ahead of the one going on waits, so the
+        // bands in memory stay few while the decode outruns whatever takes them. The runs of the
+        // bands before it were claimed first by other threads, so the wait always ends.
+        class JxlBands {
+
+        public:
+            static constexpr std::size_t AHEAD = 4;
+
+            JxlBands(const int width, const int height, const int rows, const Bitmap::Encoding encoding, const Decode::Take &take, const Decode::Abort *abort)
+                : _width(width), _height(height), _rows(rows), _encoding(encoding), _take(take), _abort(abort), _slots(static_cast<std::size_t>((height + rows - 1) / rows)) {
+            }
+
+            std::span<std::uint8_t> place(const std::size_t x, const std::size_t y, const std::size_t pixels) {
+                const std::size_t index = y / static_cast<std::size_t>(_rows);
+                Slot &slot = _slots.at(index);
+
+                wait_for(index);
+                std::call_once(slot.made, [&] {
+                    const int rows = std::min(_rows, _height - (static_cast<int>(index) * _rows));
+
+                    slot.band = Bitmap::allocate(_width, rows, _encoding);
+                    slot.remaining.store(static_cast<std::size_t>(_width) * static_cast<std::size_t>(rows));
+                });
+
+                return slot.band.row(static_cast<int>(y % static_cast<std::size_t>(_rows))).subspan(x * Bitmap::CHANNELS, pixels * Bitmap::CHANNELS);
+            }
+
+            void landed(const std::size_t y, const std::size_t pixels) {
+                Slot &slot = _slots.at(y / static_cast<std::size_t>(_rows));
+
+                if (slot.remaining.fetch_sub(pixels) == pixels) {
+                    slot.whole.store(true);
+                    deliver();
+                }
+            }
+
+            // Take said no, or the abort came, so the decode should end.
+            [[nodiscard]] bool stopped(const Decode::Abort *abort) const { return _failed.load() || aborted(abort); }
+
+            void stop() {
+                _failed.store(true);
+                _moved.notify_all();
+            }
+
+            [[nodiscard]] bool complete() const { return _next == _slots.size() && !_failed.load(); }
+
+        private:
+            struct Slot {
+                std::once_flag made;
+                Bitmap band;
+                std::atomic<std::size_t> remaining = 0;
+                std::atomic<bool> whole = false;
+            };
+
+            // An abort sends no notice, so the wait looks for one now and then.
+            void wait_for(const std::size_t index) {
+                constexpr auto LOOK = std::chrono::milliseconds(20);
+                std::unique_lock hold(_guard);
+
+                while (!_moved.wait_for(hold, LOOK, [&] { return index < _next + AHEAD || _failed.load(); })) {
+                    if (aborted(_abort)) {
+                        return;
+                    }
+                }
+            }
+
+            void deliver() {
+                const std::scoped_lock hold(_guard);
+
+                while (_next < _slots.size() && _slots.at(_next).whole.load() && !_failed.load()) {
+                    Slot &slot = _slots.at(_next);
+
+                    if (!_take(static_cast<int>(_next) * _rows, slot.band.height(), slot.band.all())) {
+                        _failed.store(true);
+                    }
+
+                    slot.band = {};
+                    ++_next;
+                    _moved.notify_all();
+                }
+            }
+
+            int _width;
+            int _height;
+            int _rows;
+            Bitmap::Encoding _encoding;
+            const Decode::Take &_take;
+            const Decode::Abort *_abort;
+            std::vector<Slot> _slots;
+            std::mutex _guard;
+            std::condition_variable _moved;
+            std::size_t _next = 0;
+            std::atomic<bool> _failed = false;
+        };
+
+        // libjxl's pool, which stops handing out work once the decode should end, so an abort
+        // lands within a group rather than after the whole frame.
+        struct JxlStoppable {
+            void *pool = nullptr;
+            std::function<bool()> stopped;
+        };
+
+        struct JxlTask {
+            const JxlStoppable *runner = nullptr;
+            void *opaque = nullptr;
+            JxlParallelRunInit init = nullptr;
+            JxlParallelRunFunction run = nullptr;
+        };
+
+        JxlParallelRetCode jxl_run(void *opaque, void *jpegxlOpaque, JxlParallelRunInit init, JxlParallelRunFunction run, const std::uint32_t start, const std::uint32_t end) {
+            const auto *runner = static_cast<const JxlStoppable *>(opaque);
+
+            if (runner->stopped()) {
+                return JXL_PARALLEL_RET_RUNNER_ERROR;
+            }
+
+            JxlTask task{runner, jpegxlOpaque, init, run};
+
+            const JxlParallelRetCode code = JxlThreadParallelRunner(runner->pool, &task,
+                [](void *held, const std::size_t threads) {
+                    const auto *given = static_cast<const JxlTask *>(held);
+
+                    return given->init(given->opaque, threads);
+                },
+                [](void *held, const std::uint32_t value, const std::size_t thread) {
+                    const auto *given = static_cast<const JxlTask *>(held);
+
+                    if (!given->runner->stopped()) {
+                        given->run(given->opaque, value, thread);
+                    }
+                },
+                start, end);
+
+            return runner->stopped() ? JXL_PARALLEL_RET_RUNNER_ERROR : code;
+        }
+
+        struct JxlStreamTo {
+            int rows = 0;
+            const Decode::Begin *begin = nullptr;
+            const Decode::Take *take = nullptr;
+            const Decode::Abort *abort = nullptr;
+        };
+
+        // Tells begin what is coming, and points the output at bands that go on to take. An
+        // image with nothing to map is copied as it comes.
+        bool jxl_start(JxlDecoder *decoder, const std::span<const std::uint8_t> data, const Tone::Display &display, const JxlStreamTo &to, std::optional<JxlOutput> &output,
+                       std::optional<JxlBands> &bands) {
+            JxlBasicInfo info;
+
+            if (JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS) {
+                return false;
+            }
+
+            const auto width = static_cast<int>(info.xsize);
+            const auto height = static_cast<int>(info.ysize);
+
+            output = jxl_setup(data, jxl_tone(decoder), width, height, display);
+
+            if (!output) {
+                output.emplace();
+            }
+
+            if (!(*to.begin)(width, height, info.alpha_bits > 0, output->encoding)) {
+                return false;
+            }
+
+            bands.emplace(width, height, to.rows, output->encoding, *to.take, to.abort);
+            output->place = [&bands](const std::size_t x, const std::size_t y, const std::size_t pixels) { return bands->place(x, y, pixels); };
+            output->landed = [&bands](const std::size_t y, const std::size_t pixels) { bands->landed(y, pixels); };
+
+            return true;
+        }
+
+        bool jxl_animated(JxlDecoder *decoder) {
+            JxlBasicInfo info;
+
+            return JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS || info.have_animation != 0;
+        }
+
+        bool jxl_listen(JxlDecoder *decoder, std::optional<JxlOutput> &output) {
+            if (!output) {
+                return false;
+            }
+
+            const JxlPixelFormat format{Bitmap::CHANNELS, output->type, JXL_NATIVE_ENDIAN, 0};
+
+            return JxlDecoderSetImageOutCallback(decoder, &format, jxl_take, &*output) == JXL_DEC_SUCCESS;
+        }
+
+        void jxl_stop(std::optional<JxlBands> &bands) {
+            if (bands) {
+                bands->stop();
+            }
+        }
+
+        // Band by band into take, in however many threads libjxl has, with only a few bands
+        // held. Animation stays with libvips.
+        Direct jxl_stream(const std::span<const std::uint8_t> data, const int rows, const Decode::Begin &begin, const Decode::Take &take, const Decode::Abort *abort, const Tone::Display &display) {
+            const JxlHandle handle;
+            std::optional<JxlBands> bands;
+            JxlStoppable runner{handle.runner, [&] { return bands ? bands->stopped(abort) : aborted(abort); }};
+
+            if (handle.decoder == nullptr || handle.runner == nullptr || JxlDecoderSetParallelRunner(handle.decoder, jxl_run, &runner) != JXL_DEC_SUCCESS
+                || JxlDecoderSetKeepOrientation(handle.decoder, JXL_TRUE) != JXL_DEC_SUCCESS
+                || JxlDecoderSubscribeEvents(handle.decoder, JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING | JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS
+                || JxlDecoderSetInput(handle.decoder, data.data(), data.size()) != JXL_DEC_SUCCESS) {
+                return Direct::Skip;
+            }
+
+            JxlDecoderCloseInput(handle.decoder);
+
+            const JxlStreamTo to{rows, &begin, &take, abort};
+            std::optional<JxlOutput> output;
+            // Begin is heard at the colour encoding, and from then on there is no going back to libvips.
+            Direct failed = Direct::Skip;
+
+            for (;;) {
+                const JxlDecoderStatus status = JxlDecoderProcessInput(handle.decoder);
+
+                if (status == JXL_DEC_BASIC_INFO) {
+                    if (jxl_animated(handle.decoder)) {
+                        return Direct::Skip;
+                    }
+                } else if (status == JXL_DEC_COLOR_ENCODING) {
+                    failed = Direct::Failed;
+
+                    if (!jxl_start(handle.decoder, data, display, to, output, bands)) {
+                        return Direct::Failed;
+                    }
+                } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
+                    if (!jxl_listen(handle.decoder, output)) {
+                        return Direct::Failed;
+                    }
+                } else if (status == JXL_DEC_FULL_IMAGE || status == JXL_DEC_SUCCESS) {
+                    break;
+                } else {
+                    jxl_stop(bands);
+
+                    return failed;
+                }
+            }
+
+            return bands && bands->complete() ? Direct::Done : Direct::Failed;
+        }
+
         // Animation stays with libvips.
-        Direct load_jxl(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out, std::string *error, const Decode::Abort *abort) {
-            const Direct direct = jxl_decode(data, out, abort, [data](const Tone::Source &tone, Bitmap *target) {
-                return jxl_setup(data, tone, target);
+        Direct load_jxl(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out, std::string *error, const Decode::Abort *abort, const Tone::Display &display) {
+            const Direct direct = jxl_decode(data, out, abort, [data, display](const Tone::Source &tone, const int width, const int height) {
+                return jxl_setup(data, tone, width, height, display);
             });
 
             if (direct == Direct::Failed) {
@@ -1484,6 +1837,12 @@ namespace tiv {
 
             return direct;
         }
+
+        // libjxl keeps float rows along every group border of a lossy frame, for the filters that
+        // run across groups, which comes to about 2.7 bytes a pixel in measurements. Lossless
+        // frames need far less.
+        constexpr double JXL_LOSSY_BYTES = 2.8;
+        constexpr double JXL_LOSSLESS_BYTES = 1.0;
 
         // The transfer of an HDR file that libvips reads without it.
         Tone::Source container_tone(const Decode::Format kind, const std::span<const std::uint8_t> data) {
@@ -1790,7 +2149,7 @@ namespace tiv {
         return probe_vips(file, info, error);
     }
 
-    bool Decode::load(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Abort *abort, const Fit fit) {
+    bool Decode::load(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Abort *abort, const Fit fit, const Tone::Display &display) {
         Mapped mapped;
 
         if (!Mapped::open(file, &mapped, error)) {
@@ -1802,16 +2161,16 @@ namespace tiv {
 
         switch (kind) {
             case Format::Jpeg:
-                direct = load_jpeg(file, mapped.data(), boxWidth, boxHeight, out, error, abort, fit);
+                direct = load_jpeg(file, mapped.data(), boxWidth, boxHeight, out, error, abort, fit, display);
                 break;
             case Format::Png:
-                direct = load_png(file, mapped.data(), boxWidth, boxHeight, out, error, abort, fit);
+                direct = load_png(file, mapped.data(), boxWidth, boxHeight, out, error, abort, fit, display);
                 break;
             case Format::WebP:
                 direct = fit == Fit::Cheap ? load_webp(file, mapped.data(), out, error, abort) : Direct::Skip;
                 break;
             case Format::Jxl:
-                direct = fit == Fit::Cheap ? load_jxl(file, mapped.data(), out, error, abort) : Direct::Skip;
+                direct = fit == Fit::Cheap ? load_jxl(file, mapped.data(), out, error, abort, display) : Direct::Skip;
                 break;
             case Format::Bmp:
                 direct = load_bmp(file, mapped.data(), boxWidth, boxHeight, out, error, abort, fit);
@@ -1848,7 +2207,7 @@ namespace tiv {
             via = Via::Shrink;
         }
 
-        return load_vips(file, boxWidth, boxHeight, out, error, abort, via, tone);
+        return load_vips(file, boxWidth, boxHeight, out, error, abort, via, tone, display);
     }
 
     bool Decode::render(const std::filesystem::path &file, const double scale, const int x, const int y, const int width, const int height, Bitmap *out, std::string *error, Abort *abort) {
@@ -1947,24 +2306,36 @@ namespace tiv {
         }
     }
 
-    bool Decode::stream(const std::filesystem::path &file, const int rows, const Begin &begin, const Take &take, std::string *error, Abort *abort) {
+    bool Decode::stream(const std::filesystem::path &file, const int rows, const Begin &begin, const Take &take, std::string *error, Abort *abort, const Tone::Display &display) {
+        if (Mapped mapped; Mapped::open(file, &mapped) && sniff(mapped.data()) == Format::Jxl) {
+            const Direct direct = jxl_stream(mapped.data(), rows, begin, take, abort, display);
+
+            if (direct != Direct::Skip) {
+                if (direct == Direct::Failed) {
+                    fail(error, file, aborted(abort) ? "aborted" : "jxl decode failed");
+                }
+
+                return direct == Direct::Done;
+            }
+        }
+
         ensure_vips();
 
         try {
             // Sequential, so each band decodes as it is asked for and nothing above it stays.
             VImage image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
             const bool alpha = image.has_alpha();
-            const Prepared prepared = prepare(image, container_tone(file));
+            const Prepared prepared = prepare(image, container_tone(file), display);
             const int width = prepared.image.width();
             const int height = prepared.image.height();
 
-            if (!begin(width, height, alpha)) {
+            if (!begin(width, height, alpha, prepared.encoding)) {
                 fail(error, file, "stopped");
 
                 return false;
             }
 
-            Bitmap band = Bitmap::allocate(width, std::min(rows, height));
+            Bitmap band = Bitmap::allocate(width, std::min(rows, height), prepared.encoding);
 
             for (int y = 0; y < height; y += rows) {
                 if (aborted(abort)) {
@@ -1999,6 +2370,28 @@ namespace tiv {
 
             return false;
         }
+    }
+
+    std::uint64_t Decode::stream_bytes(const std::filesystem::path &file, const int rows) {
+        Mapped mapped;
+
+        if (!Mapped::open(file, &mapped) || sniff(mapped.data()) != Format::Jxl) {
+            return 0;
+        }
+
+        JxlBasicInfo basic;
+        Tone::Source tone;
+
+        std::memset(&basic, 0, sizeof basic);
+
+        if (!jxl_header(mapped.data(), &basic, &tone)) {
+            return 0;
+        }
+
+        const double pixels = static_cast<double>(basic.xsize) * static_cast<double>(basic.ysize);
+        const double band = static_cast<double>(basic.xsize) * static_cast<double>(rows) * Bitmap::CHANNELS;
+
+        return static_cast<std::uint64_t>((pixels * (basic.uses_original_profile != 0 ? JXL_LOSSLESS_BYTES : JXL_LOSSY_BYTES)) + (band * (JxlBands::AHEAD + 1)));
     }
 
     bool Decode::load_png_memory(const std::span<const std::uint8_t> data, Bitmap *out, std::string *error) {

@@ -10,24 +10,45 @@
 #define TIV_IMAGE_BITMAP_H
 
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
 
 namespace tiv {
-    // RGBA8, rows packed with no padding. The buffer is 64 byte aligned and starts out
-    // uninitialised: a decoder overwrites every byte, and zeroing 700 MB first is a
+    // Four bytes a pixel, rows packed with no padding. The buffer is 64 byte aligned and starts
+    // out uninitialised: a decoder overwrites every byte, and zeroing 700 MB first is a
     // measurable cost.
     class Bitmap {
 
     public:
         static constexpr int CHANNELS = 4;
         static constexpr std::size_t ALIGNMENT = 64;
+        static constexpr std::uint32_t PQ_MASK = 0x3FF;
+
+        enum class Encoding : std::uint8_t {
+            // RGBA8 sRGB.
+            Srgb,
+            // HDR for an HDR display: one 32 bit word a pixel of BT.2020 in PQ, 10 bits each
+            // of red from the lowest, green and blue, then 2 of alpha.
+            Pq,
+        };
 
         Bitmap() = default;
 
-        static Bitmap allocate(int width, int height);
+        static Bitmap allocate(int width, int height, Encoding encoding = Encoding::Srgb);
+
+        [[nodiscard]] Encoding encoding() const { return _encoding; }
+
+        // The channels of a Pq word, red first, alpha from 0 to 3.
+        [[nodiscard]] static constexpr std::array<std::uint32_t, 4> unpack(const std::uint32_t word) {
+            return {word & PQ_MASK, (word >> 10) & PQ_MASK, (word >> 20) & PQ_MASK, word >> 30};
+        }
+
+        [[nodiscard]] static constexpr std::uint32_t pack(const std::uint32_t red, const std::uint32_t green, const std::uint32_t blue, const std::uint32_t alpha) {
+            return red | (green << 10) | (blue << 20) | (alpha << 30);
+        }
 
         [[nodiscard]] int width() const { return _width; }
         [[nodiscard]] int height() const { return _height; }
@@ -58,6 +79,7 @@ namespace tiv {
 
         int _width = 0;
         int _height = 0;
+        Encoding _encoding = Encoding::Srgb;
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays): the array form is how unique_ptr owns a raw buffer.
         std::unique_ptr<std::uint8_t[], Free> _pixels;
     };

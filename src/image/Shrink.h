@@ -17,8 +17,8 @@
 #include "image/Bitmap.h"
 
 namespace tiv {
-    // Averages blocks of factor by factor pixels as RGBA8 rows arrive, so a shrink costs its
-    // output plus one row of sums, whatever the size of the image.
+    // Averages blocks of factor by factor pixels as rows arrive, so a shrink costs its output
+    // plus one row of sums, whatever the size of the image. Rows are in the target's encoding.
     class BoxShrink {
 
     public:
@@ -35,6 +35,7 @@ namespace tiv {
         void skip();
 
     private:
+        void push_pq(std::span<const std::uint8_t> row);
         void advance();
 
         Bitmap *_target;

@@ -21,6 +21,7 @@
 #include "app/Input.h"
 #include "gallery/Folder.h"
 #include "image/Decode.h"
+#include "image/Tone.h"
 #include "render/Canvas.h"
 #include "services/Loader.h"
 #include "services/Refiner.h"
@@ -58,6 +59,9 @@ namespace tiv {
 
         bool open_window(std::string *error);
         void layout();
+        void update_display();
+        bool make_renderer(bool linear);
+        void follow_output(const Loader::Result &result);
         void set_fullscreen(bool on);
 
         // Direction is the way the wheel was going, so prefetch leans that way.
@@ -95,6 +99,7 @@ namespace tiv {
 
         // Tagged leads with the streaming mode when it is on.
         [[nodiscard]] std::string bar_left(bool tagged = true) const;
+        [[nodiscard]] std::string failure_text(const std::string &error) const;
         // Fullscreen shows the streaming mode for a moment after it switches.
         [[nodiscard]] bool flashing() const;
         [[nodiscard]] std::string bar_right() const;
@@ -113,10 +118,13 @@ namespace tiv {
 
         SDL_Window *_window = nullptr;
         SDL_Renderer *_renderer = nullptr;
+        // Shared by each renderer the window has, null where the gpu renderer is not available.
+        SDL_GPUDevice *_device = nullptr;
         std::uint32_t _loaderEvent = 0;
         std::uint32_t _refinerEvent = 0;
         // A store read a tile the view asked for.
         std::uint32_t _storeEvent = 0;
+        Tone::Display _display;
 
         Folder _folder;
         Viewport _viewport;
@@ -146,6 +154,8 @@ namespace tiv {
         bool _building = false;
         // The image shows from disk.
         bool _streamed = false;
+        // The renderer draws in linear light, for an HDR image.
+        bool _linear = false;
         int _direction = 1;
         // Shown in place of an image that could not be opened.
         std::string _failure;

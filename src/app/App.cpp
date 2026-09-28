@@ -138,6 +138,44 @@ namespace tiv {
 
         // Zero is mailbox on the gpu renderer, so each refresh shows the newest frame. Under FIFO a
         // drag that starts from idle queues frames ahead of the display and stutters until it fills.
+        // What the gpu renderer would make for itself, kept so a renderer made again for another
+        // output skips making a device. The features are the ones it turns off:
+        // https://github.com/libsdl-org/SDL/blob/release-3.4.x/src/render/gpu/SDL_render_gpu.c
+        SDL_GPUDevice *create_device() {
+            const SDL_PropertiesID properties = SDL_CreateProperties();
+
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN, true);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN, true);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_D3D12_ALLOW_FEWER_RESOURCE_SLOTS_BOOLEAN, true);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_CLIP_DISTANCE_BOOLEAN, false);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_DEPTH_CLAMPING_BOOLEAN, false);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_INDIRECT_DRAW_FIRST_INSTANCE_BOOLEAN, false);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_ANISOTROPY_BOOLEAN, false);
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_METAL_ALLOW_MACFAMILY1_BOOLEAN, false);
+
+            SDL_GPUDevice *device = SDL_CreateGPUDeviceWithProperties(properties);
+
+            SDL_DestroyProperties(properties);
+
+            return device;
+        }
+
+        SDL_Renderer *create_renderer(SDL_Window *window, SDL_GPUDevice *device, const bool linear) {
+            const SDL_PropertiesID properties = SDL_CreateProperties();
+
+            SDL_SetPointerProperty(properties, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, window);
+            SDL_SetStringProperty(properties, SDL_PROP_RENDERER_CREATE_NAME_STRING, "gpu");
+            SDL_SetPointerProperty(properties, SDL_PROP_RENDERER_CREATE_GPU_DEVICE_POINTER, device);
+            SDL_SetNumberProperty(properties, SDL_PROP_RENDERER_CREATE_OUTPUT_COLORSPACE_NUMBER, linear ? SDL_COLORSPACE_SRGB_LINEAR : SDL_COLORSPACE_SRGB);
+
+            SDL_Renderer *renderer = SDL_CreateRendererWithProperties(properties);
+
+            SDL_DestroyProperties(properties);
+
+            return renderer;
+        }
+
         int vsync_setting(SDL_Renderer *renderer, SDL_Window *window) {
             auto *device = static_cast<SDL_GPUDevice *>(SDL_GetPointerProperty(SDL_GetRendererProperties(renderer), SDL_PROP_RENDERER_GPU_DEVICE_POINTER, nullptr));
 
@@ -152,6 +190,10 @@ namespace tiv {
 
         if (_renderer != nullptr) {
             SDL_DestroyRenderer(_renderer);
+        }
+
+        if (_device != nullptr) {
+            SDL_DestroyGPUDevice(_device);
         }
 
         if (_window != nullptr) {
@@ -186,6 +228,9 @@ namespace tiv {
         }
 
         layout();
+        update_display();
+        // Said even when SDR, since HDR images wait for it before they build pyramids on disk.
+        _loader->set_display(_display);
         // A result posted before SDL_Init has no event queue to wake the loop.
         deliver();
 
@@ -221,24 +266,73 @@ namespace tiv {
         set_icon(_window);
 #endif
 
-        _renderer = SDL_CreateRenderer(_window, "gpu");
-
-        if (_renderer == nullptr) {
-            _renderer = SDL_CreateRenderer(_window, nullptr);
+        // Only an HDR display ever switches output, so everywhere else the renderer is made as it always was.
+        if (SDL_GetBooleanProperty(SDL_GetWindowProperties(_window), SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false)) {
+            _device = create_device();
         }
 
-        if (_renderer == nullptr) {
+        if (!make_renderer(false)) {
             *error = SDL_GetError();
 
             return false;
         }
 
+        return true;
+    }
+
+    // Linear output is what carries HDR. The window has one renderer, so another output means
+    // another renderer, and the canvas with its textures goes with the old one.
+    bool App::make_renderer(const bool linear) {
+        _canvas = nullptr;
+
+        if (_renderer != nullptr) {
+            SDL_DestroyRenderer(_renderer);
+        }
+
+        _renderer = _device != nullptr ? create_renderer(_window, _device, linear) : nullptr;
+
+        if (_renderer == nullptr && !linear) {
+            _renderer = SDL_CreateRenderer(_window, "gpu");
+
+            if (_renderer == nullptr) {
+                _renderer = SDL_CreateRenderer(_window, nullptr);
+            }
+        }
+
+        if (_renderer == nullptr) {
+            return false;
+        }
+
+        _linear = linear;
         SDL_SetRenderVSync(_renderer, vsync_setting(_renderer, _window));
 
         const auto maxTexture = static_cast<int>(SDL_GetNumberProperty(SDL_GetRendererProperties(_renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, Tiles::SIZE));
         _canvas = std::make_unique<Canvas>(_renderer, maxTexture);
+        _dirty = true;
 
         return true;
+    }
+
+    // SDR images draw through the SDR output they always had, only PQ ones switch to linear.
+    void App::follow_output(const Loader::Result &result) {
+        bool pq = false;
+
+        if (result.store != nullptr) {
+            pq = result.store->encoding() == Bitmap::Encoding::Pq;
+        } else if (result.pyramid != nullptr && !result.pyramid->empty()) {
+            pq = result.pyramid->levels.front()->encoding() == Bitmap::Encoding::Pq;
+        }
+
+        const bool linear = pq && _display.hdr();
+
+        if (linear == _linear) {
+            return;
+        }
+
+        if (!make_renderer(linear) && linear && !make_renderer(false)) {
+            std::println(stderr, "tinyiv: {}", SDL_GetError());
+            _running = false;
+        }
     }
 
     void App::layout() {
@@ -376,6 +470,7 @@ namespace tiv {
 
         if (is_window_event(event)) {
             layout();
+            update_display();
 
             return;
         }
@@ -585,7 +680,7 @@ namespace tiv {
                 std::println(stderr, "tinyiv: {}", result.error);
 
                 // The previous image stays on the canvas, so an empty view is what hides it.
-                _failure = result.unsupported ? "Unsupported file format" : "Could not open this image";
+                _failure = result.unsupported ? "Unsupported file format" : failure_text(result.error);
                 _loading = false;
                 _shown = result.generation;
                 _viewport.set_image(0, 0);
@@ -630,6 +725,7 @@ namespace tiv {
             const auto image = static_cast<std::uint64_t>(_folder.index());
 
             _streamed = result.store != nullptr;
+            follow_output(result);
 
             if (_streamed) {
                 // Each tile read wakes the loop, which uploads it.
@@ -819,6 +915,25 @@ namespace tiv {
         _dirty = true;
     }
 
+    // HDR images decode for the headroom the window has now, and show again once they have.
+    void App::update_display() {
+        const SDL_PropertiesID properties = SDL_GetWindowProperties(_window);
+        const bool hdr = _device != nullptr && SDL_GetBooleanProperty(properties, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+        const float headroom = hdr ? std::max(SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0F), 1.0F) : 1.0F;
+
+        if (headroom == _display.headroom) {
+            return;
+        }
+
+        _display.headroom = headroom;
+        _loader->set_display(_display);
+
+        if (_info.hdr && _folder.count() > 0) {
+            _canvas->clear();
+            show(_folder.index(), _direction);
+        }
+    }
+
     void App::toggle_stream() {
         const bool on = !_loader->streaming_all();
 
@@ -979,14 +1094,25 @@ namespace tiv {
         return _switchedAt != 0 && SDL_GetTicks() - _switchedAt < MODE_FLASH_MS;
     }
 
+    // Why, where the error says it after the file's own name, as the loader's do.
+    std::string App::failure_text(const std::string &error) const {
+        const std::string prefix = _folder.count() > 0 ? _folder.current().string() + ": " : std::string();
+
+        if (prefix.empty() || !error.starts_with(prefix) || error.size() == prefix.size()) {
+            return "Could not open this image";
+        }
+
+        return "Could not open this image: " + error.substr(prefix.size());
+    }
+
     std::string App::bar_left(const bool tagged) const {
-        const char *tag = tagged && _loader->streaming_all() ? "STREAMING  " : "";
+        const std::string tag = std::string(tagged && _loader->streaming_all() ? "STREAMING  " : "") + (tagged && _linear ? "HDR  " : "");
 
         if (_folder.count() == 0) {
             return std::format("{}tinyiv", tag);
         }
 
-        // Marked while turned or flipped and not saved, and led by the mode while streaming.
+        // Marked while turned or flipped and not saved, and led by the modes that are on.
         return std::format("{}[{}/{}] {}{}", tag, _folder.index() + 1, _folder.count(), _folder.current().filename().string(), _turn != 1 ? " *" : "");
     }
 

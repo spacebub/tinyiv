@@ -50,6 +50,8 @@
 namespace tiv {
     namespace {
         constexpr std::array<char, 8> MAGIC{'T', 'I', 'V', 'T', 'I', 'L', 'E', 'S'};
+        // The same layout with PQ tiles, which RGBA8 files never had to say.
+        constexpr std::array<char, 8> MAGIC_PQ{'T', 'I', 'V', 'P', 'Q', 'T', 'I', 'L'};
         // 2: tiles are filtered and compressed.
         constexpr std::uint32_t VERSION = 2;
         constexpr std::uint32_t MAX_LEVELS = 32;
@@ -136,8 +138,28 @@ namespace tiv {
             return held;
         }
 
-        // Named for the file and the version of it on disk, so a changed file never finds an old pyramid.
-        std::filesystem::path name_of(const std::filesystem::path &file, const Identity &identity) {
+        // A PQ word cannot lose its alpha a byte at a time.
+        int channels_for(const bool alpha, const Bitmap::Encoding encoding) {
+            return alpha || encoding == Bitmap::Encoding::Pq ? Bitmap::CHANNELS : 3;
+        }
+
+        std::array<char, 8> magic_for(const Bitmap::Encoding encoding) {
+            return encoding == Bitmap::Encoding::Pq ? MAGIC_PQ : MAGIC;
+        }
+
+        std::u8string pq_tag(const Tone::Display &display) {
+            if (!display.hdr()) {
+                return {};
+            }
+
+            const std::string tag = std::format("|pq|{:.2f}", display.headroom);
+
+            return {tag.begin(), tag.end()};
+        }
+
+        // Named for the file and the version of it on disk, so a changed file never finds an old
+        // pyramid, and for the headroom an HDR one was mapped into.
+        std::filesystem::path name_of(const std::filesystem::path &file, const Identity &identity, const Tone::Display &display) {
             std::error_code failure;
             std::filesystem::path full = std::filesystem::weakly_canonical(file, failure);
 
@@ -146,7 +168,8 @@ namespace tiv {
             }
 
             const std::u8string text = full.generic_u8string() + u8"|" + reinterpret_cast<const char8_t *>(std::to_string(identity.size).c_str()) + u8"|"
-                                       + reinterpret_cast<const char8_t *>(std::to_string(identity.time).c_str());
+                                       + reinterpret_cast<const char8_t *>(std::to_string(identity.time).c_str())
+                                       + pq_tag(display);
 
             return std::format("{:016x}{}", hash(text), SUFFIX);
         }
@@ -412,8 +435,8 @@ namespace tiv {
         class Builder {
 
         public:
-            Builder(Writer &out, std::vector<Store::Level> levels, const int channels)
-                : _out(out), _channels(channels), _slots(static_cast<std::size_t>(std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_ENCODERS))) {
+            Builder(Writer &out, std::vector<Store::Level> levels, const int channels, const Bitmap::Encoding encoding)
+                : _out(out), _channels(channels), _encoding(encoding), _slots(static_cast<std::size_t>(std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_ENCODERS))) {
                 const std::size_t raw = static_cast<std::size_t>(Store::TILE) * Store::TILE * static_cast<std::size_t>(channels);
 
                 for (Encoded &slot : _slots) {
@@ -585,13 +608,13 @@ namespace tiv {
                     std::memcpy(state.held.data(), row, pitch);
                     state.holding = true;
                 } else {
-                    Pyramid::halve_row(state.held.data(), row, state.half.data(), state.level.width);
+                    Pyramid::halve_row(state.held.data(), row, state.half.data(), state.level.width, Pyramid::Kernel::Auto, _encoding);
                     state.holding = false;
                     push(index + 1, state.half.data());
                 }
 
                 if (state.holding && state.paired == state.level.height) {
-                    Pyramid::halve_row(state.held.data(), state.held.data(), state.half.data(), state.level.width);
+                    Pyramid::halve_row(state.held.data(), state.held.data(), state.half.data(), state.level.width, Pyramid::Kernel::Auto, _encoding);
                     state.holding = false;
                     push(index + 1, state.half.data());
                 }
@@ -599,6 +622,7 @@ namespace tiv {
 
             Writer &_out;
             int _channels;
+            Bitmap::Encoding _encoding;
             std::vector<State> _states;
             std::vector<Encoded> _slots;
             bool _failed = false;
@@ -611,13 +635,14 @@ namespace tiv {
             std::vector<std::uint8_t> raw;
         };
 
-        Bitmap read_tile(const Reader &reader, const Store::Level &level, const std::uint64_t offset, const std::uint64_t bytes, const int channels, const Store::Key &key, Decoder &decoder) {
+        Bitmap read_tile(const Reader &reader, const Store::Level &level, const std::uint64_t offset, const std::uint64_t bytes, const int channels, const Bitmap::Encoding encoding, const Store::Key &key,
+                         Decoder &decoder) {
             const int width = std::min(Store::TILE, level.width - (key.column * Store::TILE));
             const int height = std::min(Store::TILE, level.height - (key.row * Store::TILE));
             const std::size_t pixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
             const std::size_t pitch = static_cast<std::size_t>(width) * static_cast<std::size_t>(channels);
             const std::size_t raw = pitch * static_cast<std::size_t>(height);
-            Bitmap tile = Bitmap::allocate(width, height);
+            Bitmap tile = Bitmap::allocate(width, height, encoding);
 
             // Four channels come out the size of the tile, so they go straight into it.
             if (channels != Bitmap::CHANNELS) {
@@ -685,14 +710,14 @@ namespace tiv {
         return std::filesystem::temp_directory_path(missing) / "tinyiv";
     }
 
-    std::shared_ptr<Store> Store::open(const std::filesystem::path &file) {
+    std::shared_ptr<Store> Store::open(const std::filesystem::path &file, const Tone::Display &display) {
         Identity identity;
 
         if (!identify(file, &identity)) {
             return nullptr;
         }
 
-        const std::filesystem::path path = location(file) / name_of(file, identity);
+        const std::filesystem::path path = location(file) / name_of(file, identity, display);
         std::error_code failure;
 
         if (!std::filesystem::is_regular_file(path, failure)) {
@@ -715,7 +740,7 @@ namespace tiv {
         return store;
     }
 
-    std::shared_ptr<Store> Store::build(const std::filesystem::path &file, std::atomic<float> *progress, std::string *error, Decode::Abort *abort) {
+    std::shared_ptr<Store> Store::build(const std::filesystem::path &file, const Tone::Display &display, std::atomic<float> *progress, std::string *error, Decode::Abort *abort) {
         Identity identity;
 
         if (!identify(file, &identity)) {
@@ -725,7 +750,7 @@ namespace tiv {
         }
 
         const std::filesystem::path dir = location(file);
-        const std::filesystem::path finished = dir / name_of(file, identity);
+        const std::filesystem::path finished = dir / name_of(file, identity, display);
         std::filesystem::path part = finished;
 
         part += PART;
@@ -742,8 +767,8 @@ namespace tiv {
         header.sourceSize = identity.size;
         header.sourceTime = identity.time;
 
-        const auto begin = [&](const int width, const int height, const bool alpha) {
-            const int channels = alpha ? Bitmap::CHANNELS : 3;
+        const auto begin = [&](const int width, const int height, const bool alpha, const Bitmap::Encoding encoding) {
+            const int channels = channels_for(alpha, encoding);
             std::vector<Level> levels = level_sizes(width, height);
             const std::uint64_t bytes = pyramid_bytes(levels, channels) / EXPECTED_RATIO;
 
@@ -762,11 +787,12 @@ namespace tiv {
             }
 
             header.channels = static_cast<std::uint32_t>(channels);
+            header.magic = magic_for(encoding);
             header.levels = static_cast<std::uint32_t>(levels.size());
             total = height;
             // Written again once the index is down.
             out->write(&header, sizeof header);
-            builder = std::make_unique<Builder>(*out, std::move(levels), channels);
+            builder = std::make_unique<Builder>(*out, std::move(levels), channels, encoding);
 
             return true;
         };
@@ -785,7 +811,7 @@ namespace tiv {
             return true;
         };
 
-        bool made = Decode::stream(file, TILE, begin, take, error, abort);
+        bool made = Decode::stream(file, TILE, begin, take, error, abort, display);
 
         if (made) {
             header.index = out->at();
@@ -826,7 +852,7 @@ namespace tiv {
             return nullptr;
         }
 
-        std::shared_ptr<Store> store = open(file);
+        std::shared_ptr<Store> store = open(file, display);
 
         if (store == nullptr) {
             fail(error, file, "could not open the tile file just made");
@@ -845,7 +871,7 @@ namespace tiv {
             return false;
         }
 
-        if (header.magic != MAGIC || header.version != VERSION || header.tile != TILE || (header.channels != 3 && header.channels != Bitmap::CHANNELS)
+        if ((header.magic != MAGIC && header.magic != MAGIC_PQ) || header.version != VERSION || header.tile != TILE || (header.channels != 3 && header.channels != Bitmap::CHANNELS)
             || header.levels == 0 || header.levels > MAX_LEVELS || header.index >= size) {
             return false;
         }
@@ -857,6 +883,7 @@ namespace tiv {
         }
 
         _channels = static_cast<int>(header.channels);
+        _encoding = header.magic == MAGIC_PQ ? Bitmap::Encoding::Pq : Bitmap::Encoding::Srgb;
         std::uint64_t at = header.index + (sizes.size() * sizeof(LevelSize));
 
         for (const LevelSize &level : sizes) {
@@ -923,7 +950,7 @@ namespace tiv {
                     const Key key{static_cast<int>(index), column, row};
                     const Span &span = _spans.at(index).at((static_cast<std::size_t>(row) * static_cast<std::size_t>(level.columns)) + static_cast<std::size_t>(column));
 
-                    keep(id_of(key), std::make_shared<const Bitmap>(read_tile(reader, level, span.offset, span.bytes, _channels, key, decoder)), true);
+                    keep(id_of(key), std::make_shared<const Bitmap>(read_tile(reader, level, span.offset, span.bytes, _channels, _encoding, key, decoder)), true);
                 }
             }
         }
@@ -977,7 +1004,7 @@ namespace tiv {
             const Key key = key_of(id);
             const Level &level = _levels.at(static_cast<std::size_t>(key.level));
             const Span &span = _spans.at(static_cast<std::size_t>(key.level)).at((static_cast<std::size_t>(key.row) * static_cast<std::size_t>(level.columns)) + static_cast<std::size_t>(key.column));
-            auto tile = std::make_shared<const Bitmap>(read_tile(reader, level, span.offset, span.bytes, _channels, key, decoder));
+            auto tile = std::make_shared<const Bitmap>(read_tile(reader, level, span.offset, span.bytes, _channels, _encoding, key, decoder));
 
             hold.lock();
             _reading.erase(id);

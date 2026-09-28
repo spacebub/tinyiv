@@ -28,6 +28,7 @@
 #include "image/Decode.h"
 #include "image/Pyramid.h"
 #include "image/Store.h"
+#include "image/Tone.h"
 
 namespace tiv {
     // The threads that decode. Requests coalesce to the latest, the files around it decode
@@ -102,6 +103,11 @@ namespace tiv {
         // Previews are sized to this.
         void set_screen(int width, int height);
 
+        // HDR images decode for this display, and wait until it has been said, so nothing is
+        // made for the wrong one. What is decoded of them for another goes, and so does
+        // whatever such a decode still running makes.
+        void set_display(const Tone::Display &display);
+
         // The image to show, then the ones to have ready either side, nearest first.
         void show(std::uint64_t generation, const std::filesystem::path &current, std::vector<std::filesystem::path> ahead, std::vector<std::filesystem::path> behind);
 
@@ -157,6 +163,8 @@ namespace tiv {
             bool unsupported = false;
             // The request that last wanted it.
             std::uint64_t used = 0;
+            // What an HDR image was decoded for.
+            Tone::Display display;
         };
 
         struct Job {
@@ -178,6 +186,8 @@ namespace tiv {
         [[nodiscard]] bool near(const std::filesystem::path &file) const;
         [[nodiscard]] bool running(const std::filesystem::path &file) const;
         [[nodiscard]] bool rested(int ms) const;
+        // Under the lock. Only an HDR image decodes for the display.
+        [[nodiscard]] Tone::Display display_for(const Decode::Info &info) const;
 
         void work();
         bool pick(Job *out, bool *later);
@@ -227,6 +237,8 @@ namespace tiv {
 
         int _screenWidth = 3840;
         int _screenHeight = 2160;
+        Tone::Display _display;
+        bool _displayKnown = false;
 
         std::vector<std::thread> _workers;
     };

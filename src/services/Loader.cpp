@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -131,6 +132,36 @@ namespace tiv {
 
         _screenWidth = std::max(width, 1);
         _screenHeight = std::max(height, 1);
+    }
+
+    Tone::Display Loader::display_for(const Decode::Info &info) const {
+        return info.hdr ? _display : Tone::Display{};
+    }
+
+    void Loader::set_display(const Tone::Display &display) {
+        {
+            const std::scoped_lock hold(_guard);
+
+            if (_displayKnown && _display.headroom == display.headroom) {
+                return;
+            }
+
+            _displayKnown = true;
+            _display = display;
+
+            for (auto found = _cache.begin(); found != _cache.end();) {
+                if (found->second.info.hdr) {
+                    release(found->second);
+                    found = _cache.erase(found);
+                } else {
+                    ++found;
+                }
+            }
+
+            _starved = false;
+        }
+
+        _wake.notify_all();
     }
 
     void Loader::show(const std::uint64_t generation, const std::filesystem::path &current, std::vector<std::filesystem::path> ahead, std::vector<std::filesystem::path> behind) {
@@ -299,9 +330,10 @@ namespace tiv {
 
         const Entry &entry = found->second;
 
-        // A pyramid on disk costs a pass over the whole file, so only the image on screen makes one.
+        // A pyramid on disk costs a pass over the whole file, so only the image on screen makes
+        // one, and an HDR one only once it is known what display the pyramid is for.
         if (entry.streamed) {
-            return file == _request.current && entry.store == nullptr && entry.error.empty();
+            return file == _request.current && entry.store == nullptr && entry.error.empty() && (!entry.info.hdr || _displayKnown);
         }
 
         const bool animate = file == _request.current && entry.info.frames > 1 && entry.animation == nullptr;
@@ -560,6 +592,7 @@ namespace tiv {
 
             screenWidth = _screenWidth;
             screenHeight = _screenHeight;
+            entry.display = display_for(entry.info);
         }
 
         const bool scalable = Decode::scalable(entry.info.kind);
@@ -602,7 +635,7 @@ namespace tiv {
             try {
                 Bitmap decoded;
 
-                if (!Decode::load(job.file, at.width, at.height, &decoded, &entry.error, &abort, how)) {
+                if (!Decode::load(job.file, at.width, at.height, &decoded, &entry.error, &abort, how, entry.display)) {
                     return false;
                 }
 
@@ -665,7 +698,24 @@ namespace tiv {
     // The others wait for a pyramid until they are shown, since it takes a pass over the whole file.
     void Loader::decode_stream(Job &job, Entry entry) {
         entry.streamed = true;
-        entry.store = Store::open(job.file);
+
+        bool waiting = false;
+
+        {
+            const std::scoped_lock hold(_guard);
+
+            entry.display = display_for(entry.info);
+            waiting = entry.info.hdr && !_displayKnown;
+        }
+
+        // Kept without a store, and wants_job() picks it up again once the display is said.
+        if (waiting) {
+            store(job.file, std::move(entry));
+
+            return;
+        }
+
+        entry.store = Store::open(job.file, entry.display);
 
         bool build = false;
 
@@ -685,7 +735,15 @@ namespace tiv {
         }
 
         if (build) {
-            entry.store = Store::build(job.file, &_progress, &entry.error, job.abort.get());
+            // A decoder that holds much of the image would take the system down with it.
+            const std::uint64_t needed = Decode::stream_bytes(job.file, Store::TILE);
+            const std::uint64_t free = Memory::available();
+
+            if (needed > free) {
+                entry.error = std::format("{}: needs {:.1f} GB of memory to decode, {:.1f} GB is free", job.file.string(), static_cast<double>(needed) / 1e9, static_cast<double>(free) / 1e9);
+            } else {
+                entry.store = Store::build(job.file, entry.display, &_progress, &entry.error, job.abort.get());
+            }
         }
 
         if (job.abort->requested()) {
@@ -769,8 +827,11 @@ namespace tiv {
         {
             const std::scoped_lock hold(_guard);
 
-            // Stopped too late to cut short, and it may have read what the file said before.
-            if (finish(file)) {
+            // Stopped too late to cut short, and it may have read what the file said before. An
+            // HDR image decoded for a display since replaced is dropped the same way.
+            const bool stale = entry.info.hdr && entry.display.headroom != _display.headroom;
+
+            if (finish(file) || stale) {
                 if (entry.pyramid != nullptr) {
                     _trash.push_back(std::move(entry.pyramid));
                 }

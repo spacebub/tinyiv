@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 
 #include "image/Bitmap.h"
@@ -36,6 +37,12 @@ namespace tiv {
 
     // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access): the inner loop runs over gigapixels.
     void BoxShrink::push(const std::span<const std::uint8_t> row) {
+        if (_target->encoding() == Bitmap::Encoding::Pq) {
+            push_pq(row);
+
+            return;
+        }
+
         std::size_t in = 0;
 
         for (int x = 0; x < _target->width(); ++x) {
@@ -62,18 +69,54 @@ namespace tiv {
         advance();
     }
 
+    void BoxShrink::push_pq(const std::span<const std::uint8_t> row) {
+        std::size_t in = 0;
+
+        for (int x = 0; x < _target->width(); ++x) {
+            const int block = std::min(_factor, _width - (x * _factor));
+            const std::size_t at = static_cast<std::size_t>(x) * Bitmap::CHANNELS;
+
+            for (int i = 0; i < block; ++i, in += Bitmap::CHANNELS) {
+                std::uint32_t word = 0;
+
+                std::memcpy(&word, row.subspan(in, 4).data(), 4);
+
+                const auto [red, green, blue, alpha] = Bitmap::unpack(word);
+
+                _sums[at] += red;
+                _sums[at + 1] += green;
+                _sums[at + 2] += blue;
+                _sums[at + 3] += alpha;
+            }
+        }
+
+        advance();
+    }
+
     void BoxShrink::advance() {
         ++_gathered;
 
         if (_upward ? _y % _factor == 0 : (_y + 1) % _factor == 0 || _y == _height - 1) {
             const std::span<std::uint8_t> out = _target->row(_y / _factor);
+            const bool pq = _target->encoding() == Bitmap::Encoding::Pq;
 
             for (int x = 0; x < _target->width(); ++x) {
                 const std::uint32_t count = _counts[static_cast<std::size_t>(x)] * static_cast<std::uint32_t>(_gathered);
                 const std::size_t at = static_cast<std::size_t>(x) * Bitmap::CHANNELS;
+                const auto mean = [&](const std::size_t c) {
+                    return (_sums[at + c] + (count / 2)) / count;
+                };
+
+                if (pq) {
+                    const std::uint32_t word = Bitmap::pack(mean(0), mean(1), mean(2), mean(3));
+
+                    std::memcpy(out.subspan(at, 4).data(), &word, 4);
+
+                    continue;
+                }
 
                 for (std::size_t c = 0; c < Bitmap::CHANNELS; ++c) {
-                    out[at + c] = static_cast<std::uint8_t>((_sums[at + c] + (count / 2)) / count);
+                    out[at + c] = static_cast<std::uint8_t>(mean(c));
                 }
             }
 

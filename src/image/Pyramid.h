@@ -36,9 +36,10 @@ namespace tiv {
         // Averages 2x2 blocks. An odd last row or column is averaged with itself.
         static Bitmap halve(const Bitmap &source, Kernel kernel = Kernel::Auto);
 
-        // One row of halve(): two RGBA8 rows of the width in, one row half as wide out, for
-        // halving an image as it streams past.
-        static void halve_row(const std::uint8_t *top, const std::uint8_t *bottom, std::uint8_t *out, int width, Kernel kernel = Kernel::Auto);
+        // One row of halve(): two rows of the width in, one row half as wide out, for halving an
+        // image as it streams past. PQ has a scalar kernel and an AVX2 one.
+        static void halve_row(const std::uint8_t *top, const std::uint8_t *bottom, std::uint8_t *out, int width, Kernel kernel = Kernel::Auto,
+                              Bitmap::Encoding encoding = Bitmap::Encoding::Srgb);
 
         // True when the kernel can run on this machine.
         [[nodiscard]] static bool supports(Kernel kernel);

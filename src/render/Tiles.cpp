@@ -24,6 +24,29 @@
 
 namespace tiv {
     namespace {
+        // PQ tiles are BT.2020 in PQ, whose 203 nits the renderer puts at SDR white: https://www.itu.int/pub/R-REP-BT.2408
+        SDL_Texture *create_texture(SDL_Renderer *renderer, const Bitmap::Encoding encoding, const int width, const int height) {
+            if (encoding == Bitmap::Encoding::Srgb) {
+                return SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, width, height);
+            }
+
+            constexpr float SDR_WHITE_NITS = 203.0F;
+            const SDL_PropertiesID properties = SDL_CreateProperties();
+
+            SDL_SetNumberProperty(properties, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, SDL_PIXELFORMAT_ABGR2101010);
+            SDL_SetNumberProperty(properties, SDL_PROP_TEXTURE_CREATE_COLORSPACE_NUMBER, SDL_COLORSPACE_HDR10);
+            SDL_SetNumberProperty(properties, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER, SDL_TEXTUREACCESS_STATIC);
+            SDL_SetNumberProperty(properties, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, width);
+            SDL_SetNumberProperty(properties, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, height);
+            SDL_SetFloatProperty(properties, SDL_PROP_TEXTURE_CREATE_SDR_WHITE_POINT_FLOAT, SDR_WHITE_NITS);
+
+            SDL_Texture *texture = SDL_CreateTextureWithProperties(renderer, properties);
+
+            SDL_DestroyProperties(properties);
+
+            return texture;
+        }
+
         Rect intersect(const Rect &a, const Rect &b) {
             const double x0 = std::max(a.x, b.x);
             const double y0 = std::max(a.y, b.y);
@@ -195,7 +218,7 @@ namespace tiv {
                 }
             }
 
-            tile.texture = SDL_CreateTexture(_renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, tile.area.w, tile.area.h);
+            tile.texture = create_texture(_renderer, _store != nullptr ? _store->encoding() : _bitmap->encoding(), tile.area.w, tile.area.h);
 
             if (tile.texture == nullptr) {
                 break;

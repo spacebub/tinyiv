@@ -29,6 +29,7 @@
 
 #include "image/Bitmap.h"
 #include "image/Decode.h"
+#include "image/Tone.h"
 
 namespace tiv {
     // An image too large for memory, as a pyramid of tiles in a file on disk. The file is made
@@ -70,11 +71,13 @@ namespace tiv {
         // made, else the user's cache.
         [[nodiscard]] static std::filesystem::path location(const std::filesystem::path &file);
 
-        // The pyramid made for the file as it is now, if there is one.
-        [[nodiscard]] static std::shared_ptr<Store> open(const std::filesystem::path &file);
+        // The pyramid made for the file as it is now and shown on the display, if there is one.
+        // The display only tells pyramids of an HDR image apart.
+        [[nodiscard]] static std::shared_ptr<Store> open(const std::filesystem::path &file, const Tone::Display &display = {});
 
         // Decodes the file into a new pyramid on disk and opens it. Progress goes from 0 to 1.
-        [[nodiscard]] static std::shared_ptr<Store> build(const std::filesystem::path &file, std::atomic<float> *progress, std::string *error = nullptr, Decode::Abort *abort = nullptr);
+        [[nodiscard]] static std::shared_ptr<Store> build(const std::filesystem::path &file, const Tone::Display &display, std::atomic<float> *progress, std::string *error = nullptr,
+                                                          Decode::Abort *abort = nullptr);
 
         ~Store();
 
@@ -90,7 +93,9 @@ namespace tiv {
         // The finest first.
         [[nodiscard]] std::span<const Level> levels() const { return _levels; }
 
-        // The tile as RGBA8 when it is in memory, else null.
+        [[nodiscard]] Bitmap::Encoding encoding() const { return _encoding; }
+
+        // The tile when it is in memory, else null.
         [[nodiscard]] std::shared_ptr<const Bitmap> find(const Key &key) const;
 
         // The tiles to read, most wanted first. Replaces whatever was asked for before and is
@@ -130,6 +135,7 @@ namespace tiv {
 
         std::filesystem::path _path;
         int _channels = 4;
+        Bitmap::Encoding _encoding = Bitmap::Encoding::Srgb;
         std::vector<Level> _levels;
         // Per level, where each tile lies in the file, row by row.
         std::vector<std::vector<Span>> _spans;

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "image/Bitmap.h"
+#include "image/Tone.h"
 
 // NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): the tag libvips gives VipsImage.
 struct _VipsImage;
@@ -101,8 +102,10 @@ namespace tiv::Decode {
     // Reads the header only.
     bool probe(const std::filesystem::path &file, Info *info, std::string *error = nullptr);
 
-    // Decodes straight into an RGBA8 bitmap as stored, the orientation left for drawing. HDR
-    // is tone mapped, or brought down by its gain map where the base rendition is HDR. The
+    // Decodes straight into a bitmap as stored, the orientation left for drawing. For an SDR
+    // display HDR is tone mapped to RGBA8, or brought down by its gain map where the base
+    // rendition is HDR. For an HDR display it comes out PQ, rolled off into the display's
+    // headroom, and a gain map is weighed for it. Everything else is RGBA8. The
     // box is in the image's shown orientation. A box smaller than the image asks for the
     // size the image would have fitted into it: formats that scale cheaply deliver that
     // size, every other one delivers the image whole and leaves the shrinking to the caller.
@@ -114,7 +117,8 @@ namespace tiv::Decode {
         Force,
     };
 
-    bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error = nullptr, Abort *abort = nullptr, Fit fit = Fit::Cheap);
+    bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error = nullptr, Abort *abort = nullptr, Fit fit = Fit::Cheap,
+              const Tone::Display &display = {});
 
     // Part of a scalable image rendered at the scale, the part given in pixels of the image
     // at that scale.
@@ -130,13 +134,18 @@ namespace tiv::Decode {
     // for all of them to fit in the bytes given.
     bool load_frames(const std::filesystem::path &file, std::size_t maxBytes, std::vector<Frame> *out, std::string *error = nullptr, Abort *abort = nullptr);
 
-    // Hands the image over as stored, top to bottom, in RGBA8 bands of the rows given, so an
-    // image of any size decodes in the memory of one band. Begin hears the size first, and
-    // whether the image has alpha. Either returning false stops the decode.
-    using Begin = std::function<bool(int width, int height, bool alpha)>;
+    // Hands the image over as stored, top to bottom, in bands of the rows given, so an image
+    // of any size decodes in the memory of one band. Begin hears the size first, whether the
+    // image has alpha and how the bands are encoded, as load() would for the display. Either
+    // returning false stops the decode.
+    using Begin = std::function<bool(int width, int height, bool alpha, Bitmap::Encoding encoding)>;
     using Take = std::function<bool(int y, int rows, std::span<const std::uint8_t> pixels)>;
 
-    bool stream(const std::filesystem::path &file, int rows, const Begin &begin, const Take &take, std::string *error = nullptr, Abort *abort = nullptr);
+    bool stream(const std::filesystem::path &file, int rows, const Begin &begin, const Take &take, std::string *error = nullptr, Abort *abort = nullptr, const Tone::Display &display = {});
+
+    // About the most memory stream() holds for the file in bands of the rows given, for the
+    // formats whose decoder holds much of the image. Zero for the rest.
+    [[nodiscard]] std::uint64_t stream_bytes(const std::filesystem::path &file, int rows);
 
     // A PNG held in memory, decoded whole.
     bool load_png_memory(std::span<const std::uint8_t> data, Bitmap *out, std::string *error = nullptr);
