@@ -22,7 +22,7 @@
 namespace bench {
     namespace {
         // Listing and sorting the folder around the opened file.
-        void Startup_folder(benchmark::State &state, const std::filesystem::path file) {
+        void Startup_folder(benchmark::State &state, const std::filesystem::path &file) {
             for ([[maybe_unused]] auto step : state) {
                 tiv::Folder folder;
 

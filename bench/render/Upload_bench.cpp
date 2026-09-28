@@ -96,7 +96,7 @@ namespace bench {
             }
 
             state.SetBytesProcessed(static_cast<std::int64_t>(uploaded) * state.iterations());
-            state.counters["mb_per_view"] = benchmark::Counter(static_cast<double>(uploaded) / (1024.0 * 1024.0));
+            state.counters.insert_or_assign("mb_per_view", benchmark::Counter(static_cast<double>(uploaded) / (1024.0 * 1024.0)));
         }
 
         // A frame of draw calls at fit, with every tile resident.

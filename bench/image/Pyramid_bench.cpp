@@ -6,6 +6,7 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -26,11 +27,11 @@ namespace bench {
             int height;
         };
 
-        constexpr Size SIZES[] = {
+        constexpr std::array<Size, 3> SIZES = {{
                 {"4k", 3840, 2160},
                 {"33MP", 6656, 4992},
                 {"128MP", 13056, 9792},
-        };
+        }};
 
         tiv::Bitmap filled(const int width, const int height) {
             tiv::Bitmap held = tiv::Bitmap::allocate(width, height);
@@ -60,7 +61,7 @@ namespace bench {
             }
 
             state.SetBytesProcessed(static_cast<std::int64_t>(source.bytes()) * state.iterations());
-            state.counters["MP/s"] = benchmark::Counter(static_cast<double>(source.pixels()) / 1e6, benchmark::Counter::kIsIterationInvariantRate);
+            state.counters.insert_or_assign("MP/s", benchmark::Counter(static_cast<double>(source.pixels()) / 1e6, benchmark::Counter::kIsIterationInvariantRate));
         }
 
         // Every level down to a quarter of a 4k screen, as the loader builds it.
@@ -75,7 +76,7 @@ namespace bench {
                 benchmark::DoNotOptimize(pyramid.levels.data());
             }
 
-            state.counters["MP/s"] = benchmark::Counter(static_cast<double>(size.width) * size.height / 1e6, benchmark::Counter::kIsIterationInvariantRate);
+            state.counters.insert_or_assign("MP/s", benchmark::Counter(static_cast<double>(size.width) * size.height / 1e6, benchmark::Counter::kIsIterationInvariantRate));
         }
     }
 
@@ -85,11 +86,11 @@ namespace bench {
             tiv::Pyramid::Kernel kernel;
         };
 
-        constexpr Named KERNELS[] = {
+        constexpr std::array<Named, 3> KERNELS = {{
                 {"scalar", tiv::Pyramid::Kernel::Scalar},
                 {"sse2", tiv::Pyramid::Kernel::Sse2},
                 {"avx2", tiv::Pyramid::Kernel::Avx2},
-        };
+        }};
 
         for (const Size &size : SIZES) {
             for (const Named &kernel : KERNELS) {

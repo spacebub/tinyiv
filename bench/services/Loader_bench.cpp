@@ -40,16 +40,16 @@ namespace bench {
         Step step_at(const std::vector<std::filesystem::path> &files, const std::size_t index, const int direction) {
             Step held;
             const auto count = static_cast<long>(files.size());
-            const auto wrap = [&](const long i) { return files[static_cast<std::size_t>(((i % count) + count) % count)]; };
+            const auto wrap = [&](const long i) { return files.at(static_cast<std::size_t>(((i % count) + count) % count)); };
 
-            held.current = files[index];
+            held.current = files.at(index);
 
             for (int i = 1; i <= AHEAD && i < count; ++i) {
-                held.ahead.push_back(wrap(static_cast<long>(index) + (i * direction)));
+                held.ahead.push_back(wrap(static_cast<long>(index) + (static_cast<long>(i) * direction)));
             }
 
             for (int i = 1; i <= BEHIND && i + AHEAD < count; ++i) {
-                held.behind.push_back(wrap(static_cast<long>(index) - (i * direction)));
+                held.behind.push_back(wrap(static_cast<long>(index) - (static_cast<long>(i) * direction)));
             }
 
             return held;
@@ -88,7 +88,7 @@ namespace bench {
         }
 
         // A fresh loader opening one file: the cold start the app makes.
-        void Loader_open(benchmark::State &state, const std::filesystem::path file) {
+        void Loader_open(benchmark::State &state, const std::filesystem::path &file) {
             Memory::reset_peak();
 
             for ([[maybe_unused]] auto step : state) {
@@ -133,8 +133,8 @@ namespace bench {
 
             // As the app asks in a folder of two, the other file ahead.
             for ([[maybe_unused]] auto step : state) {
-                const std::filesystem::path &file = files[generation % 2];
-                const std::filesystem::path &other = files[(generation + 1) % 2];
+                const std::filesystem::path &file = files.at(generation % 2);
+                const std::filesystem::path &other = files.at((generation + 1) % 2);
 
                 loader.show(++generation, file, {other}, {});
 
@@ -148,7 +148,7 @@ namespace bench {
 
         // A wheel flick over the whole folder, then how long the image it lands on takes, and
         // what the flight through the rest cost in memory.
-        void Loader_burst(benchmark::State &state, const std::vector<std::filesystem::path> files, const int gapMs) {
+        void Loader_burst(benchmark::State &state, const std::vector<std::filesystem::path> &files, const int gapMs) {
             if (files.size() < 2) {
                 state.SkipWithMessage("no folder");
 
@@ -182,13 +182,13 @@ namespace bench {
                 state.SetIterationTime(std::chrono::duration<double>(Clock::now() - landed).count());
             }
 
-            state.counters["cache_mb"] = benchmark::Counter(0.0);
+            state.counters.insert_or_assign("cache_mb", benchmark::Counter(0.0));
             Memory::report_peak(state);
         }
 
         // Walking a folder at a steady pace with prefetch running: the time each step waits
         // for its first pixels, averaged, and the memory the walk settles at.
-        void Loader_walk(benchmark::State &state, const std::vector<std::filesystem::path> files, const int paceMs, const int steps) {
+        void Loader_walk(benchmark::State &state, const std::vector<std::filesystem::path> &files, const int paceMs, const int steps) {
             if (files.size() < 2) {
                 state.SkipWithMessage("no folder");
 
@@ -231,10 +231,10 @@ namespace bench {
                 }
             }
 
-            state.counters["wait_ms_avg"] = benchmark::Counter(waited / std::max(counted, 1));
-            state.counters["wait_ms_max"] = benchmark::Counter(worst);
-            state.counters["cache_mb"] = benchmark::Counter(static_cast<double>(loader.cached_bytes()) / (1024.0 * 1024.0));
-            state.counters["cache_files"] = benchmark::Counter(static_cast<double>(loader.cached_files()));
+            state.counters.insert_or_assign("wait_ms_avg", benchmark::Counter(waited / std::max(counted, 1)));
+            state.counters.insert_or_assign("wait_ms_max", benchmark::Counter(worst));
+            state.counters.insert_or_assign("cache_mb", benchmark::Counter(static_cast<double>(loader.cached_bytes()) / (1024.0 * 1024.0)));
+            state.counters.insert_or_assign("cache_files", benchmark::Counter(static_cast<double>(loader.cached_files())));
             Memory::report_peak(state);
         }
     }

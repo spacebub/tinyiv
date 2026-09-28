@@ -40,11 +40,11 @@ namespace bench {
 
         void report(benchmark::State &state, const std::filesystem::path &file, const std::int64_t pixels) {
             state.SetBytesProcessed(static_cast<std::int64_t>(std::filesystem::file_size(file)) * state.iterations());
-            state.counters["MP/s"] = benchmark::Counter(static_cast<double>(pixels) / 1e6, benchmark::Counter::kIsIterationInvariantRate);
+            state.counters.insert_or_assign("MP/s", benchmark::Counter(static_cast<double>(pixels) / 1e6, benchmark::Counter::kIsIterationInvariantRate));
             Memory::report_peak(state);
         }
 
-        void Decode_probe(benchmark::State &state, const std::filesystem::path file) {
+        void Decode_probe(benchmark::State &state, const std::filesystem::path &file) {
             tiv::Decode::Info info;
 
             for ([[maybe_unused]] auto step : state) {
@@ -59,7 +59,7 @@ namespace bench {
         }
 
         // The whole image, as the loader decodes a format without a cheap preview.
-        void Decode_full(benchmark::State &state, const std::filesystem::path file) {
+        void Decode_full(benchmark::State &state, const std::filesystem::path &file) {
             tiv::Decode::Info info;
 
             if (!tiv::Decode::probe(file, &info)) {
@@ -91,7 +91,7 @@ namespace bench {
 
         // What the loader asks for first: something the screen holds. Over the cap, the loader
         // never lets a decoder hold the image whole, so neither does this.
-        void Decode_preview(benchmark::State &state, const std::filesystem::path file) {
+        void Decode_preview(benchmark::State &state, const std::filesystem::path &file) {
             tiv::Decode::Info info;
 
             if (!tiv::Decode::probe(file, &info)) {
@@ -123,7 +123,7 @@ namespace bench {
         }
 
         // Forced within the screen, the path for images too large to hold whole.
-        void Decode_forced(benchmark::State &state, const std::filesystem::path file) {
+        void Decode_forced(benchmark::State &state, const std::filesystem::path &file) {
             tiv::Decode::Info info;
 
             if (!tiv::Decode::probe(file, &info)) {
@@ -151,7 +151,7 @@ namespace bench {
         }
 
         // A decode cut short after a few rows, which is what a wheel flick costs per image passed.
-        void Decode_aborted(benchmark::State &state, const std::filesystem::path file) {
+        void Decode_aborted(benchmark::State &state, const std::filesystem::path &file) {
             tiv::Decode::Info info;
 
             if (!tiv::Decode::probe(file, &info)) {

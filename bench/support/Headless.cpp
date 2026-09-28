@@ -14,39 +14,49 @@
 
 namespace bench {
     namespace {
-        SDL_Window *window = nullptr;
-        SDL_Renderer *held = nullptr;
-        bool tried = false;
+        struct Session {
+            SDL_Window *window = nullptr;
+            SDL_Renderer *renderer = nullptr;
+            bool tried = false;
+        };
+
+        Session &session() {
+            static Session held;
+
+            return held;
+        }
     }
 
     SDL_Renderer *Headless::renderer() {
-        if (tried) {
-            return held;
+        Session &held = session();
+
+        if (held.tried) {
+            return held.renderer;
         }
 
-        tried = true;
+        held.tried = true;
 
         if (!SDL_Init(SDL_INIT_VIDEO)) {
             return nullptr;
         }
 
-        window = SDL_CreateWindow("tiv_bench", 640, 480, SDL_WINDOW_HIDDEN);
+        held.window = SDL_CreateWindow("tiv_bench", 640, 480, SDL_WINDOW_HIDDEN);
 
-        if (window == nullptr) {
+        if (held.window == nullptr) {
             return nullptr;
         }
 
-        held = SDL_CreateRenderer(window, "gpu");
+        held.renderer = SDL_CreateRenderer(held.window, "gpu");
 
-        if (held == nullptr) {
-            held = SDL_CreateRenderer(window, nullptr);
+        if (held.renderer == nullptr) {
+            held.renderer = SDL_CreateRenderer(held.window, nullptr);
         }
 
-        if (held != nullptr) {
-            SDL_SetRenderVSync(held, 0);
+        if (held.renderer != nullptr) {
+            SDL_SetRenderVSync(held.renderer, 0);
         }
 
-        return held;
+        return held.renderer;
     }
 
     int Headless::max_texture() {
@@ -60,17 +70,19 @@ namespace bench {
     }
 
     void Headless::shutdown() {
-        if (held != nullptr) {
-            SDL_DestroyRenderer(held);
-            held = nullptr;
+        Session &held = session();
+
+        if (held.renderer != nullptr) {
+            SDL_DestroyRenderer(held.renderer);
+            held.renderer = nullptr;
         }
 
-        if (window != nullptr) {
-            SDL_DestroyWindow(window);
-            window = nullptr;
+        if (held.window != nullptr) {
+            SDL_DestroyWindow(held.window);
+            held.window = nullptr;
         }
 
-        if (tried) {
+        if (held.tried) {
             SDL_Quit();
         }
     }

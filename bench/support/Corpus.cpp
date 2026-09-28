@@ -49,12 +49,19 @@ namespace bench {
                 {"huge-lossless.webp", "[lossless=true,effort=0]", 0, 11547, 8660, LOSSLESS_NOISE},
         }};
 
-        std::filesystem::path corpusDir;
+        struct State {
+            std::filesystem::path dir;
+            std::once_flag vips;
+        };
 
-        std::once_flag vipsOnce;
+        State &state() {
+            static State held;
+
+            return held;
+        }
 
         void ensure_vips() {
-            std::call_once(vipsOnce, [] {
+            std::call_once(state().vips, [] {
                 g_log_set_handler("VIPS", G_LOG_LEVEL_WARNING, [](const gchar *, GLogLevelFlags, const gchar *, gpointer) {}, nullptr);
                 VIPS_INIT("tiv_bench");
             });
@@ -114,7 +121,7 @@ namespace bench {
     }
 
     void Corpus::prepare(const std::filesystem::path &dir) {
-        corpusDir = dir;
+        state().dir = dir;
 
         std::filesystem::create_directories(dir);
 
@@ -129,7 +136,7 @@ namespace bench {
     }
 
     const std::filesystem::path &Corpus::dir() {
-        return corpusDir;
+        return state().dir;
     }
 
     std::span<const Corpus::Spec> Corpus::specs() {
@@ -137,14 +144,16 @@ namespace bench {
     }
 
     std::filesystem::path Corpus::file(const std::string_view name) {
-        return corpusDir / name;
+        return state().dir / name;
     }
 
     std::vector<std::filesystem::path> Corpus::files() {
         std::vector<std::filesystem::path> held;
 
+        held.reserve(SPECS.size());
+
         for (const Spec &spec : SPECS) {
-            held.push_back(corpusDir / spec.name);
+            held.push_back(state().dir / spec.name);
         }
 
         return held;

@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -28,19 +29,19 @@ namespace bench {
         constexpr int BIG_HEIGHT = 9792;
 
         // Touching every page is what a decoder does, so the allocation is measured with it.
-        void touch(std::uint8_t *data, const std::size_t bytes) {
-            for (std::size_t at = 0; at < bytes; at += 4096) {
+        void touch(const std::span<std::uint8_t> data) {
+            for (std::size_t at = 0; at < data.size(); at += 4096) {
                 data[at] = 1;
             }
 
-            benchmark::DoNotOptimize(data);
+            benchmark::DoNotOptimize(data.data());
         }
 
         void Bitmap_allocate_touch(benchmark::State &state) {
             for ([[maybe_unused]] auto step : state) {
                 tiv::Bitmap held = tiv::Bitmap::allocate(BIG_WIDTH, BIG_HEIGHT);
 
-                touch(held.data(), held.bytes());
+                touch({held.data(), held.bytes()});
             }
 
             state.SetBytesProcessed(static_cast<std::int64_t>(BIG_WIDTH) * BIG_HEIGHT * 4 * state.iterations());
@@ -51,7 +52,7 @@ namespace bench {
             for ([[maybe_unused]] auto step : state) {
                 std::vector<std::uint8_t> held(static_cast<std::size_t>(BIG_WIDTH) * BIG_HEIGHT * 4);
 
-                touch(held.data(), held.size());
+                touch(held);
             }
 
             state.SetBytesProcessed(static_cast<std::int64_t>(BIG_WIDTH) * BIG_HEIGHT * 4 * state.iterations());
@@ -67,7 +68,7 @@ namespace bench {
             return sum;
         }
 
-        void Mapped_open(benchmark::State &state, const std::filesystem::path file) {
+        void Mapped_open(benchmark::State &state, const std::filesystem::path &file) {
             for ([[maybe_unused]] auto step : state) {
                 tiv::Mapped mapped;
 
@@ -83,11 +84,12 @@ namespace bench {
             state.SetBytesProcessed(static_cast<std::int64_t>(std::filesystem::file_size(file)) * state.iterations());
         }
 
-        void Read_whole(benchmark::State &state, const std::filesystem::path file) {
+        void Read_whole(benchmark::State &state, const std::filesystem::path &file) {
             for ([[maybe_unused]] auto step : state) {
                 std::ifstream in(file, std::ios::binary);
                 std::vector<std::uint8_t> data(std::filesystem::file_size(file));
 
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): streams read chars.
                 in.read(reinterpret_cast<char *>(data.data()), static_cast<std::streamsize>(data.size()));
                 benchmark::DoNotOptimize(checksum(data));
             }
@@ -96,7 +98,7 @@ namespace bench {
         }
 
         // The byte by byte iterator read the decoders used to start with.
-        void Read_istreambuf(benchmark::State &state, const std::filesystem::path file) {
+        void Read_istreambuf(benchmark::State &state, const std::filesystem::path &file) {
             for ([[maybe_unused]] auto step : state) {
                 std::ifstream in(file, std::ios::binary);
                 std::vector<std::uint8_t> data;

@@ -21,7 +21,7 @@ namespace bench {
             std::string line;
 
             while (std::getline(in, line)) {
-                if (line.rfind(key, 0) == 0) {
+                if (line.starts_with(key)) {
                     return std::stoull(line.substr(key.size() + 1)) * 1024;
                 }
             }
@@ -39,19 +39,23 @@ namespace bench {
     }
 
     namespace {
-        std::size_t floor = 0;
+        std::size_t &baseline() {
+            static std::size_t held = 0;
+
+            return held;
+        }
     }
 
     void Memory::reset_peak() {
         // Writing 5 resets the high water mark, which needs no privilege for one's own process.
         std::ofstream("/proc/self/clear_refs") << "5\n";
-        floor = resident();
+        baseline() = resident();
     }
 
     void Memory::report_peak(benchmark::State &state) {
         const std::size_t most = peak();
 
-        state.counters["peak_rss_mb"] = benchmark::Counter(static_cast<double>(most) / (1024.0 * 1024.0));
-        state.counters["rss_added_mb"] = benchmark::Counter(static_cast<double>(most > floor ? most - floor : 0) / (1024.0 * 1024.0));
+        state.counters.insert_or_assign("peak_rss_mb", benchmark::Counter(static_cast<double>(most) / (1024.0 * 1024.0)));
+        state.counters.insert_or_assign("rss_added_mb", benchmark::Counter(static_cast<double>(most > baseline() ? most - baseline() : 0) / (1024.0 * 1024.0)));
     }
 }
