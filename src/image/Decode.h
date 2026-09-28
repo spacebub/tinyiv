@@ -56,6 +56,8 @@ namespace tiv::Decode {
         int orientation = 1;
         // More than one for an animated GIF or WebP.
         int frames = 1;
+        // Holds light beyond SDR white, by its transfer or in a gain map.
+        bool hdr = false;
 
         [[nodiscard]] std::int64_t pixels() const { return static_cast<std::int64_t>(width) * height; }
     };
@@ -99,7 +101,8 @@ namespace tiv::Decode {
     // Reads the header only.
     bool probe(const std::filesystem::path &file, Info *info, std::string *error = nullptr);
 
-    // Decodes straight into an RGBA8 bitmap as stored, the orientation left for drawing. The
+    // Decodes straight into an RGBA8 bitmap as stored, the orientation left for drawing. HDR
+    // is tone mapped, or brought down by its gain map where the base rendition is HDR. The
     // box is in the image's shown orientation. A box smaller than the image asks for the
     // size the image would have fitted into it: formats that scale cheaply deliver that
     // size, every other one delivers the image whole and leaves the shrinking to the caller.

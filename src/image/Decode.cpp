@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cctype>
 #include <cmath>
 #include <csetjmp>
@@ -18,7 +19,9 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <string>
@@ -38,11 +41,14 @@
 #include "image/Bmp.h"
 #include "image/Decode.h"
 #include "image/Exif.h"
+#include "image/GainMap.h"
+#include "image/Heif.h"
 #include "image/Icon.h"
 #include "image/Mapped.h"
 #include "image/Orient.h"
 #include "image/Shrink.h"
 #include "image/Svg.h"
+#include "image/Tone.h"
 
 namespace tiv {
     namespace {
@@ -265,6 +271,102 @@ namespace tiv {
             return image;
         }
 
+        bool floating(const VImage &image) {
+            return image.coding() == VIPS_CODING_RAD || image.format() == VIPS_FORMAT_FLOAT || image.format() == VIPS_FORMAT_DOUBLE;
+        }
+
+        // An image on its way to RGBA8: converted by libvips, or, when HDR, left in wide
+        // samples of 1 to 4 bands for the tone mapper.
+        struct Prepared {
+            VImage image;
+            std::optional<Tone::Mapper> mapper;
+        };
+
+        // Float samples are linear light whatever the file says. Wider integers carry their
+        // transfer in the container, which the caller has read.
+        Prepared prepare(VImage image, Tone::Source source) {
+            if (image.coding() == VIPS_CODING_RAD) {
+                image = image.rad2float();
+            }
+
+            if (floating(image)) {
+                source = {Tone::Transfer::Linear, Tone::Primaries::Bt709};
+            }
+
+            if (!source.hdr()) {
+                return {to_rgba(image), std::nullopt};
+            }
+
+            if (image.bands() > Bitmap::CHANNELS) {
+                image = image.extract_band(0, VImage::option()->set("n", Bitmap::CHANNELS));
+            }
+
+            if (source.transfer == Tone::Transfer::Linear) {
+                image = image.cast(VIPS_FORMAT_FLOAT);
+            } else if (image.format() == VIPS_FORMAT_UCHAR) {
+                image = image.linear(257.0, 0.0).cast(VIPS_FORMAT_USHORT);
+            } else if (image.format() != VIPS_FORMAT_USHORT) {
+                image = image.cast(VIPS_FORMAT_USHORT);
+            }
+
+            return {image, Tone::Mapper(source)};
+        }
+
+        // Where libvips hands over the rows of an HDR image, in order, for the tone mapper.
+        struct MappedSink {
+            const Tone::Mapper *mapper = nullptr;
+            std::uint8_t *target = nullptr;
+            int bands = 0;
+        };
+
+        template <typename Sample>
+        int map_region(VipsRegion *region, VipsRect *area, void *opaque) {
+            const auto *sink = static_cast<const MappedSink *>(opaque);
+            const auto samples = static_cast<std::size_t>(area->width) * static_cast<std::size_t>(sink->bands);
+            const std::size_t pitch = static_cast<std::size_t>(area->width) * Bitmap::CHANNELS;
+
+            for (int y = area->top; y < area->top + area->height; ++y) {
+                // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast): libvips hands the region over as raw rows.
+                const std::span in(reinterpret_cast<const Sample *>(VIPS_REGION_ADDR(region, area->left, y)), samples);
+                const std::span out(sink->target + (pitch * static_cast<std::size_t>(y)), pitch);
+                // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-type-reinterpret-cast)
+
+                sink->mapper->map(in, sink->bands, out);
+            }
+
+            return 0;
+        }
+
+        // Count rows from y into RGBA8 at target, packed.
+        bool write_rows(const Prepared &prepared, const int y, const int count, std::uint8_t *target, Decode::Abort *abort) {
+            const VImage &image = prepared.image;
+            const VImage part = y == 0 && count == image.height() ? image : image.crop(0, y, image.width(), count);
+
+            if (abort != nullptr) {
+                abort->arm(part.get_image());
+            }
+
+            bool written = false;
+
+            if (prepared.mapper) {
+                // One pass, which sequential loaders need. The wide samples never take more than the regions in flight.
+                MappedSink sink{&*prepared.mapper, target, image.bands()};
+
+                written = vips_sink_disc(part.get_image(), image.format() == VIPS_FORMAT_FLOAT ? map_region<float> : map_region<std::uint16_t>, &sink) == 0;
+            } else {
+                const std::size_t bytes = static_cast<std::size_t>(image.width()) * Bitmap::CHANNELS * static_cast<std::size_t>(count);
+                const VImage packed = VImage::new_from_memory(target, bytes, image.width(), count, Bitmap::CHANNELS, VIPS_FORMAT_UCHAR);
+
+                written = vips_image_write(part.get_image(), packed.get_image()) == 0;
+            }
+
+            if (abort != nullptr) {
+                abort->disarm();
+            }
+
+            return written;
+        }
+
         bool probe_vips(const std::filesystem::path &file, Decode::Info *info, std::string *error) {
             ensure_vips();
 
@@ -276,6 +378,7 @@ namespace tiv {
                 info->height = swapped ? image.width() : image.height();
                 info->orientation = vips_image_get_orientation(image.get_image());
                 info->frames = animates(info->kind) ? std::max(vips_image_get_n_pages(image.get_image()), 1) : 1;
+                info->hdr = info->hdr || floating(image);
 
                 if (info->format.empty()) {
                     info->format = vips_format_name(image);
@@ -311,29 +414,19 @@ namespace tiv {
             return factor;
         }
 
-        // Renders the image into a new bitmap, which must be RGBA8 already.
-        bool write_rgba(const VImage &image, Bitmap *out, Decode::Abort *abort) {
-            Bitmap held = Bitmap::allocate(image.width(), image.height());
-            const VImage target = VImage::new_from_memory(held.data(), held.bytes(), held.width(), held.height(), Bitmap::CHANNELS, VIPS_FORMAT_UCHAR);
+        bool write_rgba(const Prepared &prepared, Bitmap *out, Decode::Abort *abort) {
+            Bitmap held = Bitmap::allocate(prepared.image.width(), prepared.image.height());
 
-            if (abort != nullptr) {
-                abort->arm(image.get_image());
+            if (!write_rows(prepared, 0, held.height(), held.data(), abort)) {
+                return false;
             }
 
-            const bool written = vips_image_write(image.get_image(), target.get_image()) == 0;
+            *out = std::move(held);
 
-            if (abort != nullptr) {
-                abort->disarm();
-            }
-
-            if (written) {
-                *out = std::move(held);
-            }
-
-            return written;
+            return true;
         }
 
-        bool load_vips(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Decode::Abort *abort, const Via via) {
+        bool load_vips(const std::filesystem::path &file, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, Decode::Abort *abort, const Via via, const Tone::Source source) {
             ensure_vips();
 
             try {
@@ -358,7 +451,7 @@ namespace tiv {
                     }
                 }
 
-                if (!write_rgba(to_rgba(image), out, abort)) {
+                if (!write_rgba(prepare(image, source), out, abort)) {
                     fail(error, file, vips_error());
 
                     return false;
@@ -381,7 +474,7 @@ namespace tiv {
             ensure_vips();
 
             try {
-                if (!write_rgba(to_rgba(VImage::new_from_buffer(data.data(), data.size(), "")), out, abort)) {
+                if (!write_rgba(prepare(VImage::new_from_buffer(data.data(), data.size(), ""), {}), out, abort)) {
                     fail(error, file, vips_error());
 
                     return false;
@@ -433,7 +526,7 @@ namespace tiv {
                     return false;
                 }
 
-                return write_rgba(to_rgba(drawn.crop(piece.x - left, piece.y - top, piece.width, piece.height)), out, nullptr);
+                return write_rgba(prepare(drawn.crop(piece.x - left, piece.y - top, piece.width, piece.height), {}), out, nullptr);
             } catch (const vips::VError &) {
                 return false;
             }
@@ -673,6 +766,10 @@ namespace tiv {
             info->width = Orient::swaps(info->orientation) ? height : width;
             info->height = Orient::swaps(info->orientation) ? width : height;
 
+            GainMap::Jpeg gain;
+
+            info->hdr = GainMap::find_jpeg(data, &gain);
+
             return true;
         }
 
@@ -776,8 +873,9 @@ namespace tiv {
             return 1;
         }
 
-        // Reads the header and sets the transforms that make every PNG come out RGBA8.
-        bool png_open(PngHandle &handle, PngReader &reader) {
+        // Reads the header and sets the transforms that make every PNG come out RGBA8, or
+        // RGBA of 16 bits in native order when wide, for the tone mapper.
+        bool png_open(PngHandle &handle, PngReader &reader, const bool wide) {
             if (handle.png == nullptr || handle.info == nullptr) {
                 return false;
             }
@@ -795,7 +893,13 @@ namespace tiv {
 
             png_set_expand(handle.png);
 
-            if (depth == 16) {
+            if (wide) {
+                png_set_expand_16(handle.png);
+
+                if constexpr (std::endian::native == std::endian::little) {
+                    png_set_swap(handle.png);
+                }
+            } else if (depth == 16) {
                 png_set_scale_16(handle.png);
             }
 
@@ -804,13 +908,41 @@ namespace tiv {
             }
 
             if ((colour & PNG_COLOR_MASK_ALPHA) == 0 && png_get_valid(handle.png, handle.info, PNG_INFO_tRNS) == 0) {
-                png_set_filler(handle.png, 0xFF, PNG_FILLER_AFTER);
+                png_set_filler(handle.png, wide ? 0xFFFF : 0xFF, PNG_FILLER_AFTER);
             }
 
             return true;
         }
 
-        bool png_read(PngHandle &handle, Bitmap &target, const Decode::Abort *abort) {
+        // Rows come out RGBA8, through the tone mapper when png_open made them wide.
+        struct PngRows {
+            const Tone::Mapper *mapper = nullptr;
+            std::vector<std::uint16_t> wide;
+
+            PngRows(const Tone::Mapper *toneMapper, const int width) : mapper(toneMapper), wide(mapper != nullptr ? static_cast<std::size_t>(width) * Bitmap::CHANNELS : 0) {
+            }
+
+            [[nodiscard]] std::size_t bytes(const int width) const {
+                return static_cast<std::size_t>(width) * Bitmap::CHANNELS * (mapper != nullptr ? sizeof(std::uint16_t) : 1);
+            }
+
+            void read(png_structp png, const std::span<std::uint8_t> out) {
+                if (mapper == nullptr) {
+                    png_read_row(png, out.data(), nullptr);
+
+                    return;
+                }
+
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): libpng writes the 16 bit samples as bytes.
+                png_read_row(png, reinterpret_cast<png_bytep>(wide.data()), nullptr);
+                mapper->map(wide, Bitmap::CHANNELS, out);
+            }
+        };
+
+        // Wide rows only for images that are not interlaced, whose passes build on the rows before.
+        bool png_read(PngHandle &handle, Bitmap &target, const Tone::Mapper *mapper, const Decode::Abort *abort) {
+            PngRows rows(mapper, target.width());
+
             // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp): libpng reports errors by longjmp only.
             if (setjmp(png_jmpbuf(handle.png)) != 0) {
                 return false;
@@ -820,7 +952,7 @@ namespace tiv {
 
             png_read_update_info(handle.png, handle.info);
 
-            if (png_get_rowbytes(handle.png, handle.info) != target.pitch() || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
+            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes(target.width()) || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
                 return false;
             }
 
@@ -830,7 +962,7 @@ namespace tiv {
                         return false;
                     }
 
-                    png_read_row(handle.png, target.row(y).data(), nullptr);
+                    rows.read(handle.png, target.row(y));
                 }
             }
 
@@ -841,10 +973,11 @@ namespace tiv {
 
         // Rows stream through a box filter into the target, so an image of any size costs its
         // shrunk size plus two rows. Only for images that are not interlaced.
-        bool png_read_shrunk(PngHandle &handle, Bitmap &target, const int factor, const Decode::Abort *abort) {
+        bool png_read_shrunk(PngHandle &handle, Bitmap &target, const int factor, const Tone::Mapper *mapper, const Decode::Abort *abort) {
             const auto width = static_cast<int>(png_get_image_width(handle.png, handle.info));
             const auto height = static_cast<int>(png_get_image_height(handle.png, handle.info));
             std::vector<std::uint8_t> row(static_cast<std::size_t>(width) * Bitmap::CHANNELS);
+            PngRows rows(mapper, width);
             BoxShrink shrink(width, height, factor, &target);
 
             // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp): libpng reports errors by longjmp only.
@@ -854,7 +987,7 @@ namespace tiv {
 
             png_read_update_info(handle.png, handle.info);
 
-            if (png_get_rowbytes(handle.png, handle.info) != row.size() || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
+            if (png_get_rowbytes(handle.png, handle.info) != rows.bytes(width) || png_get_channels(handle.png, handle.info) != Bitmap::CHANNELS) {
                 return false;
             }
 
@@ -863,13 +996,44 @@ namespace tiv {
                     return false;
                 }
 
-                png_read_row(handle.png, row.data(), nullptr);
+                rows.read(handle.png, row);
                 shrink.push(row);
             }
 
             png_read_end(handle.png, nullptr);
 
             return true;
+        }
+
+        std::uint32_t png_u32(const std::span<const std::uint8_t> data, const std::size_t at) {
+            return (static_cast<std::uint32_t>(data[at]) << 24) | (static_cast<std::uint32_t>(data[at + 1]) << 16) | (static_cast<std::uint32_t>(data[at + 2]) << 8) | data[at + 3];
+        }
+
+        // A chunk that comes before the image data, as eXIf and cICP do:
+        // https://www.w3.org/TR/png-3/#5ChunkOrdering
+        std::span<const std::uint8_t> png_chunk(const std::span<const std::uint8_t> data, const std::string_view type) {
+            for (std::size_t at = 8; at + 12 <= data.size() && !starts_with(data, "IDAT", at + 4);) {
+                const std::size_t length = png_u32(data, at);
+
+                if (length > data.size() - at - 12) {
+                    break;
+                }
+
+                if (starts_with(data, type, at + 4)) {
+                    return data.subspan(at + 8, length);
+                }
+
+                at += 12 + length;
+            }
+
+            return {};
+        }
+
+        // https://www.w3.org/TR/png-3/#cICP-chunk
+        Tone::Source png_tone(const std::span<const std::uint8_t> data) {
+            const std::span<const std::uint8_t> cicp = png_chunk(data, "cICP");
+
+            return cicp.size() >= 2 ? Tone::from_cicp(cicp[0], cicp[1]) : Tone::Source{};
         }
 
         bool probe_png(const std::span<const std::uint8_t> data, Decode::Info *info) {
@@ -880,33 +1044,16 @@ namespace tiv {
                 return false;
             }
 
-            const auto read = [&](const std::size_t at) {
-                return static_cast<int>((static_cast<std::uint32_t>(data[at]) << 24) | (static_cast<std::uint32_t>(data[at + 1]) << 16)
-                                        | (static_cast<std::uint32_t>(data[at + 2]) << 8) | data[at + 3]);
-            };
+            const auto width = static_cast<int>(png_u32(data, IHDR));
+            const auto height = static_cast<int>(png_u32(data, IHDR + 4));
 
-            const int width = read(IHDR);
-            const int height = read(IHDR + 4);
-
-            // eXIf comes before the image data: https://www.w3.org/TR/png-3/#eXIf
-            for (std::size_t at = 8; at + 12 <= data.size() && !starts_with(data, "IDAT", at + 4);) {
-                const auto length = static_cast<std::size_t>(static_cast<std::uint32_t>(read(at)));
-
-                if (at + 12 + length > data.size()) {
-                    break;
-                }
-
-                if (starts_with(data, "eXIf", at + 4)) {
-                    info->orientation = Exif::orientation(data.subspan(at + 8, length));
-
-                    break;
-                }
-
-                at += 12 + length;
+            if (const std::span<const std::uint8_t> exif = png_chunk(data, "eXIf"); !exif.empty()) {
+                info->orientation = Exif::orientation(exif);
             }
 
             info->width = Orient::swaps(info->orientation) ? height : width;
             info->height = Orient::swaps(info->orientation) ? width : height;
+            info->hdr = png_tone(data).hdr();
 
             return width > 0 && height > 0;
         }
@@ -914,8 +1061,9 @@ namespace tiv {
         Direct load_png(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight, Bitmap *out, std::string *error, const Decode::Abort *abort, const Decode::Fit fit) {
             PngHandle handle;
             PngReader reader{data, 0};
+            const Tone::Source tone = png_tone(data);
 
-            if (!png_open(handle, reader)) {
+            if (!png_open(handle, reader, tone.hdr())) {
                 fail(error, file, "png header unreadable");
 
                 return Direct::Failed;
@@ -926,12 +1074,14 @@ namespace tiv {
             const auto height = static_cast<int>(png_get_image_height(handle.png, handle.info));
             const int factor = fit == Decode::Fit::Force ? shrink_factor(width, height, Orient::swaps(orientation) ? boxHeight : boxWidth, Orient::swaps(orientation) ? boxWidth : boxHeight) : 1;
 
-            if (factor > 1 && png_get_interlace_type(handle.png, handle.info) != PNG_INTERLACE_NONE) {
+            if ((factor > 1 || tone.hdr()) && png_get_interlace_type(handle.png, handle.info) != PNG_INTERLACE_NONE) {
                 return Direct::Skip;
             }
 
+            const std::optional<Tone::Mapper> mapper = tone.hdr() ? std::optional(Tone::Mapper(tone)) : std::nullopt;
+            const Tone::Mapper *mapping = mapper ? &*mapper : nullptr;
             Bitmap held = Bitmap::allocate((width + factor - 1) / factor, (height + factor - 1) / factor);
-            const bool read = factor > 1 ? png_read_shrunk(handle, held, factor, abort) : png_read(handle, held, abort);
+            const bool read = factor > 1 ? png_read_shrunk(handle, held, factor, mapping, abort) : png_read(handle, held, mapping, abort);
 
             if (!read) {
                 fail(error, file, aborted(abort) ? "aborted" : "png decode failed");
@@ -1085,23 +1235,58 @@ namespace tiv {
             return {static_cast<int>(swapped ? info.ysize : info.xsize), static_cast<int>(swapped ? info.xsize : info.ysize)};
         }
 
-        bool probe_jxl(const std::span<const std::uint8_t> data, Decode::Info *info) {
+        // The encoding the pixels come out in. An ICC profile alone is taken for SDR.
+        Tone::Source jxl_tone(JxlDecoder *decoder) {
+            JxlColorEncoding encoding;
+
+            if (JxlDecoderGetColorAsEncodedProfile(decoder, JXL_COLOR_PROFILE_TARGET_DATA, &encoding) != JXL_DEC_SUCCESS) {
+                return {};
+            }
+
+            // The enumerations take their values from H.273.
+            return Tone::from_cicp(static_cast<int>(encoding.primaries), static_cast<int>(encoding.transfer_function));
+        }
+
+        // Up to the colour encoding: the size and whether it is HDR.
+        bool jxl_header(const std::span<const std::uint8_t> data, JxlBasicInfo *basic, Tone::Source *tone) {
             const JxlHandle handle;
 
-            if (handle.decoder == nullptr || JxlDecoderSubscribeEvents(handle.decoder, JXL_DEC_BASIC_INFO) != JXL_DEC_SUCCESS
+            if (handle.decoder == nullptr || JxlDecoderSubscribeEvents(handle.decoder, JXL_DEC_BASIC_INFO | JXL_DEC_COLOR_ENCODING) != JXL_DEC_SUCCESS
                 || JxlDecoderSetInput(handle.decoder, data.data(), data.size()) != JXL_DEC_SUCCESS) {
                 return false;
             }
 
             JxlDecoderCloseInput(handle.decoder);
 
-            if (JxlDecoderProcessInput(handle.decoder) != JXL_DEC_BASIC_INFO) {
-                return false;
+            for (;;) {
+                const JxlDecoderStatus status = JxlDecoderProcessInput(handle.decoder);
+
+                if (status == JXL_DEC_BASIC_INFO) {
+                    if (JxlDecoderGetBasicInfo(handle.decoder, basic) != JXL_DEC_SUCCESS) {
+                        return false;
+                    }
+                } else if (status == JXL_DEC_COLOR_ENCODING) {
+                    *tone = jxl_tone(handle.decoder);
+
+                    return true;
+                } else {
+                    return false;
+                }
             }
+        }
 
+        Tone::Source jxl_container_tone(const std::span<const std::uint8_t> data) {
             JxlBasicInfo basic;
+            Tone::Source tone;
 
-            if (JxlDecoderGetBasicInfo(handle.decoder, &basic) != JXL_DEC_SUCCESS) {
+            return jxl_header(data, &basic, &tone) ? tone : Tone::Source{};
+        }
+
+        bool probe_jxl(const std::span<const std::uint8_t> data, Decode::Info *info) {
+            JxlBasicInfo basic;
+            Tone::Source tone;
+
+            if (!jxl_header(data, &basic, &tone)) {
                 return false;
             }
 
@@ -1110,56 +1295,133 @@ namespace tiv {
             info->width = size.width;
             info->height = size.height;
             info->orientation = static_cast<int>(basic.orientation);
+            info->hdr = tone.hdr() || !Heif::box(data, "jhgm").empty();
 
             return true;
         }
 
-        // libjxl with its own thread pool, which libvips does not use. Animation stays with libvips.
-        Direct load_jxl(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out, std::string *error, const Decode::Abort *abort) {
+        // A gain map that brings an HDR base down to its SDR rendition, as a jhgm box carries it.
+        // Gains outside the base's colours are in sRGB's, the only ones read.
+        struct JxlGain {
+            GainMap::Metadata metadata;
+            Bitmap map;
+        };
+
+        // Where libjxl hands over decoded pixels of an HDR image, a run of a row at a time from
+        // several threads.
+        struct JxlMapped {
+            Tone::Mapper mapper;
+            Bitmap *target = nullptr;
+            JxlDataType type = JXL_TYPE_UINT16;
+            // Held apart, as the applier keeps the map's address.
+            std::unique_ptr<JxlGain> gainMap;
+            std::optional<GainMap::Applier> gain;
+            // Into the colour space the gains apply in and back, when that is not the base's own.
+            std::optional<std::pair<Tone::Matrix, Tone::Matrix>> gainColours;
+
+            void take(const std::size_t x, const std::size_t y, const std::size_t pixels, const void *samples) const {
+                const std::span<std::uint8_t> out = target->row(static_cast<int>(y)).subspan(x * Bitmap::CHANNELS, pixels * Bitmap::CHANNELS);
+                Tone::Adjust adjust;
+
+                if (gain) {
+                    adjust = [this, x, y](const std::size_t first, const std::span<float> rgba) {
+                        if (gainColours) {
+                            Tone::transform(gainColours->first, rgba);
+                        }
+
+                        gain->apply(static_cast<int>(x + first), static_cast<int>(y), rgba);
+
+                        if (gainColours) {
+                            Tone::transform(gainColours->second, rgba);
+                        }
+                    };
+                }
+
+                const std::size_t count = pixels * Bitmap::CHANNELS;
+
+                if (type == JXL_TYPE_FLOAT) {
+                    mapper.map(std::span(static_cast<const float *>(samples), count), Bitmap::CHANNELS, out, adjust);
+                } else {
+                    mapper.map(std::span(static_cast<const std::uint16_t *>(samples), count), Bitmap::CHANNELS, out, adjust);
+                }
+            }
+        };
+
+        void jxl_take(void *opaque, const std::size_t x, const std::size_t y, const std::size_t pixels, const void *samples) {
+            static_cast<const JxlMapped *>(opaque)->take(x, y, pixels, samples);
+        }
+
+        // Told the colour encoding and the bitmap the pixels go to, says how HDR is mapped into it.
+        using JxlSetup = std::function<std::optional<JxlMapped>(const Tone::Source &tone, Bitmap *target)>;
+
+        // RGBA8 straight into the bitmap, or through the tone mapper's callback.
+        bool jxl_output(JxlDecoder *decoder, Bitmap &held, JxlMapped *mapped) {
+            if (mapped != nullptr) {
+                const JxlPixelFormat format{Bitmap::CHANNELS, mapped->type, JXL_NATIVE_ENDIAN, 0};
+
+                return JxlDecoderSetImageOutCallback(decoder, &format, jxl_take, mapped) == JXL_DEC_SUCCESS;
+            }
+
+            const JxlPixelFormat format{Bitmap::CHANNELS, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
+            std::size_t needed = 0;
+
+            return JxlDecoderImageOutBufferSize(decoder, &format, &needed) == JXL_DEC_SUCCESS && needed == held.bytes()
+                   && JxlDecoderSetImageOutBuffer(decoder, &format, held.data(), held.bytes()) == JXL_DEC_SUCCESS;
+        }
+
+        // The bitmap sized for the image, false for an animation.
+        bool jxl_canvas(JxlDecoder *decoder, Bitmap *held) {
+            JxlBasicInfo info;
+
+            if (JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS || info.have_animation != 0) {
+                return false;
+            }
+
+            *held = Bitmap::allocate(static_cast<int>(info.xsize), static_cast<int>(info.ysize));
+
+            return true;
+        }
+
+        // Without a setup the samples come out as stored, which a gain map wants. libjxl runs
+        // with its own thread pool, which libvips does not use.
+        Direct jxl_decode(const std::span<const std::uint8_t> data, Bitmap *out, const Decode::Abort *abort, const JxlSetup &setup) {
             const JxlHandle handle;
+            const int events = JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE | (setup ? JXL_DEC_COLOR_ENCODING : 0);
 
             if (handle.decoder == nullptr || handle.runner == nullptr
                 || JxlDecoderSetParallelRunner(handle.decoder, JxlThreadParallelRunner, handle.runner) != JXL_DEC_SUCCESS
                 || JxlDecoderSetKeepOrientation(handle.decoder, JXL_TRUE) != JXL_DEC_SUCCESS
-                || JxlDecoderSubscribeEvents(handle.decoder, JXL_DEC_BASIC_INFO | JXL_DEC_FULL_IMAGE) != JXL_DEC_SUCCESS
+                || JxlDecoderSubscribeEvents(handle.decoder, events) != JXL_DEC_SUCCESS
                 || JxlDecoderSetInput(handle.decoder, data.data(), data.size()) != JXL_DEC_SUCCESS) {
                 return Direct::Skip;
             }
 
             JxlDecoderCloseInput(handle.decoder);
 
-            const JxlPixelFormat format{Bitmap::CHANNELS, JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
             Bitmap held;
+            std::optional<JxlMapped> mapped;
 
             for (;;) {
                 if (aborted(abort)) {
-                    fail(error, file, "aborted");
-
                     return Direct::Failed;
                 }
 
                 const JxlDecoderStatus status = JxlDecoderProcessInput(handle.decoder);
 
                 if (status == JXL_DEC_BASIC_INFO) {
-                    JxlBasicInfo info;
-
-                    if (JxlDecoderGetBasicInfo(handle.decoder, &info) != JXL_DEC_SUCCESS || info.have_animation != 0) {
+                    if (!jxl_canvas(handle.decoder, &held)) {
                         return Direct::Skip;
                     }
-
-                    held = Bitmap::allocate(static_cast<int>(info.xsize), static_cast<int>(info.ysize));
+                } else if (status == JXL_DEC_COLOR_ENCODING) {
+                    // Basic info comes first, so the bitmap is there.
+                    mapped = setup(jxl_tone(handle.decoder), &held);
                 } else if (status == JXL_DEC_NEED_IMAGE_OUT_BUFFER) {
-                    std::size_t needed = 0;
-
-                    if (held.empty() || JxlDecoderImageOutBufferSize(handle.decoder, &format, &needed) != JXL_DEC_SUCCESS || needed != held.bytes()
-                        || JxlDecoderSetImageOutBuffer(handle.decoder, &format, held.data(), held.bytes()) != JXL_DEC_SUCCESS) {
+                    if (held.empty() || !jxl_output(handle.decoder, held, mapped ? &*mapped : nullptr)) {
                         return Direct::Skip;
                     }
                 } else if (status == JXL_DEC_FULL_IMAGE || status == JXL_DEC_SUCCESS) {
                     break;
                 } else {
-                    fail(error, file, "jxl decode failed");
-
                     return Direct::Failed;
                 }
             }
@@ -1171,6 +1433,78 @@ namespace tiv {
             *out = std::move(held);
 
             return Direct::Done;
+        }
+
+        std::unique_ptr<JxlGain> jxl_gain(const std::span<const std::uint8_t> data) {
+            GainMap::Jxl bundle;
+            auto held = std::make_unique<JxlGain>();
+
+            if (!GainMap::read_jxl(Heif::box(data, "jhgm"), &bundle) || jxl_decode(bundle.image, &held->map, nullptr, {}) != Direct::Done) {
+                return nullptr;
+            }
+
+            held->metadata = bundle.metadata;
+
+            return held;
+        }
+
+        // HDR is tone mapped, or brought down to SDR by a gain map where there is one.
+        std::optional<JxlMapped> jxl_setup(const std::span<const std::uint8_t> data, const Tone::Source &tone, Bitmap *target) {
+            if (!tone.hdr()) {
+                return std::nullopt;
+            }
+
+            std::unique_ptr<JxlGain> gain = jxl_gain(data);
+            const float weight = gain != nullptr ? gain->metadata.weight(0.0F) : 0.0F;
+            const JxlDataType type = tone.transfer == Tone::Transfer::Linear ? JXL_TYPE_FLOAT : JXL_TYPE_UINT16;
+            JxlMapped held{Tone::Mapper(tone, weight == 0.0F), target, type, nullptr, std::nullopt, std::nullopt};
+
+            if (gain != nullptr && weight != 0.0F) {
+                held.gain.emplace(gain->metadata, &gain->map, target->width(), target->height(), weight);
+
+                if (!gain->metadata.inBaseColours && tone.primaries != Tone::Primaries::Bt709) {
+                    held.gainColours.emplace(Tone::convert(tone.primaries, Tone::Primaries::Bt709), Tone::convert(Tone::Primaries::Bt709, tone.primaries));
+                }
+
+                held.gainMap = std::move(gain);
+            }
+
+            return held;
+        }
+
+        // Animation stays with libvips.
+        Direct load_jxl(const std::filesystem::path &file, const std::span<const std::uint8_t> data, Bitmap *out, std::string *error, const Decode::Abort *abort) {
+            const Direct direct = jxl_decode(data, out, abort, [data](const Tone::Source &tone, Bitmap *target) {
+                return jxl_setup(data, tone, target);
+            });
+
+            if (direct == Direct::Failed) {
+                fail(error, file, aborted(abort) ? "aborted" : "jxl decode failed");
+            }
+
+            return direct;
+        }
+
+        // The transfer of an HDR file that libvips reads without it.
+        Tone::Source container_tone(const Decode::Format kind, const std::span<const std::uint8_t> data) {
+            switch (kind) {
+                case Decode::Format::Png:
+                    return png_tone(data);
+                case Decode::Format::Jxl:
+                    return jxl_container_tone(data);
+                case Decode::Format::Heif:
+                    return Heif::colour(data).tone;
+                default:
+                    break;
+            }
+
+            return {};
+        }
+
+        Tone::Source container_tone(const std::filesystem::path &file) {
+            Mapped mapped;
+
+            return Mapped::open(file, &mapped) ? container_tone(Decode::sniff(mapped.data()), mapped.data()) : Tone::Source{};
         }
 
         // --- BMP ---
@@ -1443,6 +1777,14 @@ namespace tiv {
             return true;
         }
 
+        if (info->kind == Format::Heif) {
+            const Heif::Colour colour = Heif::colour(mapped.data());
+
+            info->hdr = colour.tone.hdr() || colour.gainMap;
+        } else {
+            info->hdr = container_tone(info->kind, mapped.data()).hdr();
+        }
+
         mapped = {};
 
         return probe_vips(file, info, error);
@@ -1486,6 +1828,8 @@ namespace tiv {
             return direct == Direct::Done;
         }
 
+        const Tone::Source tone = container_tone(kind, mapped.data());
+
         mapped = {};
 
         if (aborted(abort)) {
@@ -1504,7 +1848,7 @@ namespace tiv {
             via = Via::Shrink;
         }
 
-        return load_vips(file, boxWidth, boxHeight, out, error, abort, via);
+        return load_vips(file, boxWidth, boxHeight, out, error, abort, via, tone);
     }
 
     bool Decode::render(const std::filesystem::path &file, const double scale, const int x, const int y, const int width, const int height, Bitmap *out, std::string *error, Abort *abort) {
@@ -1531,7 +1875,7 @@ namespace tiv {
 
             const VImage part = image.crop(left, top, partWidth, partHeight);
 
-            if (!write_rgba(to_rgba(part), out, abort)) {
+            if (!write_rgba(prepare(part, {}), out, abort)) {
                 fail(error, file, vips_error());
 
                 return false;
@@ -1559,9 +1903,9 @@ namespace tiv {
             const int frames = strip.height() / height;
             const std::vector<int> delays = strip.get_typeof("delay") != 0 ? strip.get_array_int("delay") : std::vector<int>{};
             const int factor = frame_shrink(strip.width(), height, frames, maxBytes);
+            const Tone::Source source = container_tone(file);
             std::vector<Frame> held;
 
-            strip = to_rgba(strip);
             held.reserve(static_cast<std::size_t>(frames));
 
             for (int frame = 0; frame < frames; ++frame) {
@@ -1579,7 +1923,7 @@ namespace tiv {
 
                 Frame next;
 
-                if (!write_rgba(page, &next.bitmap, abort)) {
+                if (!write_rgba(prepare(page, source), &next.bitmap, abort)) {
                     fail(error, file, vips_error());
 
                     return false;
@@ -1610,11 +1954,9 @@ namespace tiv {
             // Sequential, so each band decodes as it is asked for and nothing above it stays.
             VImage image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL));
             const bool alpha = image.has_alpha();
-
-            image = to_rgba(image);
-
-            const int width = image.width();
-            const int height = image.height();
+            const Prepared prepared = prepare(image, container_tone(file));
+            const int width = prepared.image.width();
+            const int height = prepared.image.height();
 
             if (!begin(width, height, alpha)) {
                 fail(error, file, "stopped");
@@ -1633,19 +1975,8 @@ namespace tiv {
 
                 const int count = std::min(rows, height - y);
                 const std::size_t bytes = band.pitch() * static_cast<std::size_t>(count);
-                const VImage target = VImage::new_from_memory(band.data(), bytes, width, count, Bitmap::CHANNELS, VIPS_FORMAT_UCHAR);
 
-                if (abort != nullptr) {
-                    abort->arm(image.get_image());
-                }
-
-                const bool written = vips_image_write(image.crop(0, y, width, count).get_image(), target.get_image()) == 0;
-
-                if (abort != nullptr) {
-                    abort->disarm();
-                }
-
-                if (!written) {
+                if (!write_rows(prepared, y, count, band.data(), abort)) {
                     fail(error, file, vips_error());
 
                     return false;

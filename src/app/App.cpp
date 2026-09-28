@@ -996,10 +996,11 @@ namespace tiv {
         }
 
         const Size size = shown();
+        const std::string format = _info.hdr ? _info.format + " HDR" : _info.format;
 
         // Ahead of any message, which would hide how far it is.
         if (_building && _info.width != 0) {
-            return std::format("{}x{}, {}, {}, writing tiles {:.0f}%", size.width, size.height, _info.format, human_size(_bytes), _loader->progress() * 100.0F);
+            return std::format("{}x{}, {}, {}, writing tiles {:.0f}%", size.width, size.height, format, human_size(_bytes), _loader->progress() * 100.0F);
         }
 
         if (!_message.empty()) {
@@ -1011,9 +1012,9 @@ namespace tiv {
         }
 
         if (_playback.active()) {
-            return std::format("{}x{}, {} {}/{}, {}", size.width, size.height, _info.format, _playback.frame() + 1, _playback.frames(), human_size(_bytes));
+            return std::format("{}x{}, {} {}/{}, {}", size.width, size.height, format, _playback.frame() + 1, _playback.frames(), human_size(_bytes));
         }
 
-        return std::format("{}x{}, {}, {}{}", size.width, size.height, _info.format, human_size(_bytes), _streamed && !_loader->streaming_all() ? ", from disk" : "");
+        return std::format("{}x{}, {}, {}{}", size.width, size.height, format, human_size(_bytes), _streamed && !_loader->streaming_all() ? ", from disk" : "");
     }
 }

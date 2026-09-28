@@ -21,6 +21,10 @@ add_executable(tinyiv
         image/Decode.h
         image/Exif.cpp
         image/Exif.h
+        image/GainMap.cpp
+        image/GainMap.h
+        image/Heif.cpp
+        image/Heif.h
         image/Icon.cpp
         image/Icon.h
         image/Mapped.cpp
@@ -39,6 +43,8 @@ add_executable(tinyiv
         image/Store.h
         image/Svg.cpp
         image/Svg.h
+        image/Tone.cpp
+        image/Tone.h
 
         render/Canvas.cpp
         render/Canvas.h
