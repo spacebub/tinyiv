@@ -51,6 +51,7 @@
 #include "image/TileCodec.h"
 #include "image/decode/Decode.h"
 #include "image/decode/JpegBands.h"
+#include "image/decode/PngBands.h"
 #include "image/decode/Support.h"
 #include "image/decode/TiffBands.h"
 
@@ -60,7 +61,7 @@ namespace tiv {
         constexpr std::array<char, 8> MAGIC{'T', 'I', 'V', 'T', 'I', 'L', 'E', 'S'};
         // The same layout with PQ tiles.
         constexpr std::array<char, 8> MAGIC_PQ{'T', 'I', 'V', 'P', 'Q', 'T', 'I', 'L'};
-        constexpr std::uint32_t VERSION = 5;
+        constexpr std::uint32_t VERSION = 6;
         constexpr std::uint32_t MAX_LEVELS = 32;
         // Far past any image, and far enough from the limit of an int that sums of sides stay within it.
         constexpr std::uint32_t MAX_SIDE = std::uint32_t{1} << 30U;
@@ -967,6 +968,14 @@ namespace tiv {
             return tile;
         }
 
+        // A band of the finest level read from the source is waited for by the view, so it takes every
+        // thread the machine has, not the few a decode in the background keeps to.
+        int read_threads() {
+            static const int held = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+
+            return held;
+        }
+
         // A JPEG whose restart markers let any tile row decode on its own, read as it is needed rather
         // than mapped, since a mapping of a file cut short under it faults.
         class JpegSource final : public TileCache::Source {
@@ -989,11 +998,16 @@ namespace tiv {
                                                                                 : std::span<const std::uint8_t>();
                 };
 
-                return _bands.decode(fetch, top, count, 8, out, Decode::MAX_THREADS, nullptr);
+                return _bands.decode(fetch, top, count, 8, out, read_threads(), nullptr);
             }
 
-            [[nodiscard]] std::vector<std::uint64_t> index() const override {
-                return {_bands.starts().begin(), _bands.starts().end()};
+            [[nodiscard]] std::vector<std::uint8_t> index() const override {
+                const std::span<const std::uint64_t> starts = _bands.starts();
+                std::vector<std::uint8_t> held(starts.size_bytes());
+
+                std::memcpy(held.data(), starts.data(), held.size());
+
+                return held;
             }
 
         private:
@@ -1011,20 +1025,150 @@ namespace tiv {
             [[nodiscard]] bool alpha() const override { return _bands->alpha(); }
 
             bool read(const int top, const int count, Bitmap *out) const override {
-                return _bands->decode(top, count, out, Decode::MAX_THREADS, nullptr);
+                return _bands->decode(top, count, out, read_threads(), nullptr);
             }
 
             // Where the strips lie is in the file already.
-            [[nodiscard]] std::vector<std::uint64_t> index() const override { return {}; }
+            [[nodiscard]] std::vector<std::uint8_t> index() const override { return {}; }
 
         private:
             std::unique_ptr<Decode::TiffBands> _bands;
         };
 
+        // A PNG's checkpoints, each with its window and row kept compressed with the tiles.
+        class PngSource final : public TileCache::Source {
+
+        public:
+            explicit PngSource(std::unique_ptr<Decode::PngBands> bands) : _bands(std::move(bands)) {}
+
+            [[nodiscard]] int width() const override { return _bands->width(); }
+            [[nodiscard]] int height() const override { return _bands->height(); }
+            [[nodiscard]] bool alpha() const override { return _bands->alpha(); }
+
+            bool pass(const Take &take, const Keep &keep, const Decode::Abort *abort) override {
+                const std::unique_ptr<ZSTD_CCtx, TileCodec::ContextFree> context(ZSTD_createCCtx());
+                std::vector<std::uint8_t> packed;
+
+                _kept.clear();
+
+                const Decode::PngBands::Keep keepState = [&](const std::size_t checkpoint,
+                                                             const std::span<const std::uint8_t> state) {
+                    packed.resize(ZSTD_compressBound(state.size()));
+
+                    const std::size_t made = ZSTD_compressCCtx(context.get(), packed.data(), packed.size(),
+                                                               state.data(), state.size(), STATE_LEVEL);
+
+                    if (ZSTD_isError(made) != 0) {
+                        return false;
+                    }
+
+                    _kept.resize(std::max(_kept.size(), checkpoint + 1));
+                    _kept.at(checkpoint) = {.at = keep(std::span(packed).first(made)), .bytes = made};
+
+                    return true;
+                };
+
+                return context != nullptr && _bands->scan(TileCache::TILE, take, keepState, abort);
+            }
+
+            void found(const Fetch &fetch) override { _fetch = fetch; }
+
+            bool read(const int top, const int count, Bitmap *out) const override {
+                const Decode::PngBands::Recall recall = [this](const std::size_t checkpoint,
+                                                               std::vector<std::uint8_t> &state) {
+                    std::vector<std::uint8_t> scratch;
+
+                    if (checkpoint >= _kept.size() || !_fetch) {
+                        return false;
+                    }
+
+                    const std::span<const std::uint8_t> packed =
+                            _fetch(_kept.at(checkpoint).at, _kept.at(checkpoint).bytes, scratch);
+                    const unsigned long long size = ZSTD_getFrameContentSize(packed.data(), packed.size());
+
+                    if (packed.empty() || size == ZSTD_CONTENTSIZE_ERROR || size == ZSTD_CONTENTSIZE_UNKNOWN
+                        || size > MAX_STATE) {
+                        return false;
+                    }
+
+                    state.resize(static_cast<std::size_t>(size));
+
+                    return ZSTD_decompress(state.data(), state.size(), packed.data(), packed.size()) == size;
+                };
+
+                return _bands->decode(top, count, out, read_threads(), recall);
+            }
+
+            // Each checkpoint, then where its state went.
+            [[nodiscard]] std::vector<std::uint8_t> index() const override {
+                std::vector<std::uint8_t> held;
+                const std::span<const Decode::PngBands::Checkpoint> points = _bands->checkpoints();
+
+                for (std::size_t i = 0; i < points.size() && i < _kept.size(); ++i) {
+                    const Stored stored{
+                            .point = points[i],
+                            .at = _kept.at(i).at,
+                            .bytes = _kept.at(i).bytes,
+                    };
+                    const std::size_t end = held.size();
+
+                    held.resize(end + sizeof stored);
+                    std::memcpy(held.data() + end, &stored, sizeof stored);
+                }
+
+                return held;
+            }
+
+            // The index() of an earlier pass.
+            bool adopt(const std::span<const std::uint8_t> index) {
+                if (index.empty() || index.size() % sizeof(Stored) != 0) {
+                    return false;
+                }
+
+                std::vector<Decode::PngBands::Checkpoint> points(index.size() / sizeof(Stored));
+
+                _kept.resize(points.size());
+
+                for (std::size_t i = 0; i < points.size(); ++i) {
+                    Stored stored;
+
+                    std::memcpy(&stored, index.data() + (i * sizeof(Stored)), sizeof stored);
+                    points.at(i) = stored.point;
+                    _kept.at(i) = {.at = stored.at, .bytes = stored.bytes};
+                }
+
+                _bands->adopt(std::move(points));
+
+                return true;
+            }
+
+        private:
+            // zstd's fastest, the state being read far more often than made.
+            static constexpr int STATE_LEVEL = 1;
+            // A window and a row of the widest PNG a side can hold, far past any real one.
+            static constexpr unsigned long long MAX_STATE = 1ULL << 32U;
+
+            struct Kept {
+                std::uint64_t at = 0;
+                std::uint64_t bytes = 0;
+            };
+
+            // As index() writes each checkpoint.
+            struct Stored {
+                Decode::PngBands::Checkpoint point;
+                std::uint64_t at = 0;
+                std::uint64_t bytes = 0;
+            };
+
+            std::unique_ptr<Decode::PngBands> _bands;
+            std::vector<Kept> _kept;
+            Fetch _fetch;
+        };
+
         // The file as the source of its finest level, when its format allows. The index kept from
-        // before spares the pass over the file.
+        // before spares the pass over the file. A PNG only gives its own when asked for small.
         std::unique_ptr<TileCache::Source> open_source(const std::filesystem::path &file,
-                                                       const std::vector<std::uint64_t> *kept) {
+                                                       const std::vector<std::uint8_t> *kept, const bool small) {
             constexpr std::size_t HEAD = 64;
             const Reader head(file);
             std::array<std::uint8_t, HEAD> start{};
@@ -1043,6 +1187,18 @@ namespace tiv {
                 return strips != nullptr ? std::make_unique<TiffSource>(std::move(strips)) : nullptr;
             }
 
+            if (kind == Decode::Format::Png && (small || kept != nullptr)) {
+                std::unique_ptr<Decode::PngBands> rows = Decode::PngBands::open(file);
+
+                if (rows == nullptr) {
+                    return nullptr;
+                }
+
+                auto source = std::make_unique<PngSource>(std::move(rows));
+
+                return kept == nullptr || source->adopt(*kept) ? std::move(source) : nullptr;
+            }
+
             Mapped mapped;
             Decode::JpegBands bands;
 
@@ -1053,7 +1209,14 @@ namespace tiv {
                 return nullptr;
             }
 
-            if (kept != nullptr ? !Decode::JpegBands::adopt(mapped.data(), *kept, &bands)
+            std::vector<std::uint64_t> starts;
+
+            if (kept != nullptr) {
+                starts.resize(kept->size() / sizeof(std::uint64_t));
+                std::memcpy(starts.data(), kept->data(), starts.size() * sizeof(std::uint64_t));
+            }
+
+            if (kept != nullptr ? !Decode::JpegBands::adopt(mapped.data(), std::move(starts), &bands)
                                 : !Decode::JpegBands::index(mapped.data(), &bands)) {
                 return nullptr;
             }
@@ -1063,25 +1226,49 @@ namespace tiv {
             return source->valid() ? std::move(source) : nullptr;
         }
 
+        // A sink two threads put into, the Builder cutting its bands and the source keeping its state.
+        class Locked final : public Sink {
+
+        public:
+            explicit Locked(Sink &inner) : _inner(&inner) {}
+
+            std::uint64_t put(const std::span<const std::uint8_t> bytes) override {
+                const std::scoped_lock hold(_guard);
+
+                return _inner->put(bytes);
+            }
+
+            [[nodiscard]] bool ok() const override {
+                const std::scoped_lock hold(_guard);
+
+                return _inner->ok();
+            }
+
+        private:
+            Sink *_inner;
+            mutable std::mutex _guard;
+        };
+
         // One pass over the file, cutting it into a pyramid of tiles through a Builder. The sink the
         // tiles go to is asked for once the image's size is known, and null stops the pass.
         struct Pass {
             std::vector<TileCache::Level> levels;
             int channels = Bitmap::CHANNELS;
             Bitmap::Encoding encoding = Bitmap::Encoding::Srgb;
+            // Before the builder, so it goes after it.
+            std::unique_ptr<Locked> locked;
             std::unique_ptr<Builder> builder;
             // Why the pass stopped, when it was not the decoder's doing.
             std::string why;
         };
 
         // The finest level read band by band from the source, and only the levels below it made.
-        bool run_source_pass(const std::filesystem::path &file, const TileCache::Source &source,
-                             std::atomic<float> *progress, std::string *error, Decode::Abort *abort,
-                             const std::function<Sink *(const Pass &)> &ready, Pass *made) {
-            const int width = source.width();
+        bool run_source_pass(const std::filesystem::path &file, TileCache::Source &source, std::atomic<float> *progress,
+                             std::string *error, Decode::Abort *abort, const std::function<Sink *(const Pass &)> &ready,
+                             Pass *made) {
             const int height = source.height();
 
-            made->levels = level_sizes(width, height);
+            made->levels = level_sizes(source.width(), height);
             made->channels = channels_for(source.alpha(), Bitmap::Encoding::Srgb);
             made->encoding = Bitmap::Encoding::Srgb;
 
@@ -1093,30 +1280,32 @@ namespace tiv {
                 return false;
             }
 
-            made->builder = std::make_unique<Builder>(*sink, made->levels, made->channels, made->encoding, false);
+            made->locked = std::make_unique<Locked>(*sink);
+            made->builder =
+                    std::make_unique<Builder>(*made->locked, made->levels, made->channels, made->encoding, false);
 
-            Bitmap band = Bitmap::allocate(width, std::min(TileCache::TILE, height));
-
-            for (int top = 0; top < height; top += TileCache::TILE) {
-                const int rows = std::min(TileCache::TILE, height - top);
-
-                if (Decode::aborted(abort)) {
-                    fail(error, file, "aborted");
-
-                    return false;
-                }
-
-                if (!source.read(top, rows, &band)
-                    || !made->builder->band(rows, band.all().first(band.pitch() * static_cast<std::size_t>(rows)))) {
-                    fail(error, file, "could not read the image's rows");
-
+            const TileCache::Source::Take take = [&](const int y, const int rows,
+                                                     const std::span<const std::uint8_t> pixels) {
+                if (!made->builder->band(rows, pixels)) {
                     return false;
                 }
 
                 if (progress != nullptr) {
-                    progress->store(static_cast<float>(top + rows) / static_cast<float>(height),
+                    progress->store(static_cast<float>(y + rows) / static_cast<float>(height),
                                     std::memory_order_relaxed);
                 }
+
+                return true;
+            };
+
+            const TileCache::Source::Keep keep = [&](const std::span<const std::uint8_t> bytes) {
+                return made->locked->put(bytes);
+            };
+
+            if (!source.pass(take, keep, abort)) {
+                fail(error, file, Decode::aborted(abort) ? "aborted" : "could not read the image's rows");
+
+                return false;
             }
 
             if (!made->builder->finished()) {
@@ -1182,7 +1371,7 @@ namespace tiv {
 
         // Makes the file's pyramid in the folder, under a temporary name until it is whole.
         bool write_pyramid(const std::filesystem::path &file, const std::filesystem::path &dir,
-                           const Tone::Display &display, const TileCache::Source *source, std::atomic<float> *progress,
+                           const Tone::Display &display, TileCache::Source *source, std::atomic<float> *progress,
                            std::string *error, Decode::Abort *abort) {
             Identity identity;
 
@@ -1250,12 +1439,12 @@ namespace tiv {
                 made.builder->write_index(*out);
 
                 if (source != nullptr) {
-                    const std::vector<std::uint64_t> kept = source->index();
+                    const std::vector<std::uint8_t> kept = source->index();
                     const std::uint64_t count = kept.size();
 
                     header.source = out->at();
                     out->write(&count, sizeof count);
-                    out->write(kept.data(), kept.size() * sizeof(std::uint64_t));
+                    out->write(kept.data(), kept.size());
                 }
 
                 out->patch(&header, sizeof header);
@@ -1287,6 +1476,21 @@ namespace tiv {
 
             return done;
         }
+    }
+
+    bool TileCache::Source::pass(const Take &take, const Keep & /*keep*/, const Decode::Abort *abort) {
+        Bitmap band = Bitmap::allocate(width(), std::min(TILE, height()));
+
+        for (int top = 0; top < height(); top += TILE) {
+            const int rows = std::min(TILE, height() - top);
+
+            if (Decode::aborted(abort) || !read(top, rows, &band)
+                || !take(top, rows, band.all().first(band.pitch() * static_cast<std::size_t>(rows)))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     std::filesystem::path TileCache::location(const std::filesystem::path &file, const std::filesystem::path &folder,
@@ -1358,11 +1562,11 @@ namespace tiv {
     }
 
     std::shared_ptr<TileCache> TileCache::build(const std::filesystem::path &file, const std::filesystem::path &folder,
-                                                const Tone::Display &display, const Store store,
+                                                const Tone::Display &display, const Store store, const bool small,
                                                 std::atomic<float> *progress, std::string *error,
                                                 Decode::Abort *abort) {
         // An HDR JPEG is lifted by its gain map as a whole, which the source's bands do not do.
-        std::unique_ptr<Source> source = display.hdr() ? nullptr : open_source(file, nullptr);
+        std::unique_ptr<Source> source = display.hdr() ? nullptr : open_source(file, nullptr, small);
 
         if (store == Store::Disk) {
             const std::filesystem::path dir = location(file, folder);
@@ -1414,6 +1618,7 @@ namespace tiv {
 
         tileCache->_blocks = std::move(blocks.held);
         tileCache->_source = std::move(source);
+        tileCache->attach_source();
         tileCache->pin();
         tileCache->start();
 
@@ -1487,18 +1692,17 @@ namespace tiv {
         if (header.source != 0) {
             std::uint64_t count = 0;
 
-            if (!reader.read(header.source, &count, sizeof count)
-                || count > (size - header.source - sizeof count) / sizeof(std::uint64_t)) {
+            if (!reader.read(header.source, &count, sizeof count) || count > size - header.source - sizeof count) {
                 return false;
             }
 
-            std::vector<std::uint64_t> kept(static_cast<std::size_t>(count));
+            std::vector<std::uint8_t> kept(static_cast<std::size_t>(count));
 
-            if (!reader.read(header.source + sizeof count, kept.data(), kept.size() * sizeof(std::uint64_t))) {
+            if (!reader.read(header.source + sizeof count, kept.data(), kept.size())) {
                 return false;
             }
 
-            _source = open_source(file, &kept);
+            _source = open_source(file, &kept, false);
 
             if (_source == nullptr || _source->width() != _levels.front().width
                 || _source->height() != _levels.front().height) {
@@ -1507,9 +1711,23 @@ namespace tiv {
         }
 
         _path = path;
+        attach_source();
         pin();
 
         return true;
+    }
+
+    void TileCache::attach_source() {
+        if (_source == nullptr) {
+            return;
+        }
+
+        const std::shared_ptr<Reader> reader = _path.empty() ? nullptr : std::make_shared<Reader>(_path);
+
+        _source->found(
+                [this, reader](const std::uint64_t at, const std::uint64_t bytes, std::vector<std::uint8_t> &scratch) {
+                    return fetch(reader.get(), _blocks, at, bytes, scratch);
+                });
     }
 
     void TileCache::pin() {
@@ -1561,27 +1779,40 @@ namespace tiv {
         }
 
         const bool read = _source->read(top, rows, &band);
-        std::vector<std::shared_ptr<const Bitmap>> tiles;
+        std::vector<std::shared_ptr<const Bitmap>> tiles(static_cast<std::size_t>(level.columns));
+        std::atomic<int> next = 0;
 
-        tiles.reserve(static_cast<std::size_t>(level.columns));
+        // Cut on several threads, since fresh tiles fault in page by page as they are first written.
+        const auto cut = [&] {
+            for (int column = next++; column < level.columns; column = next++) {
+                const int width = std::min(TILE, level.width - (column * TILE));
+                const std::size_t from = static_cast<std::size_t>(column) * TILE * Bitmap::CHANNELS;
+                Bitmap tile = Bitmap::allocate(width, rows);
 
-        for (int column = 0; column < level.columns; ++column) {
-            const int width = std::min(TILE, level.width - (column * TILE));
-            const std::size_t from = static_cast<std::size_t>(column) * TILE * Bitmap::CHANNELS;
-            Bitmap tile = Bitmap::allocate(width, rows);
+                for (int y = 0; y < rows; ++y) {
+                    const std::span<std::uint8_t> target = tile.row(y);
 
-            for (int y = 0; y < rows; ++y) {
-                const std::span<std::uint8_t> target = tile.row(y);
-
-                // A band that cannot be read shows as a hole, else the view would ask for it forever.
-                if (read) {
-                    std::memcpy(target.data(), band.row(y).subspan(from).data(), target.size());
-                } else {
-                    std::memset(target.data(), 0, target.size());
+                    // A band that cannot be read shows as a hole, else the view would ask for it forever.
+                    if (read) {
+                        std::memcpy(target.data(), band.row(y).subspan(from).data(), target.size());
+                    } else {
+                        std::memset(target.data(), 0, target.size());
+                    }
                 }
+
+                tiles.at(static_cast<std::size_t>(column)) = std::make_shared<const Bitmap>(std::move(tile));
+            }
+        };
+
+        {
+            std::vector<std::jthread> cutters;
+            const int spread = std::min(level.columns, read_threads());
+
+            for (int i = 1; i < spread; ++i) {
+                cutters.emplace_back(cut);
             }
 
-            tiles.push_back(std::make_shared<const Bitmap>(std::move(tile)));
+            cut();
         }
 
         const std::scoped_lock hold(_guard);

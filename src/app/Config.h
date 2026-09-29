@@ -21,6 +21,11 @@ namespace tiv {
         // is taken from the image's folder.
         std::filesystem::path cache;
 
+        // A PNG too large for memory keeps every tile, which pans at once, or with small only places to
+        // begin decoding it again, about a third of the room, but panning at full resolution waits
+        // for bands of rows to decode.
+        bool small = false;
+
         // $XDG_CONFIG_HOME/tinyiv/tinyiv.conf, or tinyiv.conf beside the executable on Windows.
         [[nodiscard]] static std::filesystem::path location();
 

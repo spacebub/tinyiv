@@ -101,8 +101,9 @@ namespace tiv {
         // Previews are sized to this.
         void set_screen(int width, int height);
 
-        // Where pyramids on disk go, as TileCache::location() takes it. Said before the first show().
-        void set_tile_folder(std::filesystem::path folder);
+        // Where pyramids on disk go, as TileCache::location() takes it, and whether a PNG keeps
+        // only places to begin again. Said before the first show().
+        void set_tiles(std::filesystem::path folder, bool small);
 
         // HDR images decode for this display, and wait until it has been said, so nothing is
         // made for the wrong one. What is decoded of them for another goes, and so does
@@ -239,6 +240,7 @@ namespace tiv {
 
         bool _streamAll = false;
         std::filesystem::path _tileFolder;
+        bool _smallTiles = false;
         std::atomic<float> _progress = 0.0F;
 
         int _screenWidth = 3840;

@@ -234,7 +234,7 @@ namespace tiv {
             std::println(stderr, "tinyiv: {}", warning);
         }
 
-        _loader->set_tile_folder(config.cache);
+        _loader->set_tiles(config.cache, config.small);
         _refiner = std::make_unique<Refiner>(_refinerEvent);
 
         show(_folder.index(), 1);

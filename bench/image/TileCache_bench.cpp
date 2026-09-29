@@ -42,8 +42,8 @@ namespace bench {
         }
 
         std::shared_ptr<tiv::TileCache> made(const std::filesystem::path &file, const tiv::TileCache::Store store,
-                                             std::string *error) {
-            return tiv::TileCache::build(file, tile_folder(), {}, store, nullptr, error);
+                                             std::string *error, const bool small = false) {
+            return tiv::TileCache::build(file, tile_folder(), {}, store, small, nullptr, error);
         }
 
         std::vector<tiv::TileCache::Key> every_tile(const tiv::TileCache &tileCache, const int level) {
@@ -107,14 +107,14 @@ namespace bench {
 
         // Making the pyramid from the file: one pass of decode, halving and compression.
         void TileCache_build(benchmark::State &state, const std::filesystem::path &file,
-                             const tiv::TileCache::Store store) {
+                             const tiv::TileCache::Store store, const bool small) {
             std::size_t stored = 0;
 
             Memory::reset_peak();
 
             for ([[maybe_unused]] auto step : state) {
                 std::string error;
-                const std::shared_ptr<tiv::TileCache> tileCache = made(file, store, &error);
+                const std::shared_ptr<tiv::TileCache> tileCache = made(file, store, &error, small);
 
                 if (tileCache == nullptr) {
                     state.SkipWithError("build failed: " + error);
@@ -131,9 +131,9 @@ namespace bench {
 
         // Unpacking every tile of the finest level, as a pan across the whole image would.
         void TileCache_read(benchmark::State &state, const std::filesystem::path &file,
-                            const tiv::TileCache::Store store) {
+                            const tiv::TileCache::Store store, const bool small) {
             std::string error;
-            const std::shared_ptr<tiv::TileCache> tileCache = made(file, store, &error);
+            const std::shared_ptr<tiv::TileCache> tileCache = made(file, store, &error, small);
 
             if (tileCache == nullptr) {
                 state.SkipWithError("build failed: " + error);
@@ -152,10 +152,10 @@ namespace bench {
         }
 
         // The same tiles whichever store holds them, else the numbers above compare nothing.
-        void TileCache_stores_agree(benchmark::State &state, const std::filesystem::path &file) {
+        void TileCache_stores_agree(benchmark::State &state, const std::filesystem::path &file, const bool small) {
             std::string error;
-            const std::shared_ptr<tiv::TileCache> disk = made(file, tiv::TileCache::Store::Disk, &error);
-            const std::shared_ptr<tiv::TileCache> memory = made(file, tiv::TileCache::Store::Memory, &error);
+            const std::shared_ptr<tiv::TileCache> disk = made(file, tiv::TileCache::Store::Disk, &error, small);
+            const std::shared_ptr<tiv::TileCache> memory = made(file, tiv::TileCache::Store::Memory, &error, small);
 
             if (disk == nullptr || memory == nullptr) {
                 state.SkipWithError("build failed: " + error);
@@ -184,9 +184,9 @@ namespace bench {
         }
 
         // The full resolution tiles against libvips' decode of the same region, wherever they come from.
-        void TileCache_finest_exact(benchmark::State &state, const std::filesystem::path &file) {
+        void TileCache_finest_exact(benchmark::State &state, const std::filesystem::path &file, const bool small) {
             std::string error;
-            const std::shared_ptr<tiv::TileCache> tileCache = made(file, tiv::TileCache::Store::Memory, &error);
+            const std::shared_ptr<tiv::TileCache> tileCache = made(file, tiv::TileCache::Store::Memory, &error, small);
 
             if (tileCache == nullptr) {
                 state.SkipWithError("build failed: " + error);
@@ -240,28 +240,36 @@ namespace bench {
     void register_tile_cache() {
         for (const std::string_view name : FILES) {
             const std::filesystem::path file = Corpus::file(name);
-            const std::string label(name);
 
-            benchmark::RegisterBenchmark("TileCache_build/disk/" + label, TileCache_build, file,
-                                         tiv::TileCache::Store::Disk)
-                    ->Unit(benchmark::kMillisecond)
-                    ->Iterations(3);
-            benchmark::RegisterBenchmark("TileCache_build/memory/" + label, TileCache_build, file,
-                                         tiv::TileCache::Store::Memory)
-                    ->Unit(benchmark::kMillisecond)
-                    ->Iterations(3);
-            benchmark::RegisterBenchmark("TileCache_read/disk/" + label, TileCache_read, file,
-                                         tiv::TileCache::Store::Disk)
-                    ->Unit(benchmark::kMillisecond);
-            benchmark::RegisterBenchmark("TileCache_read/memory/" + label, TileCache_read, file,
-                                         tiv::TileCache::Store::Memory)
-                    ->Unit(benchmark::kMillisecond);
-            benchmark::RegisterBenchmark("TileCache_stores_agree/" + label, TileCache_stores_agree, file)
-                    ->Unit(benchmark::kMillisecond)
-                    ->Iterations(1);
-            benchmark::RegisterBenchmark("TileCache_finest_exact/" + label, TileCache_finest_exact, file)
-                    ->Unit(benchmark::kMillisecond)
-                    ->Iterations(1);
+            // Only a PNG keeps anything less for small.
+            for (const bool small : {false, true}) {
+                if (small && !name.ends_with(".png")) {
+                    continue;
+                }
+
+                const std::string label = std::string(small ? "small/" : "") + std::string(name);
+
+                benchmark::RegisterBenchmark("TileCache_build/disk/" + label, TileCache_build, file,
+                                             tiv::TileCache::Store::Disk, small)
+                        ->Unit(benchmark::kMillisecond)
+                        ->Iterations(3);
+                benchmark::RegisterBenchmark("TileCache_build/memory/" + label, TileCache_build, file,
+                                             tiv::TileCache::Store::Memory, small)
+                        ->Unit(benchmark::kMillisecond)
+                        ->Iterations(3);
+                benchmark::RegisterBenchmark("TileCache_read/disk/" + label, TileCache_read, file,
+                                             tiv::TileCache::Store::Disk, small)
+                        ->Unit(benchmark::kMillisecond);
+                benchmark::RegisterBenchmark("TileCache_read/memory/" + label, TileCache_read, file,
+                                             tiv::TileCache::Store::Memory, small)
+                        ->Unit(benchmark::kMillisecond);
+                benchmark::RegisterBenchmark("TileCache_stores_agree/" + label, TileCache_stores_agree, file, small)
+                        ->Unit(benchmark::kMillisecond)
+                        ->Iterations(1);
+                benchmark::RegisterBenchmark("TileCache_finest_exact/" + label, TileCache_finest_exact, file, small)
+                        ->Unit(benchmark::kMillisecond)
+                        ->Iterations(1);
+            }
         }
     }
 }

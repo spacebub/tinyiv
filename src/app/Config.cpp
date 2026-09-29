@@ -31,7 +31,12 @@ namespace tiv {
                 "# Where the tiles of images too large for memory are kept. Empty keeps them in a\n"
                 "# tinyiv-cache folder beside each image. A relative path is taken from the image's\n"
                 "# folder, and ~ stands for the home folder.\n"
-                "cache =\n";
+                "cache =\n"
+                "\n"
+                "# fast or small. Fast keeps every tile of a huge PNG, so it pans at once. Small keeps only\n"
+                "# places to begin decoding it again, about a third of the room, but panning at full\n"
+                "# resolution waits a few tens of milliseconds for each band of rows.\n"
+                "cache_mode = fast\n";
 
         std::filesystem::path from_utf8(const std::string_view text) {
             return std::u8string(text.begin(), text.end());
@@ -87,13 +92,26 @@ namespace tiv {
 
         struct Setting {
             std::string_view key;
-            void (*apply)(Config &config, std::string_view value);
+            // False when the value is not one the key takes.
+            bool (*apply)(Config &config, std::string_view value);
         };
 
         // Scanned in order for each line, which stays nanoseconds at any count a person edits by hand.
         constexpr std::array SETTINGS{
                 Setting{.key = "cache",
-                        .apply = [](Config &config, const std::string_view value) { config.cache = expanded(value); }},
+                        .apply =
+                                [](Config &config, const std::string_view value) {
+                                    config.cache = expanded(value);
+
+                                    return true;
+                                }},
+                Setting{.key = "cache_mode",
+                        .apply =
+                                [](Config &config, const std::string_view value) {
+                                    config.small = value == "small";
+
+                                    return value == "small" || value == "fast";
+                                }},
         };
 
         const Setting *setting_for(const std::string_view key) {
@@ -208,7 +226,9 @@ namespace tiv {
                 continue;
             }
 
-            setting->apply(config, value);
+            if (!setting->apply(config, value)) {
+                warn(number, std::format("\"{}\" is not a value {} takes", value, key));
+            }
         }
 
         return config;

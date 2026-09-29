@@ -5,6 +5,7 @@
 ### Added
 
 - A config file, `tinyiv.conf`, with a `cache` setting for where tiles of huge images are kept
+- A `cache_mode` setting: `small` keeps a huge PNG as places to begin decoding it again instead of every tile, about a third of the room
 
 ### Changed
 

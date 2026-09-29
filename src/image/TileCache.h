@@ -34,9 +34,10 @@
 namespace tiv {
     // An image as a pyramid of compressed tiles, made by decoding top to bottom. One too large for
     // memory goes in a file on disk and is kept so reopening is instant, one that fits is held in
-    // memory and never written. A file that can be decoded from partway, a JPEG with restart markers
-    // or a TIFF by its strips or tiles, gives its full resolution itself, and only the smaller levels are stored, as GDAL's
-    // external overviews do: https://gdal.org/en/stable/programs/gdaladdo.html
+    // memory and never written. A file that can be decoded from partway, a JPEG with restart markers,
+    // a TIFF by its strips or tiles, or a PNG with checkpoints when asked for small, gives its full
+    // resolution itself, and only the smaller levels are stored, as GDAL's external overviews do:
+    // https://gdal.org/en/stable/programs/gdaladdo.html
     // Tiles are unpacked on background threads as the view asks for them and cached, so memory
     // follows what the screen shows, whatever the image's size.
     class TileCache {
@@ -95,8 +96,22 @@ namespace tiv {
             // a multiple of TILE.
             virtual bool read(int top, int count, Bitmap *out) const = 0;
 
+            // Rows of the image from y, as RGBA.
+            using Take = std::function<bool(int y, int count, std::span<const std::uint8_t> pixels)>;
+            // Keeps bytes with the tiles and says where they went.
+            using Keep = std::function<std::uint64_t(std::span<const std::uint8_t> bytes)>;
+            // Bytes kept before, read into the scratch or found where they lie. Empty when unreadable.
+            using Fetch = std::function<std::span<const std::uint8_t>(std::uint64_t at, std::uint64_t bytes,
+                                                                      std::vector<std::uint8_t> &scratch)>;
+
+            // The whole image once, top to bottom, in bands of TILE rows, keeping what read() will want.
+            virtual bool pass(const Take &take, const Keep &keep, const Decode::Abort *abort);
+
+            // Where what pass() kept is found again, said before the first read().
+            virtual void found(const Fetch & /*fetch*/) {}
+
             // What opens the same source again without a pass over the file.
-            [[nodiscard]] virtual std::vector<std::uint64_t> index() const = 0;
+            [[nodiscard]] virtual std::vector<std::uint8_t> index() const = 0;
         };
 
         // The folder the file's pyramid goes in: the one asked for, taken from the file's folder
@@ -113,9 +128,12 @@ namespace tiv {
 
         // Decodes the file into a new pyramid and opens it. On disk it goes in the folder as
         // location() takes it. Progress goes from 0 to 1.
+        // Small keeps a PNG's full resolution as places to begin inflating it again, a fraction of the
+        // room, but panning there has to decode whole bands of rows.
         [[nodiscard]] static std::shared_ptr<TileCache>
         build(const std::filesystem::path &file, const std::filesystem::path &folder, const Tone::Display &display,
-              Store store, std::atomic<float> *progress, std::string *error = nullptr, Decode::Abort *abort = nullptr);
+              Store store, bool small, std::atomic<float> *progress, std::string *error = nullptr,
+              Decode::Abort *abort = nullptr);
 
         ~TileCache();
 
@@ -171,6 +189,8 @@ namespace tiv {
         // A row of the finest level's tiles from the source, all kept. The band is scratch for the
         // rows. Not under the lock.
         void read_source(int row, bool pinned, Bitmap &band);
+        // Tells the source where what it kept is found.
+        void attach_source();
         // Reads whole the levels of few enough tiles, so there is always something to draw.
         void pin();
         void start();

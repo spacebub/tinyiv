@@ -4,8 +4,9 @@ A small, very fast, GPU rendered image viewer. It decodes on background threads,
 image on the GPU as tiles of a mipmap pyramid, and prefetches the folder around the file, so
 stepping is instant and gigapixel files pan without a stutter. An image too large for memory
 streams from a pyramid of tiles written to disk on first open, so it opens at full resolution
-whatever its size. A JPEG with restart markers, or a TIFF read by its strips or tiles, gives its
-full resolution straight from the file, so only the smaller levels are stored. One window, one folder, one image. No configuration, no editing, no extra
+whatever its size. A JPEG with restart markers, a TIFF read by its strips or tiles, or with
+`cache_mode = small` a PNG, gives its full resolution straight from the file, so only the smaller
+levels are stored. One window, one folder, one image. No configuration, no editing, no extra
 features.
 
 Every format libvips reads is shown. JPEG, PNG, WebP, JPEG XL, BMP, ICO and ICNS go through
@@ -55,9 +56,10 @@ Settings live in `tinyiv.conf`, in `$XDG_CONFIG_HOME/tinyiv` (`~/.config/tinyiv`
 beside `tinyiv.exe` on Windows. The first start writes one listing every setting. Each line is
 `key = value`, and a line starting with `#` is a comment.
 
-| Key     | Value                                                                                    |
-|---------|------------------------------------------------------------------------------------------|
+| Key          | Value                                                                               |
+|--------------|-------------------------------------------------------------------------------------|
 | `cache` | Where the tiles of images too large for memory go. Empty keeps them in a `tinyiv-cache` folder beside each image. A relative path is taken from the image's folder, and `~` is the home folder. |
+| `cache_mode` | `fast` or `small`. Fast keeps every tile of a huge PNG, so it pans at once. Small keeps only places to begin decoding the file again instead of its full resolution tiles, about a third of the room overall, but panning at full resolution waits a few tens of milliseconds for each band of rows. |
 
 A folder that cannot be written falls back to the user's cache folder.
 
