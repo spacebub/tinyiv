@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -24,19 +25,6 @@
 namespace tiv {
     namespace {
         constexpr std::string_view BLANKS = " \t";
-
-        constexpr std::string_view TEMPLATE =
-                "# tinyiv settings: one key = value a line. A line starting with # is a comment.\n"
-                "\n"
-                "# Where the tiles of images too large for memory are kept. Empty keeps them in a\n"
-                "# tinyiv-cache folder beside each image. A relative path is taken from the image's\n"
-                "# folder, and ~ stands for the home folder.\n"
-                "cache =\n"
-                "\n"
-                "# fast or small. Fast keeps every tile of a huge PNG, so it pans at once. Small keeps only\n"
-                "# places to begin decoding it again, about a third of the room, but panning at full\n"
-                "# resolution waits a few tens of milliseconds for each band of rows.\n"
-                "cache_mode = fast\n";
 
         std::filesystem::path from_utf8(const std::string_view text) {
             return std::u8string(text.begin(), text.end());
@@ -92,6 +80,8 @@ namespace tiv {
 
         struct Setting {
             std::string_view key;
+            // What the file says of it and its default, as written into a file that lacks it.
+            std::string_view text;
             // False when the value is not one the key takes.
             bool (*apply)(Config &config, std::string_view value);
         };
@@ -99,6 +89,10 @@ namespace tiv {
         // Scanned in order for each line, which stays nanoseconds at any count a person edits by hand.
         constexpr std::array SETTINGS{
                 Setting{.key = "cache",
+                        .text = "# Folder for the tile caches of images too large to fit in memory. Leave it empty\n"
+                                "# to keep each cache in a tinyiv-cache folder next to its image. A relative path\n"
+                                "# starts from the image's folder, and ~ means your home folder.\n"
+                                "cache =\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {
                                     config.cache = expanded(value);
@@ -106,6 +100,11 @@ namespace tiv {
                                     return true;
                                 }},
                 Setting{.key = "cache_mode",
+                        .text = "# How huge PNGs are cached, fast or small. Fast stores every tile, so panning is\n"
+                                "# instant. Small stores only the points decoding can resume from, which takes\n"
+                                "# about a third of the space, but panning at full size waits a few tens of\n"
+                                "# milliseconds for each band of rows.\n"
+                                "cache_mode = fast\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {
                                     config.small = value == "small";
@@ -124,18 +123,31 @@ namespace tiv {
             return nullptr;
         }
 
-        void write_template(const std::filesystem::path &file) {
+        // Every setting the file lacks goes at its end with its default, so all of them can be found
+        // there. A file that is not there yet is made with all of them.
+        void append_missing(const std::filesystem::path &file, const std::string_view text,
+                            const std::span<const bool> seen) {
+            if (std::ranges::all_of(seen, [](const bool found) { return found; })) {
+                return;
+            }
+
             std::error_code failure;
 
             std::filesystem::create_directories(file.parent_path(), failure);
 
-            if (failure) {
-                return;
+            std::ofstream out(file, std::ios::binary | std::ios::app);
+            bool first = text.empty();
+
+            if (!first && !text.ends_with('\n')) {
+                out << '\n';
             }
 
-            std::ofstream out(file, std::ios::binary);
-
-            out.write(TEMPLATE.data(), static_cast<std::streamsize>(TEMPLATE.size()));
+            for (std::size_t i = 0; i < SETTINGS.size(); ++i) {
+                if (!seen[i]) {
+                    out << (first ? "" : "\n") << SETTINGS.at(i).text;
+                    first = false;
+                }
+            }
         }
     }
 
@@ -169,7 +181,7 @@ namespace tiv {
             std::error_code failure;
 
             if (!std::filesystem::exists(file, failure) && !failure) {
-                write_template(file);
+                append_missing(file, {}, std::array<bool, SETTINGS.size()>{});
             }
 
             return config;
@@ -190,6 +202,7 @@ namespace tiv {
 
         std::string_view rest = text;
         int number = 0;
+        std::array<bool, SETTINGS.size()> seen{};
 
         while (!rest.empty()) {
             const std::size_t end = rest.find('\n');
@@ -220,6 +233,10 @@ namespace tiv {
             const std::string_view value = unquoted(trimmed(line.substr(equals + 1)));
             const Setting *setting = setting_for(key);
 
+            if (setting != nullptr) {
+                seen.at(static_cast<std::size_t>(setting - SETTINGS.data())) = true;
+            }
+
             if (setting == nullptr) {
                 warn(number, std::format("unknown key \"{}\"", key));
 
@@ -227,9 +244,11 @@ namespace tiv {
             }
 
             if (!setting->apply(config, value)) {
-                warn(number, std::format("\"{}\" is not a value {} takes", value, key));
+                warn(number, std::format("{} cannot be \"{}\"", key, value));
             }
         }
+
+        append_missing(file, text, seen);
 
         return config;
     }

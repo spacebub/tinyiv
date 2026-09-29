@@ -105,6 +105,8 @@ namespace tiv {
         // The streaming mode shows for a moment after it switches, in the bar or as a badge.
         [[nodiscard]] bool flashing() const;
         [[nodiscard]] std::string mode_text() const;
+        // The image on screen streams from tiles because it is too large for memory, not by the mode.
+        [[nodiscard]] bool always_streamed() const;
         // " in" and the folder tiles being made go to, with the home folder as ~. Empty in memory.
         [[nodiscard]] std::string where_tiles_go() const;
         [[nodiscard]] std::string bar_right() const;
@@ -164,6 +166,8 @@ namespace tiv {
         int _direction = 1;
         // Shown in place of an image that could not be opened.
         std::string _failure;
+        // What the last press of S did, shown for a moment after.
+        std::string _flash;
         // Where the tiles being made go on disk, empty when they stay in memory.
         std::filesystem::path _tileFolder;
         // A drag that started on the play bar's track.

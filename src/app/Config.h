@@ -15,22 +15,21 @@
 #include <vector>
 
 namespace tiv {
-    // The user's settings, one `key = value` a line, with `#` starting a comment.
+    // The user's settings, one key = value a line, # starting a comment.
     struct Config {
-        // Where pyramids on disk go. Empty puts them beside each image, and a relative path
-        // is taken from the image's folder.
+        // Where tile caches go. Empty keeps each beside its image, and a relative path starts from
+        // the image's folder.
         std::filesystem::path cache;
 
-        // A PNG too large for memory keeps every tile, which pans at once, or with small only places to
-        // begin decoding it again, about a third of the room, but panning at full resolution waits
-        // for bands of rows to decode.
+        // A huge PNG keeps only the points decoding can resume from, about a third of the space, instead
+        // of every tile, at the cost of waiting for bands of rows when panning at full size.
         bool small = false;
 
         // $XDG_CONFIG_HOME/tinyiv/tinyiv.conf, or tinyiv.conf beside the executable on Windows.
         [[nodiscard]] static std::filesystem::path location();
 
-        // Reads the file, and writes one listing every key when there is none, so it can be
-        // found and edited. Lines it cannot take are described in warnings and skipped.
+        // Reads the file, then adds every setting it lacks with its default, making the file first
+        // when there is none. Lines it cannot take are skipped and described in warnings.
         [[nodiscard]] static Config load(const std::filesystem::path &file, std::vector<std::string> *warnings);
     };
 }

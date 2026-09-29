@@ -984,13 +984,22 @@ namespace tiv {
     }
 
     void App::toggle_stream() {
+        _switchedAt = SDL_GetTicks();
+        _dirty = true;
+
+        // It streams whatever the mode, so switching would only decode it again the same way.
+        if (always_streamed()) {
+            _flash = "Too large for memory, always streamed";
+
+            return;
+        }
+
         const bool on = !_loader->streaming_all();
 
+        _flash = on ? "Streaming mode on" : "Streaming mode off";
         _loader->stream_all(on);
         // Tiles of the same image and size would be kept, so the canvas lets go of them first.
         _canvas->clear();
-        _switchedAt = SDL_GetTicks();
-        _dirty = true;
 
         if (_folder.count() == 0) {
             return;
@@ -1019,7 +1028,11 @@ namespace tiv {
     }
 
     std::string App::mode_text() const {
-        return _loader->streaming_all() ? "Streaming mode on" : "Streaming mode off";
+        return _flash;
+    }
+
+    bool App::always_streamed() const {
+        return (_streamed || _building) && static_cast<std::int64_t>(_info.width) * _info.height > Loader::max_pixels();
     }
 
     void App::save() {
@@ -1232,12 +1245,6 @@ namespace tiv {
 
         const Size size = shown();
         const std::string format = _info.hdr ? _info.format + " HDR" : _info.format;
-
-        // Ahead of any message, which would hide how far it is.
-        if (_building && _info.width != 0) {
-            return std::format("{}x{}, {}, {}, making tiles{} {:.0f}%", size.width, size.height, format,
-                               human_size(_bytes), where_tiles_go(), _loader->progress() * 100.0F);
-        }
 
         // Switching the mode says so for a moment, as the badge does in fullscreen.
         if (flashing()) {

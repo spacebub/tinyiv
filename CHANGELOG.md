@@ -4,42 +4,49 @@
 
 ### Added
 
-- A config file, `tinyiv.conf`, with a `cache` setting for where tiles of huge images are kept
-- A `cache_mode` setting: `small` keeps a huge PNG as places to begin decoding it again instead of every tile, about a third of the room
+- A config file, `tinyiv.conf`. Settings missing from it are added with their default values
+- `cache` setting to choose where tile caches are kept
+- `cache_mode` setting. `small` caches huge PNGs in about a third of the space, at the cost of slower panning at full size
 
 ### Changed
 
-- Large JPEGs with restart markers decode on several threads at once, about five times faster
-- 8 bit TIFFs decode their strips or tiles on several threads at once through libtiff, about seven times faster, and stream their full resolution from the file
-- A streamed JPEG with restart markers reads its full resolution from the file and stores only the smaller levels, a quarter of the room it took
-- Tiles are stored as planes, red and blue less green, each row filtered up or by gradient, and tiles of 256 colours or fewer as a palette: 15 to 55% smaller, and as quick to read
-- Tile folders tinyiv makes carry a CACHEDIR.TAG, so backup tools pass them by
-- While tiles are written to disk, the status says which folder they go to
-- Writing tiles watches the drive and stops before it fills, and on Linux 6.14 or newer keeps them out of the page cache
-- Tile bands are cut and compressed while the next band decodes, making huge images about 15% faster to open the first time
-- Streaming mode keeps the tiles of an image that fits in memory in memory, and writes only images too large for it to disk
+- Large JPEGs with restart markers decode on all cores, about five times faster
+- 8 bit TIFFs decode on all cores through libtiff, about seven times faster
+- JPEGs with restart markers and most TIFFs are streamed straight from the file at full size, so only the smaller levels are cached. Their caches take about a quarter of the space they used to
+- In streaming mode, images that fit in memory stay in memory instead of being written to disk
+- Tile caches are 15 to 55% smaller and just as fast to read
+- Huge images open about 15% faster the first time
+- While tiles are being made, the folder they go to is shown
+- Tile cache folders are tagged with CACHEDIR.TAG, so backup tools skip them
+- Writing tile caches on Linux 6.14 or newer no longer pushes other files out of the page cache
+- Pressing S on an image too large for memory says it is always streamed, instead of switching streaming mode off
+- The status bar no longer repeats the tile progress shown in the middle of the window
+
+### Fixed
+
+- Writing a tile cache could fill the drive. It now stops while 1 GB is still free
 
 ## 1.2.0 - 2026-09-28
 
 ### Added
 
 - HDR support
-- Tile caching on disk for huge images that cannot fit in RAM
-- A streaming mode that can be toggled with `s` that takes advantage of the tile caching. Enabled by default on large enough images
+- Tile caching on disk for images too large to fit in memory
+- Streaming mode, toggled with `S`, which shows images from their tile cache. Images too large for memory always stream
 
 ### Changed
 
-- Zooming and panning are no longer bounded by the screen. The mouse can now be dragged infinitely
+- Zooming and panning are no longer limited to the screen, and the mouse can be dragged as far as you like
 
 ## 1.1.0 - 2026-09-27
 
 ### Added
 
-- Rotate, flip, view modes and save
+- Rotating, flipping, view modes and saving
 
 ### Fixed
 
-- Reduce memory consumption
+- Lower memory use
 
 ## 1.0.0 - 2026-09-27
 
