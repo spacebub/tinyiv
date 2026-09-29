@@ -28,7 +28,7 @@
 - Writing tile caches on Linux 6.14 or newer no longer pushes other files out of the page cache
 - Pressing S on an image too large for memory switches streaming mode without opening the image again, and says it is always streamed
 - The status bar no longer repeats the tile progress shown in the middle of the window
-- The file name and its place in the folder moved to a top bar, with the sort order on its right
+- The file name and its place in the folder moved to a top bar, the name centred, with the sort order on its right
 - The status bar shows whether streaming mode is on and, apart from it, whether the image on screen is too large for memory and always streams
 
 ### Fixed

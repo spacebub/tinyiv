@@ -102,7 +102,7 @@ namespace tiv {
     }
 
     void StatusBar::draw(SDL_Renderer *renderer, const Rect &bar, const float scale, const std::string &left,
-                         const std::string &right, const bool loading) {
+                         const std::string &middle, const std::string &right, const bool loading) {
         const SDL_FRect area{
                 .x = static_cast<float>(bar.x),
                 .y = static_cast<float>(bar.y),
@@ -123,8 +123,17 @@ namespace tiv {
         const std::string rightText = fitted(loading ? spinning(right) : right, area.w - (2.0F * padding), scale);
         const float rightWidth = static_cast<float>(rightText.size()) * glyph(scale);
         const std::string leftText = fitted(left, area.w - (3.0F * padding) - rightWidth, scale);
+        const float leftWidth = static_cast<float>(leftText.size()) * glyph(scale);
+        // Clear of the left and right texts, with a padding between them.
+        const float first = area.x + padding + (leftWidth > 0.0F ? leftWidth + padding : 0.0F);
+        const float end = area.x + area.w - padding - (rightWidth > 0.0F ? rightWidth + padding : 0.0F);
+        const std::string middleText = fitted(middle, end - first, scale);
+        const float middleWidth = static_cast<float>(middleText.size()) * glyph(scale);
+        // Slides off the centre when it would run into either side.
+        const float middleX = std::max(std::min(area.x + ((area.w - middleWidth) / 2.0F), end - middleWidth), first);
 
         text_at(renderer, area.x + padding, y, scale, leftText);
+        text_at(renderer, middleX, y, scale, middleText);
         text_at(renderer, area.x + area.w - padding - rightWidth, y, scale, rightText);
     }
 

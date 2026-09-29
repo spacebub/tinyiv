@@ -106,6 +106,9 @@ namespace tiv {
 
         // Where in the folder the image is and its name, marked while turned and not saved.
         [[nodiscard]] std::string title() const;
+        // The two halves of the title: where in the folder, then the name.
+        [[nodiscard]] std::string position() const;
+        [[nodiscard]] std::string name() const;
         // The modes that are on, for the bottom bar.
         [[nodiscard]] std::string modes() const;
         [[nodiscard]] std::string failure_text(const std::string &error) const;

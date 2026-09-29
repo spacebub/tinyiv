@@ -1219,7 +1219,7 @@ namespace tiv {
 
             StatusBar::draw(_renderer,
                             {.x = 0.0, .y = 0.0, .width = static_cast<double>(width), .height = static_cast<double>(bar)},
-                            scale, title(), order, false);
+                            scale, position(), name(), order, false);
             StatusBar::draw(_renderer,
                             {
                                     .x = 0.0,
@@ -1227,7 +1227,7 @@ namespace tiv {
                                     .width = static_cast<double>(width),
                                     .height = static_cast<double>(bar),
                             },
-                            scale, modes(), details(), _loading);
+                            scale, modes(), "", details(), _loading);
         } else if (flashing()) {
             // No bar to carry the mode, so switching it says so for a moment.
             StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, mode_text(),
@@ -1315,12 +1315,25 @@ namespace tiv {
     }
 
     std::string App::title() const {
+        const std::string where = position();
+
+        return where.empty() ? name() : where + " " + name();
+    }
+
+    std::string App::position() const {
+        if (_folder.count() == 0) {
+            return "";
+        }
+
+        return std::format("[{}/{}]", _folder.index() + 1, _folder.count());
+    }
+
+    std::string App::name() const {
         if (_folder.count() == 0) {
             return "tinyiv";
         }
 
-        return std::format("[{}/{}] {}{}", _folder.index() + 1, _folder.count(), _folder.current().filename().string(),
-                           _turn != 1 ? " *" : "");
+        return _folder.current().filename().string() + (_turn != 1 ? " *" : "");
     }
 
     std::string App::modes() const {
