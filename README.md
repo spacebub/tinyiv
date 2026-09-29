@@ -39,7 +39,7 @@ Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 | ;  '                    | Flip vertically, horizontally |
 | Ctrl+S                  | Save rotation and flips       |
 | S                       | Toggle streaming mode         |
-| I                       | Show, hide the status bar     |
+| I                       | Show, hide the bars           |
 | Space                   | Play, pause animation         |
 | ,  .                    | Previous, next frame          |
 | Click, drag on play bar | Play, pause, seek             |

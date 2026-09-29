@@ -558,15 +558,24 @@ namespace tiv {
 
             _streamAll = on;
 
+            // Images too large for memory stream in either mode, so their tiles and builds stay.
             for (const Job &job : _jobs) {
-                job.abort->request();
+                if (!job.streaming || job.info.pixels() <= max_pixels()) {
+                    job.abort->request();
+                }
             }
 
-            for (auto &[file, entry] : _cache) {
-                release(entry);
+            for (auto at = _cache.begin(); at != _cache.end();) {
+                if (at->second.streamed && at->second.info.pixels() > max_pixels()) {
+                    ++at;
+
+                    continue;
+                }
+
+                release(at->second);
+                at = _cache.erase(at);
             }
 
-            _cache.clear();
             _starved = false;
         }
 

@@ -133,7 +133,7 @@ namespace tiv {
 
         // S: streaming mode, where every still image shows from a pyramid of tiles, not only
         // those too large for memory. Only those go on disk unless set_tiles() persists all. Everything
-        // decoded goes, so the next show() decodes the new way.
+        // else decoded goes, so the next show() decodes the new way.
         void stream_all(bool on);
         [[nodiscard]] bool streaming_all() const;
 

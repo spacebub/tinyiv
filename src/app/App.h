@@ -63,6 +63,8 @@ namespace tiv {
         void follow_output(const Loader::Result &result);
         void set_fullscreen(bool on);
         [[nodiscard]] bool bar_shown() const;
+        // Of the top and of the bottom bar alike, zero while they are hidden.
+        [[nodiscard]] int bar_height() const;
         void toggle_bar();
 
         // Direction is the way the wheel was going, so prefetch leans that way.
@@ -101,8 +103,10 @@ namespace tiv {
         [[nodiscard]] int wait_ms() const;
         [[nodiscard]] Rect play_bar() const;
 
-        // Tagged leads with STREAMING while the mode is on or the image streams anyway.
-        [[nodiscard]] std::string bar_left(bool tagged = true) const;
+        // Where in the folder the image is and its name, marked while turned and not saved.
+        [[nodiscard]] std::string title() const;
+        // The modes that are on, for the bottom bar.
+        [[nodiscard]] std::string modes() const;
         [[nodiscard]] std::string failure_text(const std::string &error) const;
         // The streaming mode shows for a moment after it switches, in the bar or as a badge.
         [[nodiscard]] bool flashing() const;
@@ -111,7 +115,7 @@ namespace tiv {
         [[nodiscard]] bool always_streamed() const;
         // " in" and the folder tiles being made go to, with the home folder as ~. Empty in memory.
         [[nodiscard]] std::string where_tiles_go() const;
-        [[nodiscard]] std::string bar_right() const;
+        [[nodiscard]] std::string details() const;
 
         // What was last sent to the refiner, so a request that failed is not repeated.
         struct Ask {
@@ -146,7 +150,7 @@ namespace tiv {
         Decode::Info _info;
         // Turns and flips on top of the orientation the file says, until saved.
         int _turn = 1;
-        // Replaces the image details in the status bar until the next image or turn.
+        // Replaces the image details in the bottom bar until the next image or turn.
         std::string _message;
         bool _help = false;
         // Images came and went since freed memory was last given back.
@@ -183,7 +187,7 @@ namespace tiv {
         Ask _asked;
 
         bool _fullscreen = false;
-        // Whether the status bar shows, kept apart for windowed and fullscreen: I switches the one in use.
+        // Whether the bars show, kept apart for windowed and fullscreen: I switches the one in use.
         bool _barWindowed = true;
         bool _barFullscreen = false;
         bool _running = true;

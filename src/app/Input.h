@@ -55,8 +55,8 @@ namespace tiv {
         // Window units a cursor held on an edge moves back in before it runs free again.
         static constexpr float EDGE_RELEASE = 4.0F;
 
-        // Mouse positions arrive in window units, density turns them into pixels.
-        Action handle(const SDL_Event &event, float density, Viewport &viewport);
+        // Mouse positions arrive in window units, density turns them into pixels and top is where the view starts.
+        Action handle(const SDL_Event &event, float density, double top, Viewport &viewport);
 
         // Positive is next, negative is previous. Clears what it returns.
         [[nodiscard]] int scroll();

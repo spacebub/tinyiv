@@ -10,7 +10,7 @@
 - `streaming_mode` setting to start tinyiv with streaming mode on
 - `persist_streams` setting to cache every streamed image on disk, not only those too large for memory
 - `sort` setting to choose the order a folder starts in
-- `O` steps through the sort orders: name A to Z, name Z to A, newest first, oldest first and smallest first. The status bar always shows the order in use
+- `O` steps through the sort orders: name A to Z, name Z to A, newest first, oldest first and smallest first. The top bar always shows the order in use
 
 ### Changed
 
@@ -23,8 +23,10 @@
 - While tiles are being made, the folder they go to is shown
 - Tile cache folders are tagged with CACHEDIR.TAG, so backup tools skip them
 - Writing tile caches on Linux 6.14 or newer no longer pushes other files out of the page cache
-- Pressing S on an image too large for memory says it is always streamed, instead of switching streaming mode off
+- Pressing S on an image too large for memory switches streaming mode without opening the image again, and says it is always streamed
 - The status bar no longer repeats the tile progress shown in the middle of the window
+- The file name and its place in the folder moved to a top bar, with the sort order on its right
+- The status bar shows whether streaming mode is on and, apart from it, whether the image on screen is too large for memory and always streams
 
 ### Fixed
 

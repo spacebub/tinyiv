@@ -14,7 +14,7 @@
 #include "view/Viewport.h"
 
 namespace tiv {
-    Input::Action Input::handle(const SDL_Event &event, const float density, Viewport &viewport) {
+    Input::Action Input::handle(const SDL_Event &event, const float density, const double top, Viewport &viewport) {
         switch (event.type) {
             case SDL_EVENT_QUIT:
                 return Action::Quit;
@@ -24,7 +24,7 @@ namespace tiv {
 
             case SDL_EVENT_MOUSE_BUTTON_DOWN: {
                 const double x = event.button.x * density;
-                const double y = event.button.y * density;
+                const double y = (event.button.y * density) - top;
 
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     if (event.button.clicks == 2) {

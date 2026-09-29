@@ -58,7 +58,7 @@ namespace Embedded {
 namespace tiv {
     namespace {
         constexpr float WINDOW_SHARE = 0.8F;
-        // Room for the status bar to show a file name beside the size and format.
+        // Room for the top bar to show a file name beside the order.
         constexpr int MIN_WIDTH = 480;
         constexpr int MIN_HEIGHT = 270;
         constexpr int PREFETCH_AHEAD = 6;
@@ -86,7 +86,7 @@ namespace tiv {
                         {.left = ";  '", .right = "Flip vertically, horizontally"},
                         {.left = "Ctrl+S", .right = "Save turns and flips"},
                         {.left = "S", .right = "Streaming mode on, off"},
-                        {.left = "I", .right = "Status bar on, off"},
+                        {.left = "I", .right = "Bars on, off"},
                         {.left = "Space", .right = "Play, pause animation"},
                         {.left = ",  .", .right = "Previous, next frame"},
                         {.left = "Ctrl+H", .right = "Show, hide this help"},
@@ -128,7 +128,7 @@ namespace tiv {
         // In the order O steps through them.
         struct OrderText {
             Folder::Order order;
-            // Leads the status bar for as long as the order holds.
+            // Ends the top bar for as long as the order holds.
             std::string_view tag;
             // Said for a moment when O switches to it.
             std::string_view text;
@@ -398,9 +398,7 @@ namespace tiv {
 
         SDL_GetWindowSizeInPixels(_window, &width, &height);
 
-        const int bar = bar_shown() ? StatusBar::height(SDL_GetWindowDisplayScale(_window)) : 0;
-
-        _viewport.set_area(width, height - bar);
+        _viewport.set_area(width, height - (2 * bar_height()));
         _repaints = REPAINTS;
         moved();
     }
@@ -414,6 +412,10 @@ namespace tiv {
 
     bool App::bar_shown() const {
         return _fullscreen ? _barFullscreen : _barWindowed;
+    }
+
+    int App::bar_height() const {
+        return bar_shown() ? StatusBar::height(SDL_GetWindowDisplayScale(_window)) : 0;
     }
 
     void App::toggle_bar() {
@@ -553,7 +555,7 @@ namespace tiv {
             return;
         }
 
-        const Input::Action action = _input.handle(event, SDL_GetWindowPixelDensity(_window), _viewport);
+        const Input::Action action = _input.handle(event, SDL_GetWindowPixelDensity(_window), bar_height(), _viewport);
 
         // Doing anything the help lists puts the help away.
         if (_help && action != Input::Action::None && action != Input::Action::ToggleHelp) {
@@ -1015,20 +1017,21 @@ namespace tiv {
     }
 
     void App::toggle_stream() {
+        const bool on = !_loader->streaming_all();
+
         _switchedAt = SDL_GetTicks();
         _dirty = true;
+        _loader->stream_all(on);
 
-        // It streams whatever the mode, so switching would only decode it again the same way.
+        // It streams whatever the mode, so it stays on screen and only the neighbours decode the new way.
         if (always_streamed()) {
             _flash = "Too large for memory, always streamed";
+            _canvas->keep({});
 
             return;
         }
 
-        const bool on = !_loader->streaming_all();
-
         _flash = on ? "Streaming mode on" : "Streaming mode off";
-        _loader->stream_all(on);
         // Tiles of the same image and size would be kept, so the canvas lets go of them first.
         _canvas->clear();
 
@@ -1140,23 +1143,29 @@ namespace tiv {
         SDL_SetRenderDrawColor(_renderer, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, BACKGROUND.a);
         SDL_RenderClear(_renderer);
 
+        const int bar = bar_height();
+        const Rect view{
+                .x = 0.0,
+                .y = static_cast<double>(bar),
+                .width = _viewport.area_width(),
+                .height = _viewport.area_height(),
+        };
+
         if (_viewport.has_image()) {
+            const SDL_Rect below{.x = 0, .y = bar, .w = width, .h = height - (2 * bar)};
+
+            SDL_SetRenderViewport(_renderer, &below);
             _canvas->draw(_viewport);
+            SDL_SetRenderViewport(_renderer, nullptr);
         } else if (!_failure.empty()) {
-            StatusBar::notice(_renderer,
-                              {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
-                              scale, _failure);
+            StatusBar::notice(_renderer, view, scale, _failure);
         } else if (_building) {
             const std::string notice =
                     std::format("Making tiles{}: {:.0f}%", where_tiles_go(), _loader->progress() * 100.0F);
 
-            StatusBar::notice(_renderer,
-                              {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
-                              scale, notice);
+            StatusBar::notice(_renderer, view, scale, notice);
         } else if (_folder.count() == 0) {
-            StatusBar::notice(_renderer,
-                              {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
-                              scale, "Drop an image here to open it");
+            StatusBar::notice(_renderer, view, scale, "Drop an image here to open it");
         }
 
         if (_playback.active()) {
@@ -1171,8 +1180,11 @@ namespace tiv {
         }
 
         if (bar_shown()) {
-            const int bar = StatusBar::height(scale);
+            const std::string order = _folder.count() > 0 ? std::string(order_text(_folder.order()).tag) : "";
 
+            StatusBar::draw(_renderer,
+                            {.x = 0.0, .y = 0.0, .width = static_cast<double>(width), .height = static_cast<double>(bar)},
+                            scale, title(), order, false);
             StatusBar::draw(_renderer,
                             {
                                     .x = 0.0,
@@ -1180,14 +1192,14 @@ namespace tiv {
                                     .width = static_cast<double>(width),
                                     .height = static_cast<double>(bar),
                             },
-                            scale, bar_left(), bar_right(), _loading);
+                            scale, modes(), details(), _loading);
         } else if (flashing()) {
             // No bar to carry the mode, so switching it says so for a moment.
             StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, mode_text(),
                              false);
         } else if (_loading) {
             // Where the bar would be, for as long as something is still on its way.
-            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, bar_left(false),
+            StatusBar::badge(_renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, title(),
                              true);
         }
 
@@ -1244,7 +1256,12 @@ namespace tiv {
     Rect App::play_bar() const {
         const auto height = static_cast<double>(PlayBar::height(SDL_GetWindowDisplayScale(_window)));
 
-        return {.x = 0.0, .y = _viewport.area_height() - height, .width = _viewport.area_width(), .height = height};
+        return {
+                .x = 0.0,
+                .y = static_cast<double>(bar_height()) + _viewport.area_height() - height,
+                .width = _viewport.area_width(),
+                .height = height,
+        };
     }
 
     bool App::flashing() const {
@@ -1262,22 +1279,24 @@ namespace tiv {
         return "Could not open this image: " + error.substr(prefix.size());
     }
 
-    std::string App::bar_left(const bool tagged) const {
-        const std::string tag = std::string(tagged && (_streamed || _loader->streaming_all()) ? "STREAMING  " : "")
-                                + (tagged && _linear ? "HDR  " : "");
-
+    std::string App::title() const {
         if (_folder.count() == 0) {
-            return std::format("{}tinyiv", tag);
+            return "tinyiv";
         }
 
-        // Marked while turned or flipped and not saved, and led by the modes that are on and the order.
-        return std::format("{}{}[{}/{}] {}{}", tag, tagged ? std::format("{}  ", order_text(_folder.order()).tag) : "",
-                           _folder.index() + 1, _folder.count(), _folder.current().filename().string(),
+        return std::format("[{}/{}] {}{}", _folder.index() + 1, _folder.count(), _folder.current().filename().string(),
                            _turn != 1 ? " *" : "");
     }
 
-    std::string App::bar_right() const {
-        // Opposite the name, while there is nothing else to say.
+    std::string App::modes() const {
+        const bool streaming = _loader->streaming_all();
+
+        return std::format("{}{}{}", streaming ? "STREAMING" : "", streaming && _linear ? "  " : "",
+                           _linear ? "HDR" : "");
+    }
+
+    std::string App::details() const {
+        // While there is no image to describe.
         if (_folder.count() == 0) {
             if constexpr (*TIV_GIT_REVISION != '\0') {
                 return "v" TIV_VERSION " (" TIV_GIT_REVISION ")";
@@ -1307,6 +1326,7 @@ namespace tiv {
                                _playback.frames(), human_size(_bytes));
         }
 
-        return std::format("{}x{}, {}, {}", size.width, size.height, format, human_size(_bytes));
+        return std::format("{}x{}, {}, {}{}", size.width, size.height, format, always_streamed() ? "streaming, " : "",
+                           human_size(_bytes));
     }
 }
