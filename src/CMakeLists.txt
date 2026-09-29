@@ -3,6 +3,8 @@ add_executable(tinyiv
 
         app/App.cpp
         app/App.h
+        app/Config.cpp
+        app/Config.h
         app/Input.cpp
         app/Input.h
 

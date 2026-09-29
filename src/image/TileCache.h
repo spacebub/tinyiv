@@ -66,19 +66,21 @@ namespace tiv {
             int row = 0;
         };
 
-        // The folder the file's pyramid goes in: one beside the file where it can be made, else
-        // the user's cache.
-        [[nodiscard]] static std::filesystem::path location(const std::filesystem::path &file);
+        // The folder the file's pyramid goes in: the one asked for, taken from the file's folder
+        // when relative, else one beside the file. Where that cannot be made, the user's cache.
+        [[nodiscard]] static std::filesystem::path location(const std::filesystem::path &file,
+                                                            const std::filesystem::path &folder = {});
 
         // The pyramid made for the file as it is now and shown on the display, if there is one.
         // The display only tells pyramids of an HDR image apart.
         [[nodiscard]] static std::shared_ptr<TileCache> open(const std::filesystem::path &file,
+                                                             const std::filesystem::path &folder = {},
                                                              const Tone::Display &display = {});
 
         // Decodes the file into a new pyramid on disk and opens it. Progress goes from 0 to 1.
         [[nodiscard]] static std::shared_ptr<TileCache>
-        build(const std::filesystem::path &file, const Tone::Display &display, std::atomic<float> *progress,
-              std::string *error = nullptr, Decode::Abort *abort = nullptr);
+        build(const std::filesystem::path &file, const std::filesystem::path &folder, const Tone::Display &display,
+              std::atomic<float> *progress, std::string *error = nullptr, Decode::Abort *abort = nullptr);
 
         ~TileCache();
 

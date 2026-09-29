@@ -25,6 +25,7 @@
 #include <SDL3/SDL.h>
 
 #include "app/App.h"
+#include "app/Config.h"
 #include "app/Input.h"
 #include "gallery/Folder.h"
 #include "image/Bitmap.h"
@@ -225,6 +226,15 @@ namespace tiv {
         _refinerEvent = _loaderEvent + 1;
         _tileCacheEvent = _loaderEvent + 2;
         _loader = std::make_unique<Loader>(_loaderEvent);
+
+        std::vector<std::string> warnings;
+        const Config config = Config::load(Config::location(), &warnings);
+
+        for (const std::string &warning : warnings) {
+            std::println(stderr, "tinyiv: {}", warning);
+        }
+
+        _loader->set_tile_folder(config.cache);
         _refiner = std::make_unique<Refiner>(_refinerEvent);
 
         show(_folder.index(), 1);

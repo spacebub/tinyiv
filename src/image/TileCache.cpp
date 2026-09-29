@@ -865,12 +865,13 @@ namespace tiv {
         }
     }
 
-    std::filesystem::path TileCache::location(const std::filesystem::path &file) {
+    std::filesystem::path TileCache::location(const std::filesystem::path &file, const std::filesystem::path &folder) {
         std::error_code failure;
 
-        if (const std::filesystem::path folder = std::filesystem::absolute(file, failure).parent_path();
-            !failure && !folder.empty()) {
-            std::filesystem::path dir = folder / "tinyiv-cache";
+        if (const std::filesystem::path parent = std::filesystem::absolute(file, failure).parent_path();
+            !failure && !parent.empty()) {
+            // An absolute folder replaces the parent whole.
+            std::filesystem::path dir = parent / (folder.empty() ? std::filesystem::path("tinyiv-cache") : folder);
 
             if (usable(dir)) {
                 return dir;
@@ -888,14 +889,15 @@ namespace tiv {
         return std::filesystem::temp_directory_path(missing) / "tinyiv";
     }
 
-    std::shared_ptr<TileCache> TileCache::open(const std::filesystem::path &file, const Tone::Display &display) {
+    std::shared_ptr<TileCache> TileCache::open(const std::filesystem::path &file, const std::filesystem::path &folder,
+                                               const Tone::Display &display) {
         Identity identity;
 
         if (!identify(file, &identity)) {
             return nullptr;
         }
 
-        const std::filesystem::path dir = location(file);
+        const std::filesystem::path dir = location(file, folder);
         std::filesystem::path path = dir / name_of(identity, display);
         std::error_code failure;
 
@@ -923,9 +925,9 @@ namespace tiv {
         return tileCache;
     }
 
-    std::shared_ptr<TileCache> TileCache::build(const std::filesystem::path &file, const Tone::Display &display,
-                                                std::atomic<float> *progress, std::string *error,
-                                                Decode::Abort *abort) {
+    std::shared_ptr<TileCache> TileCache::build(const std::filesystem::path &file, const std::filesystem::path &folder,
+                                                const Tone::Display &display, std::atomic<float> *progress,
+                                                std::string *error, Decode::Abort *abort) {
         Identity identity;
 
         if (!identify(file, &identity)) {
@@ -934,7 +936,7 @@ namespace tiv {
             return nullptr;
         }
 
-        const std::filesystem::path dir = location(file);
+        const std::filesystem::path dir = location(file, folder);
         const std::filesystem::path finished = dir / name_of(identity, display);
         std::filesystem::path part = finished;
 
@@ -1038,7 +1040,7 @@ namespace tiv {
             return nullptr;
         }
 
-        std::shared_ptr<TileCache> tileCache = open(file, display);
+        std::shared_ptr<TileCache> tileCache = open(file, folder, display);
 
         if (tileCache == nullptr) {
             fail(error, file, "could not open the tile file just made");

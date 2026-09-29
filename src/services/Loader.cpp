@@ -186,6 +186,12 @@ namespace tiv {
         _screenHeight = std::max(height, 1);
     }
 
+    void Loader::set_tile_folder(std::filesystem::path folder) {
+        const std::scoped_lock hold(_guard);
+
+        _tileFolder = std::move(folder);
+    }
+
     Tone::Display Loader::display_for(const Decode::Info &info) const {
         return info.hdr ? _display : Tone::Display{};
     }
@@ -741,12 +747,14 @@ namespace tiv {
         entry.streamed = true;
 
         bool waiting = false;
+        std::filesystem::path folder;
 
         {
             const std::scoped_lock hold(_guard);
 
             entry.display = display_for(entry.info);
             waiting = entry.info.hdr && !_displayKnown;
+            folder = _tileFolder;
         }
 
         // Kept without a tile cache, and wants_job() picks it up again once the display is said.
@@ -756,7 +764,7 @@ namespace tiv {
             return;
         }
 
-        entry.tileCache = TileCache::open(job.file, entry.display);
+        entry.tileCache = TileCache::open(job.file, folder, entry.display);
 
         bool build = false;
 
@@ -797,7 +805,8 @@ namespace tiv {
                         std::format("{}: needs {:.1f} GB of memory to decode, {:.1f} GB is free", job.file.string(),
                                     static_cast<double>(needed) / 1e9, static_cast<double>(free) / 1e9);
             } else {
-                entry.tileCache = TileCache::build(job.file, entry.display, &_progress, &entry.error, job.abort.get());
+                entry.tileCache =
+                        TileCache::build(job.file, folder, entry.display, &_progress, &entry.error, job.abort.get());
             }
         }
 

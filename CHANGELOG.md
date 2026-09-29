@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- A config file, `tinyiv.conf`, with a `cache` setting for where tiles of huge images are kept
+
 ## 1.2.0 - 2026-09-28
 
 ### Added

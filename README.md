@@ -48,6 +48,18 @@ Rotating and flipping only change how the image is drawn. Ctrl+S writes the resu
 file's orientation tag, for JPEG, PNG, WebP and TIFF, and leaves the pixel data byte for
 byte: rotating back and saving again gives back the identical file.
 
+## Configuration
+
+Settings live in `tinyiv.conf`, in `$XDG_CONFIG_HOME/tinyiv` (`~/.config/tinyiv`) on Linux and
+beside `tinyiv.exe` on Windows. The first start writes one listing every setting. Each line is
+`key = value`, and a line starting with `#` is a comment.
+
+| Key     | Value                                                                                    |
+|---------|------------------------------------------------------------------------------------------|
+| `cache` | Where the tiles of images too large for memory go. Empty keeps them in a `tinyiv-cache` folder beside each image. A relative path is taken from the image's folder, and `~` is the home folder. |
+
+A folder that cannot be written falls back to the user's cache folder.
+
 ## License
 
 GPL-3.0-or-later.
