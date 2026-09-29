@@ -28,6 +28,9 @@ python3 ../.download-cache/benchmark-v1.9.5/tools/compare.py benchmarks before.j
 | `Decode_full`         | The whole image, up to the cap                                  |
 | `Decode_forced`       | The streamed path that bounds memory for images over the cap    |
 | `Pyramid_halve`       | The mipmap kernels, scalar to AVX2                              |
+| `TileCache_build`     | Making a tile pyramid on disk or in memory, and what it stores  |
+| `TileCache_read`      | Unpacking every full resolution tile, from disk or memory       |
+| `TileCache_stores_agree` | Fails when the two stores give different tiles               |
 | `Bmp_decode`          | The BMP row kernels, scalar to AVX2, whole and forced           |
 | `Upload_static`       | Texture upload throughput                                       |
 | `Tiles_visible_4k`    | The tiles one screen of a 128 MP image needs                    |

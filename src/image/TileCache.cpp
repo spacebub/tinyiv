@@ -343,8 +343,25 @@ namespace tiv {
             return {};
         }
 
+        // Where a Builder puts the tiles it makes.
+        class Sink {
+
+        public:
+            Sink() = default;
+            virtual ~Sink() = default;
+
+            Sink(const Sink &) = delete;
+            Sink(Sink &&) = delete;
+            Sink &operator=(const Sink &) = delete;
+            Sink &operator=(Sink &&) = delete;
+
+            // Returns what finds the tile again, as a Span's offset.
+            virtual std::uint64_t put(std::span<const std::uint8_t> bytes) = 0;
+            [[nodiscard]] virtual bool ok() const = 0;
+        };
+
         // Gathers writes into a large buffer and puts each down at its offset, as the Reader reads.
-        class Writer {
+        class Writer final : public Sink {
 
         public:
             explicit Writer(const std::filesystem::path &file)
@@ -359,15 +376,23 @@ namespace tiv {
                 _buffer.reserve(WRITE_BUFFER);
             }
 
-            ~Writer() { close(); }
+            ~Writer() override { close(); }
 
             Writer(const Writer &) = delete;
             Writer(Writer &&) = delete;
             Writer &operator=(const Writer &) = delete;
             Writer &operator=(Writer &&) = delete;
 
-            [[nodiscard]] bool ok() const { return valid() && _ok; }
+            [[nodiscard]] bool ok() const override { return valid() && _ok; }
             [[nodiscard]] std::uint64_t at() const { return _at; }
+
+            std::uint64_t put(const std::span<const std::uint8_t> bytes) override {
+                const std::uint64_t offset = _at;
+
+                write(bytes.data(), bytes.size());
+
+                return offset;
+            }
 
             void write(const void *data, const std::size_t bytes) {
                 const auto *from = static_cast<const std::uint8_t *>(data);
@@ -464,6 +489,22 @@ namespace tiv {
             std::uint64_t _flushed = 0;
             std::uint64_t _at = 0;
             bool _ok = true;
+        };
+
+        // Keeps each tile as its own block, for a pyramid of an image that fits in memory, which
+        // is never written to disk. Its offsets are the blocks' indices.
+        class Blocks final : public Sink {
+
+        public:
+            std::uint64_t put(const std::span<const std::uint8_t> bytes) override {
+                held.emplace_back(bytes.begin(), bytes.end());
+
+                return held.size() - 1;
+            }
+
+            [[nodiscard]] bool ok() const override { return true; }
+
+            std::vector<std::vector<std::uint8_t>> held;
         };
 
         std::vector<TileCache::Level> level_sizes(int width, int height) {
@@ -572,7 +613,7 @@ namespace tiv {
         class Builder {
 
         public:
-            Builder(Writer &out, const std::vector<TileCache::Level> &levels, const int channels,
+            Builder(Sink &out, const std::vector<TileCache::Level> &levels, const int channels,
                     const Bitmap::Encoding encoding)
                 : _out(&out), _channels(channels), _encoding(encoding),
                   _slots(static_cast<std::size_t>(
@@ -620,28 +661,39 @@ namespace tiv {
                 return _out->ok() && !_failed;
             }
 
-            // Every level whole, and where each tile went written after them.
-            [[nodiscard]] bool finish() {
-                for (const State &state : _states) {
-                    if (state.received != state.level.height) {
-                        return false;
-                    }
-                }
+            // Every level whole.
+            [[nodiscard]] bool finished() const {
+                return !_failed && _out->ok() && std::ranges::all_of(_states, [](const State &state) {
+                    return state.received == state.level.height;
+                });
+            }
 
+            // Where each tile went, after the level sizes.
+            void write_index(Writer &out) const {
                 for (const State &state : _states) {
                     const LevelSize size{
                             .width = static_cast<std::uint32_t>(state.level.width),
                             .height = static_cast<std::uint32_t>(state.level.height),
                     };
 
-                    _out->write(&size, sizeof size);
+                    out.write(&size, sizeof size);
                 }
 
                 for (const State &state : _states) {
-                    _out->write(state.spans.data(), state.spans.size() * sizeof(Placed));
+                    out.write(state.spans.data(), state.spans.size() * sizeof(Placed));
+                }
+            }
+
+            [[nodiscard]] std::vector<std::vector<Placed>> spans() const {
+                std::vector<std::vector<Placed>> held;
+
+                held.reserve(_states.size());
+
+                for (const State &state : _states) {
+                    held.push_back(state.spans);
                 }
 
-                return _out->ok() && !_failed;
+                return held;
             }
 
         private:
@@ -719,8 +771,10 @@ namespace tiv {
                         _failed = _failed || !slot.ok;
                         state.spans.at(
                                 (static_cast<std::size_t>(state.tileRow) * static_cast<std::size_t>(level.columns))
-                                + static_cast<std::size_t>(column)) = {.offset = _out->at(), .bytes = slot.size};
-                        _out->write(slot.packed.data(), slot.size);
+                                + static_cast<std::size_t>(column)) = {
+                                .offset = _out->put(std::span(slot.packed).first(slot.size)),
+                                .bytes = slot.size,
+                        };
                     }
                 }
 
@@ -769,7 +823,7 @@ namespace tiv {
                 }
             }
 
-            Writer *_out;
+            Sink *_out;
             int _channels;
             Bitmap::Encoding _encoding;
             std::vector<State> _states;
@@ -816,9 +870,25 @@ namespace tiv {
             std::vector<std::uint8_t> raw;
         };
 
-        Bitmap read_tile(const Reader &reader, const TileCache::Level &level, const std::uint64_t offset,
-                         const std::uint64_t bytes, const int channels, const Bitmap::Encoding encoding,
-                         const TileCache::Key &key, Decoder &decoder) {
+        // A tile's packed bytes, read into the scratch from disk, or found in memory when there is no
+        // reader. Empty when unreadable.
+        std::span<const std::uint8_t> fetch(const Reader *reader, const std::vector<std::vector<std::uint8_t>> &blocks,
+                                            const std::uint64_t offset, const std::uint64_t bytes,
+                                            std::vector<std::uint8_t> &scratch) {
+            if (reader == nullptr) {
+                return offset < blocks.size() ? std::span<const std::uint8_t>(blocks.at(offset))
+                                              : std::span<const std::uint8_t>();
+            }
+
+            scratch.resize(static_cast<std::size_t>(bytes));
+
+            return reader->read(offset, scratch.data(), scratch.size()) ? std::span<const std::uint8_t>(scratch)
+                                                                        : std::span<const std::uint8_t>();
+        }
+
+        // The packed bytes are empty when they could not be read.
+        Bitmap read_tile(const std::span<const std::uint8_t> packed, const TileCache::Level &level, const int channels,
+                         const Bitmap::Encoding encoding, const TileCache::Key &key, Decoder &decoder) {
             const int width = std::min(TileCache::TILE, level.width - (key.column * TileCache::TILE));
             const int height = std::min(TileCache::TILE, level.height - (key.row * TileCache::TILE));
             const std::size_t pixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
@@ -832,15 +902,10 @@ namespace tiv {
             }
 
             std::uint8_t *target = channels == Bitmap::CHANNELS ? tile.data() : decoder.raw.data();
-
-            decoder.packed.resize(static_cast<std::size_t>(bytes));
-
-            bool read = decoder.context != nullptr && reader.read(offset, decoder.packed.data(), decoder.packed.size());
+            bool read = decoder.context != nullptr && !packed.empty();
 
             if (read) {
-                read = ZSTD_decompressDCtx(decoder.context.get(), target, raw, decoder.packed.data(),
-                                           decoder.packed.size())
-                       == raw;
+                read = ZSTD_decompressDCtx(decoder.context.get(), target, raw, packed.data(), packed.size()) == raw;
             }
 
             if (read) {
@@ -862,6 +927,156 @@ namespace tiv {
             }
 
             return tile;
+        }
+        // One pass over the file, cutting it into a pyramid of tiles through a Builder. The sink the
+        // tiles go to is asked for once the image's size is known, and null stops the pass.
+        struct Pass {
+            std::vector<TileCache::Level> levels;
+            int channels = Bitmap::CHANNELS;
+            Bitmap::Encoding encoding = Bitmap::Encoding::Srgb;
+            std::unique_ptr<Builder> builder;
+            // Why the pass stopped, when it was not the decoder's doing.
+            std::string why;
+        };
+
+        bool run_pass(const std::filesystem::path &file, const Tone::Display &display, std::atomic<float> *progress,
+                      std::string *error, Decode::Abort *abort, const std::function<Sink *(const Pass &)> &ready,
+                      Pass *made) {
+            int total = 1;
+
+            const auto begin = [&](const int width, const int height, const bool alpha,
+                                   const Bitmap::Encoding encoding) {
+                made->levels = level_sizes(width, height);
+                made->channels = channels_for(alpha, encoding);
+                made->encoding = encoding;
+                total = height;
+
+                Sink *sink = ready(*made);
+
+                if (sink == nullptr) {
+                    return false;
+                }
+
+                made->builder = std::make_unique<Builder>(*sink, made->levels, made->channels, encoding);
+
+                return true;
+            };
+
+            const auto take = [&](const int y, const int rows, const std::span<const std::uint8_t> pixels) {
+                if (!made->builder->band(rows, pixels)) {
+                    made->why = "could not store the tiles";
+
+                    return false;
+                }
+
+                if (progress != nullptr) {
+                    progress->store(static_cast<float>(y + rows) / static_cast<float>(total),
+                                    std::memory_order_relaxed);
+                }
+
+                return true;
+            };
+
+            bool done = Decode::stream(file, TileCache::TILE, begin, take, error, abort, display);
+
+            if (done && !made->builder->finished()) {
+                done = false;
+                made->why = "could not store the tiles";
+            }
+
+            if (!done && !made->why.empty()) {
+                fail(error, file, made->why);
+            }
+
+            return done;
+        }
+
+        // Makes the file's pyramid in the folder, under a temporary name until it is whole.
+        bool write_pyramid(const std::filesystem::path &file, const std::filesystem::path &dir,
+                           const Tone::Display &display, std::atomic<float> *progress, std::string *error,
+                           Decode::Abort *abort) {
+            Identity identity;
+
+            if (!identify(file, &identity)) {
+                fail(error, file, "unreadable");
+
+                return false;
+            }
+
+            const std::filesystem::path finished = dir / name_of(identity, display);
+            std::filesystem::path part = finished;
+
+            part += PART;
+
+            Header header;
+            std::unique_ptr<Writer> out;
+            Pass made;
+
+            header.version = VERSION;
+            header.tile = TileCache::TILE;
+            header.sourceSize = identity.size;
+            header.sourceContents = identity.contents;
+
+            const auto ready = [&](const Pass &pass) -> Sink * {
+                const std::uint64_t bytes = pyramid_bytes(pass.levels, pass.channels) / EXPECTED_RATIO;
+
+                if (!make_room(dir, bytes)) {
+                    made.why = std::format("needs {:.1f} GB free on the drive for tiles",
+                                           static_cast<double>(bytes + SPARE_DISK) / 1e9);
+
+                    return nullptr;
+                }
+
+                out = std::make_unique<Writer>(part);
+
+                if (!out->ok()) {
+                    made.why = "could not create the tile file";
+
+                    return nullptr;
+                }
+
+                header.magic = magic_for(pass.encoding);
+                header.channels = static_cast<std::uint32_t>(pass.channels);
+                header.levels = static_cast<std::uint32_t>(pass.levels.size());
+                // Written again once the index is down.
+                out->write(&header, sizeof header);
+
+                return out.get();
+            };
+
+            bool done = run_pass(file, display, progress, error, abort, ready, &made);
+
+            if (done) {
+                header.index = out->at();
+                made.builder->write_index(*out);
+                out->patch(&header, sizeof header);
+                done = out->close();
+
+                if (!done) {
+                    fail(error, file, "could not write the tile file");
+                }
+            }
+
+            if (out != nullptr) {
+                out->close();
+            }
+
+            std::error_code failure;
+
+            if (done) {
+                std::filesystem::rename(part, finished, failure);
+                done = !failure;
+
+                if (!done) {
+                    fail(error, file, "could not keep the tile file");
+                }
+            }
+
+            if (!done) {
+                std::filesystem::remove(part, failure);
+            }
+
+            return done;
         }
     }
 
@@ -926,125 +1141,50 @@ namespace tiv {
     }
 
     std::shared_ptr<TileCache> TileCache::build(const std::filesystem::path &file, const std::filesystem::path &folder,
-                                                const Tone::Display &display, std::atomic<float> *progress,
-                                                std::string *error, Decode::Abort *abort) {
-        Identity identity;
+                                                const Tone::Display &display, const Store store,
+                                                std::atomic<float> *progress, std::string *error,
+                                                Decode::Abort *abort) {
+        if (store == Store::Disk) {
+            if (!write_pyramid(file, location(file, folder), display, progress, error, abort)) {
+                return nullptr;
+            }
 
-        if (!identify(file, &identity)) {
-            fail(error, file, "unreadable");
+            std::shared_ptr<TileCache> tileCache = open(file, folder, display);
 
+            if (tileCache == nullptr) {
+                fail(error, file, "could not open the tile file just made");
+            }
+
+            return tileCache;
+        }
+
+        Blocks blocks;
+        Pass made;
+
+        if (!run_pass(file, display, progress, error, abort, [&](const Pass & /*pass*/) { return &blocks; }, &made)) {
             return nullptr;
         }
 
-        const std::filesystem::path dir = location(file, folder);
-        const std::filesystem::path finished = dir / name_of(identity, display);
-        std::filesystem::path part = finished;
+        std::shared_ptr<TileCache> tileCache(new TileCache());
 
-        part += PART;
+        tileCache->_channels = made.channels;
+        tileCache->_encoding = made.encoding;
+        tileCache->_levels = made.levels;
 
-        Header header;
-        std::unique_ptr<Writer> out;
-        std::unique_ptr<Builder> builder;
-        std::string why;
-        int total = 1;
+        for (const std::vector<Placed> &placed : made.builder->spans()) {
+            std::vector<Span> &spans = tileCache->_spans.emplace_back();
 
-        header.magic = MAGIC;
-        header.version = VERSION;
-        header.tile = TILE;
-        header.sourceSize = identity.size;
-        header.sourceContents = identity.contents;
+            spans.reserve(placed.size());
 
-        const auto begin = [&](const int width, const int height, const bool alpha, const Bitmap::Encoding encoding) {
-            const int channels = channels_for(alpha, encoding);
-            const std::vector<Level> levels = level_sizes(width, height);
-            const std::uint64_t bytes = pyramid_bytes(levels, channels) / EXPECTED_RATIO;
-
-            if (!make_room(dir, bytes)) {
-                why = std::format("needs {:.1f} GB free on the drive for tiles",
-                                  static_cast<double>(bytes + SPARE_DISK) / 1e9);
-
-                return false;
-            }
-
-            out = std::make_unique<Writer>(part);
-
-            if (!out->ok()) {
-                why = "could not create the tile file";
-
-                return false;
-            }
-
-            header.channels = static_cast<std::uint32_t>(channels);
-            header.magic = magic_for(encoding);
-            header.levels = static_cast<std::uint32_t>(levels.size());
-            total = height;
-            // Written again once the index is down.
-            out->write(&header, sizeof header);
-            builder = std::make_unique<Builder>(*out, levels, channels, encoding);
-
-            return true;
-        };
-
-        const auto take = [&](const int y, const int rows, const std::span<const std::uint8_t> pixels) {
-            if (!builder->band(rows, pixels)) {
-                why = "could not write the tile file";
-
-                return false;
-            }
-
-            if (progress != nullptr) {
-                progress->store(static_cast<float>(y + rows) / static_cast<float>(total), std::memory_order_relaxed);
-            }
-
-            return true;
-        };
-
-        bool made = Decode::stream(file, TILE, begin, take, error, abort, display);
-
-        if (made) {
-            header.index = out->at();
-            made = builder->finish();
-
-            if (!made) {
-                why = "could not write the tile file";
+            for (const Placed &tile : placed) {
+                spans.push_back({.offset = tile.offset, .bytes = tile.bytes});
+                tileCache->_storedBytes += static_cast<std::size_t>(tile.bytes);
             }
         }
 
-        if (made) {
-            out->patch(&header, sizeof header);
-            made = out->close();
-        }
-
-        std::error_code failure;
-
-        if (out != nullptr) {
-            out->close();
-        }
-
-        if (made) {
-            std::filesystem::rename(part, finished, failure);
-            made = !failure;
-
-            if (!made) {
-                why = "could not keep the tile file";
-            }
-        }
-
-        if (!made) {
-            std::filesystem::remove(part, failure);
-
-            if (!why.empty()) {
-                fail(error, file, why);
-            }
-
-            return nullptr;
-        }
-
-        std::shared_ptr<TileCache> tileCache = open(file, folder, display);
-
-        if (tileCache == nullptr) {
-            fail(error, file, "could not open the tile file just made");
-        }
+        tileCache->_blocks = std::move(blocks.held);
+        tileCache->pin();
+        tileCache->start();
 
         return tileCache;
     }
@@ -1114,8 +1254,13 @@ namespace tiv {
         }
 
         _path = path;
+        pin();
 
-        // The coarsest levels come in whole now, so there is always something to draw.
+        return true;
+    }
+
+    void TileCache::pin() {
+        const std::unique_ptr<Reader> reader = _path.empty() ? nullptr : std::make_unique<Reader>(_path);
         Decoder decoder;
         const std::scoped_lock hold(_guard);
 
@@ -1132,16 +1277,15 @@ namespace tiv {
                     const Span &span = _spans.at(index).at(
                             (static_cast<std::size_t>(row) * static_cast<std::size_t>(level.columns))
                             + static_cast<std::size_t>(column));
+                    const std::span<const std::uint8_t> packed =
+                            fetch(reader.get(), _blocks, span.offset, span.bytes, decoder.packed);
 
                     keep(id_of(key),
-                         std::make_shared<const Bitmap>(
-                                 read_tile(reader, level, span.offset, span.bytes, _channels, _encoding, key, decoder)),
+                         std::make_shared<const Bitmap>(read_tile(packed, level, _channels, _encoding, key, decoder)),
                          true);
                 }
             }
         }
-
-        return true;
     }
 
     void TileCache::start() {
@@ -1165,7 +1309,7 @@ namespace tiv {
     }
 
     void TileCache::read_loop() {
-        const Reader reader(_path);
+        const std::unique_ptr<Reader> reader = _path.empty() ? nullptr : std::make_unique<Reader>(_path);
         Decoder decoder;
         std::unique_lock hold(_guard);
 
@@ -1192,8 +1336,9 @@ namespace tiv {
             const Span &span = _spans.at(static_cast<std::size_t>(key.level))
                                        .at((static_cast<std::size_t>(key.row) * static_cast<std::size_t>(level.columns))
                                            + static_cast<std::size_t>(key.column));
-            auto tile = std::make_shared<const Bitmap>(
-                    read_tile(reader, level, span.offset, span.bytes, _channels, _encoding, key, decoder));
+            const std::span<const std::uint8_t> packed =
+                    fetch(reader.get(), _blocks, span.offset, span.bytes, decoder.packed);
+            auto tile = std::make_shared<const Bitmap>(read_tile(packed, level, _channels, _encoding, key, decoder));
 
             hold.lock();
             _reading.erase(id);

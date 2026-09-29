@@ -32,9 +32,10 @@
 #include "image/decode/Decode.h"
 
 namespace tiv {
-    // An image too large for memory, as a pyramid of tiles in a file on disk, made once by decoding
-    // top to bottom and kept so reopening is instant. Tiles are read on background threads as the
-    // view asks for them and cached, so memory follows what the screen shows, whatever the image's size.
+    // An image as a pyramid of compressed tiles, made by decoding top to bottom. One too large for
+    // memory goes in a file on disk and is kept so reopening is instant, one that fits is held in
+    // memory and never written. Tiles are unpacked on background threads as the view asks for them
+    // and cached, so memory follows what the screen shows, whatever the image's size.
     class TileCache {
 
     public:
@@ -52,6 +53,11 @@ namespace tiv {
         static constexpr int PINNED_TILES = 4;
 
         static constexpr int READERS = 2;
+
+        enum class Store : std::uint8_t {
+            Disk,
+            Memory,
+        };
 
         struct Level {
             int width = 0;
@@ -77,10 +83,11 @@ namespace tiv {
                                                              const std::filesystem::path &folder = {},
                                                              const Tone::Display &display = {});
 
-        // Decodes the file into a new pyramid on disk and opens it. Progress goes from 0 to 1.
+        // Decodes the file into a new pyramid and opens it. On disk it goes in the folder as
+        // location() takes it. Progress goes from 0 to 1.
         [[nodiscard]] static std::shared_ptr<TileCache>
         build(const std::filesystem::path &file, const std::filesystem::path &folder, const Tone::Display &display,
-              std::atomic<float> *progress, std::string *error = nullptr, Decode::Abort *abort = nullptr);
+              Store store, std::atomic<float> *progress, std::string *error = nullptr, Decode::Abort *abort = nullptr);
 
         ~TileCache();
 
@@ -113,6 +120,9 @@ namespace tiv {
 
         [[nodiscard]] std::size_t cached_bytes() const;
 
+        // The compressed tiles held in memory, none for a pyramid on disk.
+        [[nodiscard]] std::size_t stored_bytes() const { return _storedBytes; }
+
     private:
         struct Slot {
             std::shared_ptr<const Bitmap> bitmap;
@@ -129,6 +139,8 @@ namespace tiv {
         TileCache() = default;
 
         bool load(const std::filesystem::path &path);
+        // Reads whole the levels of few enough tiles, so there is always something to draw.
+        void pin();
         void start();
         void read_loop();
         // Under the lock.
@@ -136,7 +148,11 @@ namespace tiv {
         [[nodiscard]] static std::uint64_t id_of(const Key &key);
         [[nodiscard]] static Key key_of(std::uint64_t id);
 
+        // Empty for a pyramid in memory.
         std::filesystem::path _path;
+        // The tiles of a pyramid in memory, where a Span's offset is the index.
+        std::vector<std::vector<std::uint8_t>> _blocks;
+        std::size_t _storedBytes = 0;
         int _channels = 4;
         Bitmap::Encoding _encoding = Bitmap::Encoding::Srgb;
         std::vector<Level> _levels;

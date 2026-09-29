@@ -258,7 +258,7 @@ namespace tiv {
                 });
             }
 
-            // What the images left behind read of their files goes, what is on disk stays.
+            // What the images left behind unpacked of their tiles goes, the tiles themselves stay.
             for (auto &[file, entry] : _cache) {
                 if (entry.tileCache != nullptr && file != current) {
                     entry.tileCache->shrink();
@@ -743,6 +743,8 @@ namespace tiv {
 
     // Opens the pyramid made for the file before, or makes one when it is the current image.
     // The others wait for a pyramid until they are shown, since it takes a pass over the whole file.
+    // An image that fits in memory, streamed only because streaming mode is on, keeps its pyramid in
+    // memory and never touches the disk.
     void Loader::decode_stream(Job &job, Entry entry) {
         entry.streamed = true;
 
@@ -764,7 +766,12 @@ namespace tiv {
             return;
         }
 
-        entry.tileCache = TileCache::open(job.file, folder, entry.display);
+        const TileCache::Store where =
+                entry.info.pixels() > max_pixels() ? TileCache::Store::Disk : TileCache::Store::Memory;
+
+        if (where == TileCache::Store::Disk) {
+            entry.tileCache = TileCache::open(job.file, folder, entry.display);
+        }
 
         bool build = false;
 
@@ -805,8 +812,8 @@ namespace tiv {
                         std::format("{}: needs {:.1f} GB of memory to decode, {:.1f} GB is free", job.file.string(),
                                     static_cast<double>(needed) / 1e9, static_cast<double>(free) / 1e9);
             } else {
-                entry.tileCache =
-                        TileCache::build(job.file, folder, entry.display, &_progress, &entry.error, job.abort.get());
+                entry.tileCache = TileCache::build(job.file, folder, entry.display, where, &_progress, &entry.error,
+                                                   job.abort.get());
             }
         }
 
@@ -904,6 +911,10 @@ namespace tiv {
                 if (entry.pyramid != nullptr) {
                     _trash.push_back(std::move(entry.pyramid));
                 }
+
+                if (entry.tileCache != nullptr) {
+                    _trash.push_back(std::move(entry.tileCache));
+                }
             } else {
                 insert(file, std::move(entry));
             }
@@ -923,6 +934,10 @@ namespace tiv {
 
         if (entry.pyramid != nullptr) {
             _bytes += entry.pyramid->bytes();
+        }
+
+        if (entry.tileCache != nullptr) {
+            _bytes += entry.tileCache->stored_bytes();
         }
 
         const Entry &kept = _cache.emplace(file, std::move(entry)).first->second;
@@ -973,6 +988,7 @@ namespace tiv {
         }
 
         if (entry.tileCache != nullptr) {
+            _bytes -= entry.tileCache->stored_bytes();
             _trash.push_back(std::move(entry.tileCache));
         }
 
@@ -1077,7 +1093,10 @@ namespace tiv {
         for (auto it = _cache.begin(); it != _cache.end(); ++it) {
             const int at = rank(it->first);
 
-            if (at <= 1 || it->second.pyramid == nullptr) {
+            const bool holds = it->second.pyramid != nullptr
+                               || (it->second.tileCache != nullptr && it->second.tileCache->stored_bytes() > 0);
+
+            if (at <= 1 || !holds) {
                 continue;
             }
 

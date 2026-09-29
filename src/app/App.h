@@ -82,7 +82,7 @@ namespace tiv {
         void turn(int by);
         // Writes how the image is turned into its file, when it is turned.
         void save();
-        // Switches streaming mode, where every still image shows from a pyramid on disk.
+        // Switches streaming mode, where every still image shows from a pyramid of tiles.
         void toggle_stream();
         // How the image on screen is drawn, from how it is stored.
         [[nodiscard]] int orientation() const;

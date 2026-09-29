@@ -42,8 +42,8 @@ namespace tiv {
             Preview,
             // The whole image, up to the cap.
             Full,
-            // An image too large for memory, or asked to stream, whose tiles are being written to
-            // disk before it can show. See progress().
+            // An image too large for memory, or asked to stream, whose tiles are being made before
+            // it can show. See progress().
             Building,
             Failed,
         };
@@ -58,7 +58,7 @@ namespace tiv {
             bool unsupported = false;
             // Every frame, once decoded, for an image whose info counts more than one.
             std::shared_ptr<const Animation> animation;
-            // Instead of the pyramid, for an image shown from disk.
+            // Instead of the pyramid, for an image shown from tiles.
             std::shared_ptr<const TileCache> tileCache;
         };
 
@@ -127,13 +127,13 @@ namespace tiv {
         // No decode is running.
         [[nodiscard]] bool idle() const;
 
-        // S: streaming mode, where every still image shows from a pyramid on disk, not only
-        // those too large for memory. Everything decoded goes, so the next show() decodes the
-        // new way.
+        // S: streaming mode, where every still image shows from a pyramid of tiles, not only
+        // those too large for memory. Only those go on disk, the rest stay in memory. Everything
+        // decoded goes, so the next show() decodes the new way.
         void stream_all(bool on);
         [[nodiscard]] bool streaming_all() const;
 
-        // How far the tiles being written for the current image are, from 0 to 1.
+        // How far the tiles being made for the current image are, from 0 to 1.
         [[nodiscard]] float progress() const { return _progress.load(std::memory_order_relaxed); }
 
         [[nodiscard]] std::size_t cached_bytes() const;
@@ -157,7 +157,7 @@ namespace tiv {
             // The first level is the whole image, up to the cap. Off once trimmed to the screen.
             bool whole = false;
             std::shared_ptr<const Animation> animation;
-            // Shown from disk. The tile cache is null until one is made, which only the current image does.
+            // Shown from tiles. The tile cache is null until one is made, which only the current image does.
             bool streamed = false;
             std::shared_ptr<const TileCache> tileCache;
             std::string error;

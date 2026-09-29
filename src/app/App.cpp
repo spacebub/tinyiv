@@ -251,7 +251,7 @@ namespace tiv {
 
         layout();
         update_display();
-        // Said even when SDR, since HDR images wait for it before they build pyramids on disk.
+        // Said even when SDR, since HDR images wait for it before they build pyramids of tiles.
         _loader->set_display(_display);
         // A result posted before SDL_Init has no event queue to wake the loop.
         deliver();
@@ -438,7 +438,7 @@ namespace tiv {
 
     void App::run() {
         while (_running) {
-            // Asks for the tiles on disk the view meets before deciding there is nothing to do.
+            // Asks for the streamed tiles the view meets before deciding there is nothing to do.
             _canvas->fetch(_viewport);
 
             const bool idle = !_canvas->pending(_viewport) && _repaints == 0;
@@ -727,7 +727,7 @@ namespace tiv {
                 continue;
             }
 
-            // Nothing to draw until the tiles are on disk, so the old image goes and the view
+            // Nothing to draw until the tiles are made, so the old image goes and the view
             // says how far they are.
             if (result.kind == Loader::Kind::Building) {
                 _shown = result.generation;
@@ -1072,7 +1072,7 @@ namespace tiv {
                               {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
                               scale, _failure);
         } else if (_building) {
-            const std::string notice = std::format("Writing tiles to disk: {:.0f}%", _loader->progress() * 100.0F);
+            const std::string notice = std::format("Making tiles: {:.0f}%", _loader->progress() * 100.0F);
 
             StatusBar::notice(_renderer,
                               {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
@@ -1214,7 +1214,7 @@ namespace tiv {
 
         // Ahead of any message, which would hide how far it is.
         if (_building && _info.width != 0) {
-            return std::format("{}x{}, {}, {}, writing tiles {:.0f}%", size.width, size.height, format,
+            return std::format("{}x{}, {}, {}, making tiles {:.0f}%", size.width, size.height, format,
                                human_size(_bytes), _loader->progress() * 100.0F);
         }
 

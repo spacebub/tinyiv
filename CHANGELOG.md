@@ -6,6 +6,10 @@
 
 - A config file, `tinyiv.conf`, with a `cache` setting for where tiles of huge images are kept
 
+### Changed
+
+- Streaming mode keeps the tiles of an image that fits in memory in memory, and writes only images too large for it to disk
+
 ## 1.2.0 - 2026-09-28
 
 ### Added

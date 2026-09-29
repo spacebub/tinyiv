@@ -49,6 +49,7 @@ add_executable(tiv_bench
 
         image/Bitmap_bench.cpp
         image/Pyramid_bench.cpp
+        image/TileCache_bench.cpp
 
         image/decode/Bmp_bench.cpp
         image/decode/Decode_bench.cpp

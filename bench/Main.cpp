@@ -31,6 +31,7 @@ namespace {
         bench::register_bmp();
         bench::register_decode();
         bench::register_pyramid();
+        bench::register_tile_cache();
         bench::register_upload();
         bench::register_loader();
         bench::register_startup();
