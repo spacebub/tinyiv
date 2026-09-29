@@ -33,9 +33,9 @@
 
 namespace bench {
     namespace {
-        // The restart JPEGs read their full resolution from the file, the rest store it.
-        constexpr std::array<std::string_view, 5> FILES = {"noise.jpg", "noise.png", "noise.tif", "restart.jpg",
-                                                           "restart444.jpg"};
+        // The restart JPEGs and the TIFFs read their full resolution from the file, the rest store it.
+        constexpr std::array<std::string_view, 6> FILES = {"noise.jpg",   "noise.png",      "noise.tif",
+                                                           "restart.jpg", "restart444.jpg", "tiled.tif"};
 
         std::filesystem::path tile_folder() {
             return Corpus::dir() / "tiles";

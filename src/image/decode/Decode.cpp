@@ -27,6 +27,7 @@
 #include "image/decode/Jxl.h"
 #include "image/decode/Png.h"
 #include "image/decode/Support.h"
+#include "image/decode/TiffBands.h"
 #include "image/decode/Vips.h"
 #include "image/decode/WebP.h"
 
@@ -125,6 +126,33 @@ namespace tiv {
         }
 
         // Only the largest entry is shown.
+        // Strips or tiles side by side, for the layouts TiffBands takes. Should the bands fail for any
+        // reason but an abort, libvips still gets its turn.
+        Decode::Direct load_tiff(const std::filesystem::path &file, Bitmap *out, std::string *error,
+                                 const Decode::Abort *abort) {
+            const std::unique_ptr<Decode::TiffBands> bands = Decode::TiffBands::open(file);
+
+            if (bands == nullptr) {
+                return Decode::Direct::Skip;
+            }
+
+            Bitmap held = Bitmap::allocate(bands->width(), bands->height());
+
+            if (!bands->decode(0, bands->height(), &held, Decode::MAX_THREADS, abort)) {
+                if (Decode::aborted(abort)) {
+                    Decode::fail(error, file, "aborted");
+
+                    return Decode::Direct::Failed;
+                }
+
+                return Decode::Direct::Skip;
+            }
+
+            *out = std::move(held);
+
+            return Decode::Direct::Done;
+        }
+
         Decode::Direct load_icon(const std::filesystem::path &file, const Decode::Format kind,
                                  const std::span<const std::uint8_t> data, const int boxWidth, const int boxHeight,
                                  Bitmap *out, std::string *error, Decode::Abort *abort, const Decode::Fit fit) {
@@ -389,6 +417,9 @@ namespace tiv {
             case Format::Ico:
             case Format::Icns:
                 direct = load_icon(file, kind, mapped.data(), boxWidth, boxHeight, out, error, abort, fit);
+                break;
+            case Format::Tiff:
+                direct = fit == Fit::Cheap ? load_tiff(file, out, error, abort) : Direct::Skip;
                 break;
             default:
                 break;

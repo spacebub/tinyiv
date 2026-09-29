@@ -88,7 +88,7 @@ namespace tiv {
     }
 
 #ifdef _WIN32
-    bool Mapped::open(const std::filesystem::path &file, Mapped *out, std::string *error) {
+    bool Mapped::open(const std::filesystem::path &file, Mapped *out, std::string *error, const Use use) {
         // Shared for deleting too, so a file on screen can still be removed or renamed.
         HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                     nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
@@ -141,9 +141,11 @@ namespace tiv {
         }
 
         // Decoders read front to back, and the read ahead hides the disk.
-        WIN32_MEMORY_RANGE_ENTRY range{memory, read_ahead(size)};
+        if (use == Use::Through) {
+            WIN32_MEMORY_RANGE_ENTRY range{memory, read_ahead(size)};
 
-        PrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0);
+            PrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0);
+        }
 
         out->_data = static_cast<const std::uint8_t *>(memory);
         out->_size = size;
@@ -151,7 +153,7 @@ namespace tiv {
         return true;
     }
 #else
-    bool Mapped::open(const std::filesystem::path &file, Mapped *out, std::string *error) {
+    bool Mapped::open(const std::filesystem::path &file, Mapped *out, std::string *error, const Use use) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
         const int fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
 
@@ -191,8 +193,12 @@ namespace tiv {
         }
 
         // Decoders read front to back, and the read ahead hides the disk.
-        madvise(memory, size, MADV_SEQUENTIAL);
-        madvise(memory, read_ahead(size), MADV_WILLNEED);
+        if (use == Use::Through) {
+            madvise(memory, size, MADV_SEQUENTIAL);
+            madvise(memory, read_ahead(size), MADV_WILLNEED);
+        } else {
+            madvise(memory, size, MADV_RANDOM);
+        }
 
         out->_data = static_cast<const std::uint8_t *>(memory);
         out->_size = size;

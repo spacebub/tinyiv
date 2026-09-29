@@ -90,7 +90,7 @@ endif ()
 find_package(SDL3 REQUIRED CONFIG COMPONENTS SDL3-shared)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
-pkg_check_modules(CODECS REQUIRED IMPORTED_TARGET libwebp libjxl libjxl_threads libjpeg libpng libzstd)
+pkg_check_modules(CODECS REQUIRED IMPORTED_TARGET libwebp libjxl libjxl_threads libjpeg libpng libtiff-4 libzstd)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 include(DownloadCache)

@@ -36,7 +36,7 @@ namespace bench {
         constexpr double LOSSLESS_NOISE = 18.0;
         constexpr double LOSSY_NOISE = 45.0;
 
-        constexpr std::array<Corpus::Spec, 12> SPECS = {
+        constexpr std::array<Corpus::Spec, 13> SPECS = {
                 {
                         {
                                 .name = "noise.png",
@@ -110,6 +110,14 @@ namespace bench {
                                 .targetBytes = 45 * MIB,
                                 .width = 0,
                                 .height = 0,
+                                .sigma = LOSSLESS_NOISE,
+                        },
+                        {
+                                .name = "tiled.tif",
+                                .options = "[compression=lzw,tile=true,tile_width=256,tile_height=256]",
+                                .targetBytes = 0,
+                                .width = 8000,
+                                .height = 6000,
                                 .sigma = LOSSLESS_NOISE,
                         },
                         {

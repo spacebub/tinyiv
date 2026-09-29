@@ -34,8 +34,8 @@
 namespace tiv {
     // An image as a pyramid of compressed tiles, made by decoding top to bottom. One too large for
     // memory goes in a file on disk and is kept so reopening is instant, one that fits is held in
-    // memory and never written. A file that can be decoded from partway, such as a JPEG with restart
-    // markers, gives its full resolution itself, and only the smaller levels are stored, as GDAL's
+    // memory and never written. A file that can be decoded from partway, a JPEG with restart markers
+    // or a TIFF by its strips or tiles, gives its full resolution itself, and only the smaller levels are stored, as GDAL's
     // external overviews do: https://gdal.org/en/stable/programs/gdaladdo.html
     // Tiles are unpacked on background threads as the view asks for them and cached, so memory
     // follows what the screen shows, whatever the image's size.
@@ -89,6 +89,7 @@ namespace tiv {
 
             [[nodiscard]] virtual int width() const = 0;
             [[nodiscard]] virtual int height() const = 0;
+            [[nodiscard]] virtual bool alpha() const = 0;
 
             // Rows from top, count of them or to the bottom, in sRGB as wide as the image. The top is
             // a multiple of TILE.

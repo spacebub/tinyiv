@@ -47,6 +47,7 @@
 #include "image/decode/Decode.h"
 #include "image/decode/JpegBands.h"
 #include "image/decode/Support.h"
+#include "image/decode/TiffBands.h"
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic): tiles are cut from rows by offset.
 namespace tiv {
@@ -952,6 +953,7 @@ namespace tiv {
             [[nodiscard]] bool valid() const { return _reader.valid(); }
             [[nodiscard]] int width() const override { return _bands.width(); }
             [[nodiscard]] int height() const override { return _bands.height(); }
+            [[nodiscard]] bool alpha() const override { return false; }
 
             bool read(const int top, const int count, Bitmap *out) const override {
                 const Decode::JpegBands::Fetch fetch = [this](const std::uint64_t offset, const std::uint64_t bytes,
@@ -974,14 +976,55 @@ namespace tiv {
             Decode::JpegBands _bands;
         };
 
+        class TiffSource final : public TileCache::Source {
+
+        public:
+            explicit TiffSource(std::unique_ptr<Decode::TiffBands> bands) : _bands(std::move(bands)) {}
+
+            [[nodiscard]] int width() const override { return _bands->width(); }
+            [[nodiscard]] int height() const override { return _bands->height(); }
+            [[nodiscard]] bool alpha() const override { return _bands->alpha(); }
+
+            bool read(const int top, const int count, Bitmap *out) const override {
+                return _bands->decode(top, count, out, Decode::MAX_THREADS, nullptr);
+            }
+
+            // Where the strips lie is in the file already.
+            [[nodiscard]] std::vector<std::uint64_t> index() const override { return {}; }
+
+        private:
+            std::unique_ptr<Decode::TiffBands> _bands;
+        };
+
         // The file as the source of its finest level, when its format allows. The index kept from
         // before spares the pass over the file.
         std::unique_ptr<TileCache::Source> open_source(const std::filesystem::path &file,
                                                        const std::vector<std::uint64_t> *kept) {
+            constexpr std::size_t HEAD = 64;
+            const Reader head(file);
+            std::array<std::uint8_t, HEAD> start{};
+            std::error_code failure;
+            const std::uintmax_t size = std::filesystem::file_size(file, failure);
+
+            if (failure || !head.valid() || !head.read(0, start.data(), std::min<std::uintmax_t>(size, HEAD))) {
+                return nullptr;
+            }
+
+            const Decode::Format kind = Decode::sniff(std::span(start).first(std::min<std::size_t>(size, HEAD)));
+
+            if (kind == Decode::Format::Tiff) {
+                std::unique_ptr<Decode::TiffBands> strips = Decode::TiffBands::open(file);
+
+                return strips != nullptr ? std::make_unique<TiffSource>(std::move(strips)) : nullptr;
+            }
+
             Mapped mapped;
             Decode::JpegBands bands;
 
-            if (!Mapped::open(file, &mapped) || Decode::sniff(mapped.data()) != Decode::Format::Jpeg) {
+            // Finding the markers reads the whole file, taking the kept ones only its ends.
+            if (kind != Decode::Format::Jpeg
+                || !Mapped::open(file, &mapped, nullptr,
+                                 kept != nullptr ? Mapped::Use::Scattered : Mapped::Use::Through)) {
                 return nullptr;
             }
 
@@ -1014,7 +1057,7 @@ namespace tiv {
             const int height = source.height();
 
             made->levels = level_sizes(width, height);
-            made->channels = channels_for(false, Bitmap::Encoding::Srgb);
+            made->channels = channels_for(source.alpha(), Bitmap::Encoding::Srgb);
             made->encoding = Bitmap::Encoding::Srgb;
 
             Sink *sink = ready(*made);

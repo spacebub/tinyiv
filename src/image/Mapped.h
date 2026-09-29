@@ -29,7 +29,16 @@ namespace tiv {
         Mapped &operator=(const Mapped &) = delete;
         Mapped &operator=(Mapped &&other) noexcept;
 
-        static bool open(const std::filesystem::path &file, Mapped *out, std::string *error = nullptr);
+        // How the file will be read, which decides what the system reads ahead.
+        enum class Use : std::uint8_t {
+            // Front to back, as a decoder goes.
+            Through,
+            // Here and there, as an index points.
+            Scattered,
+        };
+
+        static bool open(const std::filesystem::path &file, Mapped *out, std::string *error = nullptr,
+                         Use use = Use::Through);
 
         [[nodiscard]] std::span<const std::uint8_t> data() const { return {_data, _size}; }
         [[nodiscard]] std::size_t size() const { return _size; }

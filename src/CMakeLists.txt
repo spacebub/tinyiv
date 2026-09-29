@@ -63,6 +63,8 @@ add_executable(tinyiv
         image/decode/Support.h
         image/decode/Svg.cpp
         image/decode/Svg.h
+        image/decode/TiffBands.cpp
+        image/decode/TiffBands.h
         image/decode/Vips.cpp
         image/decode/Vips.h
         image/decode/WebP.cpp

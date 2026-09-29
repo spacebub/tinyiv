@@ -43,6 +43,7 @@
       "host": true
     },
     "sdl3",
+    "tiff",
     "zstd"
   ]
 }
