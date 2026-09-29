@@ -11,6 +11,7 @@
 - Large JPEGs with restart markers decode on several threads at once, about five times faster
 - 8 bit TIFFs decode their strips or tiles on several threads at once through libtiff, about seven times faster, and stream their full resolution from the file
 - A streamed JPEG with restart markers reads its full resolution from the file and stores only the smaller levels, a quarter of the room it took
+- Tiles are stored as planes, red and blue less green, each row filtered up or by gradient, and tiles of 256 colours or fewer as a palette: 15 to 55% smaller, and as quick to read
 - Streaming mode keeps the tiles of an image that fits in memory in memory, and writes only images too large for it to disk
 
 ## 1.2.0 - 2026-09-28

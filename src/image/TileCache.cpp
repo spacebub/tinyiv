@@ -44,6 +44,7 @@
 #include "image/Mapped.h"
 #include "image/Pyramid.h"
 #include "image/TileCache.h"
+#include "image/TileCodec.h"
 #include "image/decode/Decode.h"
 #include "image/decode/JpegBands.h"
 #include "image/decode/Support.h"
@@ -55,7 +56,7 @@ namespace tiv {
         constexpr std::array<char, 8> MAGIC{'T', 'I', 'V', 'T', 'I', 'L', 'E', 'S'};
         // The same layout with PQ tiles.
         constexpr std::array<char, 8> MAGIC_PQ{'T', 'I', 'V', 'P', 'Q', 'T', 'I', 'L'};
-        constexpr std::uint32_t VERSION = 4;
+        constexpr std::uint32_t VERSION = 5;
         constexpr std::uint32_t MAX_LEVELS = 32;
         // Far past any image, and far enough from the limit of an int that sums of sides stay within it.
         constexpr std::uint32_t MAX_SIDE = std::uint32_t{1} << 30U;
@@ -66,8 +67,6 @@ namespace tiv {
         constexpr std::size_t WRITE_BUFFER = std::size_t{16} * 1024 * 1024;
         constexpr std::string_view SUFFIX = ".tiles";
         constexpr std::string_view PART = ".part";
-        // zstd's fastest level that keeps most of the ratio.
-        constexpr int ZSTD_LEVEL = 1;
         constexpr int MAX_ENCODERS = 16;
         // Guesses the tiles at a third of their raw size, to know how much room to make before any are written.
         constexpr std::uint64_t EXPECTED_RATIO = 3;
@@ -599,19 +598,10 @@ namespace tiv {
             return room() >= wanted + SPARE_DISK;
         }
 
-        struct ContextFree {
-            void operator()(ZSTD_CCtx *context) const { ZSTD_freeCCtx(context); }
-            void operator()(ZSTD_DCtx *context) const { ZSTD_freeDCtx(context); }
-        };
-
-        // One tile being made ready to write: its rows packed to the file's channels, each
-        // less the row above, then compressed.
+        // One tile being made ready to write.
         struct Encoded {
-            std::unique_ptr<ZSTD_CCtx, ContextFree> context{ZSTD_createCCtx()};
-            std::vector<std::uint8_t> raw;
-            std::vector<std::uint8_t> packed;
-            std::size_t size = 0;
-            bool ok = false;
+            TileCodec::Encoder encoder;
+            std::span<const std::uint8_t> packed;
         };
 
         // Cuts each band into tiles as it arrives and halves it into the next level, so every
@@ -626,14 +616,6 @@ namespace tiv {
                 : _out(&out), _channels(channels), _encoding(encoding), _keepFinest(keepFinest),
                   _slots(static_cast<std::size_t>(
                           std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_ENCODERS))) {
-                const std::size_t raw = static_cast<std::size_t>(TileCache::TILE) * TileCache::TILE
-                                        * static_cast<std::size_t>(channels);
-
-                for (Encoded &slot : _slots) {
-                    slot.raw.resize(raw);
-                    slot.packed.resize(ZSTD_compressBound(raw));
-                }
-
                 for (const TileCache::Level &level : levels) {
                     State state;
                     const std::size_t pitch = static_cast<std::size_t>(level.width) * Bitmap::CHANNELS;
@@ -731,32 +713,8 @@ namespace tiv {
                 const int width = std::min(TileCache::TILE, level.width - (column * TileCache::TILE));
                 const std::size_t pitch = static_cast<std::size_t>(level.width) * Bitmap::CHANNELS;
                 const std::size_t from = static_cast<std::size_t>(column) * TileCache::TILE * Bitmap::CHANNELS;
-                const std::size_t outPitch = static_cast<std::size_t>(width) * static_cast<std::size_t>(_channels);
-                std::uint8_t *raw = slot.raw.data();
 
-                for (int y = 0; y < count; ++y) {
-                    const std::uint8_t *source = rows + (pitch * static_cast<std::size_t>(y)) + from;
-                    std::uint8_t *target = raw + (outPitch * static_cast<std::size_t>(y));
-
-                    if (_channels == Bitmap::CHANNELS) {
-                        std::memcpy(target, source, outPitch);
-                    } else {
-                        Channels::pack(source, target, width);
-                    }
-                }
-
-                // Bottom up, so each row is still whole when the one below takes it away.
-                for (int y = count - 1; y > 0; --y) {
-                    std::uint8_t *row = raw + (outPitch * static_cast<std::size_t>(y));
-
-                    Channels::difference(row, row - outPitch, row, outPitch);
-                }
-
-                const std::size_t made = ZSTD_compressCCtx(slot.context.get(), slot.packed.data(), slot.packed.size(),
-                                                           raw, outPitch * static_cast<std::size_t>(count), ZSTD_LEVEL);
-
-                slot.ok = slot.context != nullptr && ZSTD_isError(made) == 0;
-                slot.size = slot.ok ? made : 0;
+                slot.packed = slot.encoder.encode(rows + from, pitch, width, count, _channels, _encoding);
             }
 
             void write_band(State &state, const std::uint8_t *rows, const int count) {
@@ -781,12 +739,12 @@ namespace tiv {
                     for (int column = first; column < last; ++column) {
                         const Encoded &slot = _slots.at(static_cast<std::size_t>(column - first));
 
-                        _failed = _failed || !slot.ok;
+                        _failed = _failed || slot.packed.empty();
                         state.spans.at(
                                 (static_cast<std::size_t>(state.tileRow) * static_cast<std::size_t>(level.columns))
                                 + static_cast<std::size_t>(column)) = {
-                                .offset = _out->put(std::span(slot.packed).first(slot.size)),
-                                .bytes = slot.size,
+                                .offset = _out->put(slot.packed),
+                                .bytes = slot.packed.size(),
                         };
                     }
                 }
@@ -867,7 +825,8 @@ namespace tiv {
                         static_cast<std::uint64_t>(std::min(TileCache::TILE, level.height - (row * TileCache::TILE)));
 
                 if (tile.offset + tile.bytes > header.index
-                    || tile.bytes > ZSTD_compressBound(width * height * header.channels)) {
+                    || tile.bytes > TileCodec::bound(static_cast<int>(width), static_cast<int>(height),
+                                                     static_cast<int>(header.channels))) {
                     return false;
                 }
 
@@ -879,9 +838,8 @@ namespace tiv {
 
         // What a reader thread keeps between tiles.
         struct Decoder {
-            std::unique_ptr<ZSTD_DCtx, ContextFree> context{ZSTD_createDCtx()};
+            TileCodec::Decoder codec;
             std::vector<std::uint8_t> packed;
-            std::vector<std::uint8_t> raw;
         };
 
         // A tile's packed bytes, read into the scratch from disk, or found in memory when there is no
@@ -905,43 +863,16 @@ namespace tiv {
                          const Bitmap::Encoding encoding, const TileCache::Key &key, Decoder &decoder) {
             const int width = std::min(TileCache::TILE, level.width - (key.column * TileCache::TILE));
             const int height = std::min(TileCache::TILE, level.height - (key.row * TileCache::TILE));
-            const std::size_t pixels = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-            const std::size_t pitch = static_cast<std::size_t>(width) * static_cast<std::size_t>(channels);
-            const std::size_t raw = pitch * static_cast<std::size_t>(height);
             Bitmap tile = Bitmap::allocate(width, height, encoding);
 
-            // Four channels come out the size of the tile, so they go straight into it.
-            if (channels != Bitmap::CHANNELS) {
-                decoder.raw.resize(raw);
-            }
-
-            std::uint8_t *target = channels == Bitmap::CHANNELS ? tile.data() : decoder.raw.data();
-            bool read = decoder.context != nullptr && !packed.empty();
-
-            if (read) {
-                read = ZSTD_decompressDCtx(decoder.context.get(), target, raw, packed.data(), packed.size()) == raw;
-            }
-
-            if (read) {
-                // Top down, so the row above is whole again by the time it is added back.
-                for (int y = 1; y < height; ++y) {
-                    std::uint8_t *row = target + (pitch * static_cast<std::size_t>(y));
-
-                    Channels::accumulate(row, row - pitch, pitch);
-                }
-
-                if (channels != Bitmap::CHANNELS) {
-                    Channels::expand(decoder.raw.data(), tile.data(), static_cast<int>(pixels));
-                }
-            }
-
             // A tile that cannot be read shows as a hole, else the view would ask for it forever.
-            if (!read) {
+            if (packed.empty() || !decoder.codec.decode(packed, channels, encoding, &tile)) {
                 std::memset(tile.data(), 0, tile.bytes());
             }
 
             return tile;
         }
+
         // A JPEG whose restart markers let any tile row decode on its own, read as it is needed rather
         // than mapped, since a mapping of a file cut short under it faults.
         class JpegSource final : public TileCache::Source {

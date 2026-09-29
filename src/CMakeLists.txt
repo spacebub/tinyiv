@@ -33,6 +33,8 @@ add_executable(tinyiv
         image/Simd.h
         image/TileCache.cpp
         image/TileCache.h
+        image/TileCodec.cpp
+        image/TileCodec.h
         image/Tone.cpp
         image/Tone.h
 
