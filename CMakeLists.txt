@@ -10,7 +10,7 @@ if (CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
 endif ()
 
 project(tinyiv
-        VERSION 1.2.0
+        VERSION 1.3.0
         DESCRIPTION "A tiny, fast image viewer"
         LANGUAGES C CXX)
 
@@ -90,7 +90,7 @@ endif ()
 find_package(SDL3 REQUIRED CONFIG COMPONENTS SDL3-shared)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
-pkg_check_modules(CODECS REQUIRED IMPORTED_TARGET libwebp libjxl libjxl_threads libjpeg libpng libtiff-4 libzstd zlib)
+pkg_check_modules(CODECS REQUIRED IMPORTED_TARGET libwebp libjxl libjxl_threads libjpeg libpng libtiff-4 libheif libzstd zlib)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 include(DownloadCache)

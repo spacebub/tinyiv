@@ -21,14 +21,6 @@
 #include <utility>
 #include <vector>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#else
-#include <fcntl.h>
-#include <unistd.h>
-#endif
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -38,6 +30,7 @@
 
 #include "image/Bitmap.h"
 #include "image/Channels.h"
+#include "image/FileReader.h"
 #include "image/Simd.h"
 #include "image/decode/Decode.h"
 #include "image/decode/Png.h"
@@ -103,78 +96,12 @@ namespace tiv::Decode {
             return std::memcmp(type.data(), name, TYPE) == 0;
         }
 
-        // A file read at offsets, shared by threads.
-        class File {
-
-        public:
-            explicit File(const std::filesystem::path &file)
-#ifdef _WIN32
-                : _handle(CreateFileW(file.c_str(), GENERIC_READ,
-                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                                      FILE_ATTRIBUTE_NORMAL, nullptr))
-#else
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
-                : _fd(::open(file.c_str(), O_RDONLY | O_CLOEXEC))
-#endif
-            {
-            }
-
-            ~File() {
-#ifdef _WIN32
-                if (_handle != INVALID_HANDLE_VALUE) {
-                    CloseHandle(_handle);
-                }
-#else
-                if (_fd >= 0) {
-                    ::close(_fd);
-                }
-#endif
-            }
-
-            File(const File &) = delete;
-            File(File &&) = delete;
-            File &operator=(const File &) = delete;
-            File &operator=(File &&) = delete;
-
-            [[nodiscard]] bool valid() const {
-#ifdef _WIN32
-                return _handle != INVALID_HANDLE_VALUE;
-#else
-                return _fd >= 0;
-#endif
-            }
-
-            // Up to bytes at the offset, fewer at the end of the file.
-            std::size_t read(const std::uint64_t offset, std::uint8_t *out, const std::size_t bytes) const {
-#ifdef _WIN32
-                OVERLAPPED where{};
-                DWORD got = 0;
-
-                where.Offset = static_cast<DWORD>(offset & 0xFFFFFFFFU);
-                where.OffsetHigh = static_cast<DWORD>(offset >> 32U);
-
-                return ReadFile(_handle, out, static_cast<DWORD>(bytes), &got, &where) != 0 ? got : 0;
-#else
-                const ssize_t got = ::pread(_fd, out, bytes, static_cast<off_t>(offset));
-
-                return got > 0 ? static_cast<std::size_t>(got) : 0;
-#endif
-            }
-
-        private:
-#ifdef _WIN32
-            HANDLE _handle = INVALID_HANDLE_VALUE;
-#else
-            int _fd = -1;
-#endif
-        };
-
         // The compressed stream across its IDAT chunks, from a place in one, a large read at a time.
         // Each piece it hands out lies within one chunk, so a place in it is a place in the file.
         class Idat {
 
         public:
-            Idat(const File &file, const std::uint64_t at, const std::uint32_t left)
+            Idat(const FileReader &file, const std::uint64_t at, const std::uint32_t left)
                 : _file(&file), _at(at), _left(left), _buffer(READ_BYTES) {}
 
             // The next bytes of the stream, empty at its end. It ends where they end in at() and left().
@@ -227,7 +154,7 @@ namespace tiv::Decode {
                 return std::min<std::size_t>(bytes, static_cast<std::size_t>(_start + _held - offset));
             }
 
-            const File *_file;
+            const FileReader *_file;
             std::uint64_t _at;
             std::uint32_t _left;
             std::vector<std::uint8_t> _buffer;
@@ -580,7 +507,7 @@ namespace tiv::Decode {
     }
 
     std::unique_ptr<PngBands> PngBands::open(const std::filesystem::path &file, const Tone::Display &display) {
-        const File reader(file);
+        const FileReader reader(file);
         std::array<std::uint8_t, SIGNATURE.size()> signature{};
 
         if (!reader.valid() || reader.read(0, signature.data(), signature.size()) != signature.size()
@@ -763,7 +690,7 @@ namespace tiv::Decode {
     }
 
     bool PngBands::scan(const int rows, const Take &take, const Keep &keep, const Abort *abort) {
-        const File reader(_file);
+        const FileReader reader(_file);
         Idat idat(reader, _data, _length);
         Scan scan(*this, keep);
         Lines lines(*this, 0, std::vector<std::uint8_t>(_rowBytes, 0));
@@ -843,7 +770,7 @@ namespace tiv::Decode {
     bool PngBands::decode_from(const std::size_t checkpoint, const int first, const int last, Bitmap *out,
                                const int outTop, const Recall &recall) const {
         const Checkpoint &point = _checkpoints.at(checkpoint);
-        const File reader(_file);
+        const FileReader reader(_file);
         Idat idat(reader, point.file, point.left);
         Inflater inflater;
         std::vector<std::uint8_t> state;

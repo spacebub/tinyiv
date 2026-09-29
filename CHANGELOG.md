@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 - 2026-09-29
 
 ### Added
 
@@ -11,12 +11,12 @@
 
 ### Changed
 
-- Large JPEGs with restart markers decode on all cores, about five times faster
-- 8 bit TIFFs decode on all cores through libtiff, about seven times faster
-- JPEGs with restart markers and most TIFFs are streamed straight from the file at full size, so only the smaller levels are cached. Their caches take about a quarter of the space they used to
+- Large JPEGs with restart markers decode on all cores
+- 8 bit TIFFs decode on all cores through libtiff
+- JPEGs with restart markers, most TIFFs and HEIF or AVIF grids are streamed straight from the file at full size, so only the smaller levels are cached. Their caches take about a quarter of the space they used to
 - In streaming mode, images that fit in memory stay in memory instead of being written to disk
 - Tile caches are 15 to 55% smaller and just as fast to read
-- Huge images open about 15% faster the first time
+- Huge images open faster the first time, as tiles are compressed while the next rows decode
 - While tiles are being made, the folder they go to is shown
 - Tile cache folders are tagged with CACHEDIR.TAG, so backup tools skip them
 - Writing tile caches on Linux 6.14 or newer no longer pushes other files out of the page cache

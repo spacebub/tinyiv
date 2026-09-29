@@ -19,6 +19,8 @@ add_executable(tinyiv
         image/Channels.h
         image/Exif.cpp
         image/Exif.h
+        image/FileReader.cpp
+        image/FileReader.h
         image/Mapped.cpp
         image/Mapped.h
         image/Orient.cpp
@@ -47,6 +49,8 @@ add_executable(tinyiv
         image/decode/GainMap.h
         image/decode/Heif.cpp
         image/decode/Heif.h
+        image/decode/HeifBands.cpp
+        image/decode/HeifBands.h
         image/decode/Icon.cpp
         image/decode/Icon.h
         image/decode/Jpeg.cpp

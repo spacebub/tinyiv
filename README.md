@@ -7,8 +7,8 @@ folder, one image, with no editing and no extra features.
 
 Images too large for memory are streamed. The first time one opens, tinyiv builds a pyramid of
 tiles and caches it on disk, so it shows at full resolution whatever its size, and opens
-instantly the next time. JPEGs with restart markers and most TIFFs are read straight from the
-file at full size, so only their smaller levels are cached. With `cache_mode = small`, huge PNGs
+instantly the next time. JPEGs with restart markers, most TIFFs and HEIF or AVIF grids are read
+straight from the file at full size, so only their smaller levels are cached. With `cache_mode = small`, huge PNGs
 work the same way.
 
 Every format libvips can read is supported. JPEG, PNG, WebP, JPEG XL, TIFF, BMP, ICO and ICNS

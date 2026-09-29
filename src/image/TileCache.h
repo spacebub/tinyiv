@@ -35,7 +35,8 @@ namespace tiv {
     // An image as a pyramid of compressed tiles, made by decoding top to bottom. One too large for
     // memory goes in a file on disk and is kept so reopening is instant, one that fits is held in
     // memory and never written. A file that can be decoded from partway, a JPEG with restart markers,
-    // a TIFF by its strips or tiles, or a PNG with checkpoints when asked for small, gives its full
+    // a TIFF by its strips or tiles, a HEIF or AVIF grid, or a PNG with checkpoints when asked for
+    // small, gives its full
     // resolution itself, and only the smaller levels are stored, as GDAL's external overviews do:
     // https://gdal.org/en/stable/programs/gdaladdo.html
     // Tiles are unpacked on background threads as the view asks for them and cached, so memory

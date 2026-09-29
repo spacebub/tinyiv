@@ -50,6 +50,7 @@
 #include "image/TileCache.h"
 #include "image/TileCodec.h"
 #include "image/decode/Decode.h"
+#include "image/decode/HeifBands.h"
 #include "image/decode/JpegBands.h"
 #include "image/decode/PngBands.h"
 #include "image/decode/Support.h"
@@ -1035,6 +1036,26 @@ namespace tiv {
             std::unique_ptr<Decode::TiffBands> _bands;
         };
 
+        class HeifSource final : public TileCache::Source {
+
+        public:
+            explicit HeifSource(std::unique_ptr<Decode::HeifBands> bands) : _bands(std::move(bands)) {}
+
+            [[nodiscard]] int width() const override { return _bands->width(); }
+            [[nodiscard]] int height() const override { return _bands->height(); }
+            [[nodiscard]] bool alpha() const override { return false; }
+
+            bool read(const int top, const int count, Bitmap *out) const override {
+                return _bands->decode(top, count, out, read_threads(), nullptr);
+            }
+
+            // Where the tiles lie is in the file already.
+            [[nodiscard]] std::vector<std::uint8_t> index() const override { return {}; }
+
+        private:
+            std::unique_ptr<Decode::HeifBands> _bands;
+        };
+
         // A PNG's checkpoints, each with its window and row kept compressed with the tiles.
         class PngSource final : public TileCache::Source {
 
@@ -1187,6 +1208,12 @@ namespace tiv {
                 std::unique_ptr<Decode::TiffBands> strips = Decode::TiffBands::open(file);
 
                 return strips != nullptr ? std::make_unique<TiffSource>(std::move(strips)) : nullptr;
+            }
+
+            if (kind == Decode::Format::Heif) {
+                std::unique_ptr<Decode::HeifBands> tiles = Decode::HeifBands::open(file);
+
+                return tiles != nullptr ? std::make_unique<HeifSource>(std::move(tiles)) : nullptr;
             }
 
             if (kind == Decode::Format::Png && (small || kept != nullptr)) {

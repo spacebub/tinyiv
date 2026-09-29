@@ -1,7 +1,7 @@
 # Compiling tinyiv
 
 Needs a C++23 compiler, CMake 3.25, SDL3, libvips with its C++ API, libjpeg, libpng, libwebp,
-libjxl, libtiff, zlib and zstd. The benchmarks in `bench/` build on Linux only, see [bench/README.md](bench/README.md).
+libjxl, libtiff, libheif, zlib and zstd. The benchmarks in `bench/` build on Linux only, see [bench/README.md](bench/README.md).
 
 ## Linux
 
