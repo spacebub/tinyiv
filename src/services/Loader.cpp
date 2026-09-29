@@ -775,6 +775,12 @@ namespace tiv {
 
         if (where == TileCache::Store::Disk) {
             entry.tileCache = TileCache::open(job.file, folder, entry.display);
+
+            // Made in the other cache mode, it is made again and takes the place of the old one, so
+            // the room it takes follows the setting.
+            if (entry.tileCache != nullptr && !entry.tileCache->suits(small)) {
+                entry.tileCache = nullptr;
+            }
         }
 
         bool build = false;

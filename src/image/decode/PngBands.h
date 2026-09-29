@@ -16,10 +16,12 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
 #include "image/Bitmap.h"
+#include "image/Tone.h"
 #include "image/decode/Decode.h"
 
 namespace tiv::Decode {
@@ -51,12 +53,16 @@ namespace tiv::Decode {
         using Take = std::function<bool(int y, int count, std::span<const std::uint8_t> pixels)>;
 
         // Null unless the file is a PNG this reads: not interlaced, 8 or 16 bits, grey, RGB or 8 bit
-        // palette, with or without alpha, and SDR.
-        [[nodiscard]] static std::unique_ptr<PngBands> open(const std::filesystem::path &file);
+        // palette, with or without alpha. HDR rows are tone mapped for the display as the streamed
+        // decode maps them, and an HDR palette or colour key is left to that decode.
+        [[nodiscard]] static std::unique_ptr<PngBands> open(const std::filesystem::path &file,
+                                                            const Tone::Display &display = {});
 
         [[nodiscard]] int width() const { return _width; }
         [[nodiscard]] int height() const { return _height; }
         [[nodiscard]] bool alpha() const;
+        // PQ when an HDR image is shown on an HDR display.
+        [[nodiscard]] Bitmap::Encoding encoding() const { return _encoding; }
 
         // Every row top to bottom, in bands of the rows given, a checkpoint at the first block to
         // start past each stretch of about CHECKPOINT_BYTES inflated.
@@ -88,8 +94,11 @@ namespace tiv::Decode {
         // The layout is one this reads, the chunks before the image data given for the tone.
         [[nodiscard]] bool supported(std::span<const std::uint8_t> start, bool plain) const;
 
-        // An unfiltered row to RGBA, as tinyiv's PNG decoder has libpng make it.
-        void expand(const std::uint8_t *row, std::uint8_t *out) const;
+        // An unfiltered row to RGBA, as tinyiv's PNG decoder has libpng make it, or through the tone
+        // mapper for HDR, the samples widened in the scratch.
+        void expand(const std::uint8_t *row, std::uint8_t *out, std::vector<std::uint16_t> &wide) const;
+        void expand_mapped(const Tone::Mapper &mapper, const std::uint8_t *row, std::uint8_t *out,
+                           std::vector<std::uint16_t> &wide) const;
         void expand_grey(const std::uint8_t *row, std::uint8_t *out) const;
         void expand_colour(const std::uint8_t *row, std::uint8_t *out) const;
 
@@ -112,6 +121,9 @@ namespace tiv::Decode {
         std::array<std::uint32_t, 256> _palette{};
         std::array<std::uint16_t, 3> _key{};
         bool _keyed = false;
+        // For an HDR image, as Vips::prepare() makes it for the streamed decode.
+        std::optional<Tone::Mapper> _mapper;
+        Bitmap::Encoding _encoding = Bitmap::Encoding::Srgb;
         std::vector<Checkpoint> _checkpoints;
     };
 }

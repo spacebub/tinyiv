@@ -414,6 +414,7 @@ namespace tiv::Decode {
         std::vector<std::uint8_t> scanline;
         std::vector<std::uint8_t> above;
         std::vector<std::uint8_t> row;
+        std::vector<std::uint16_t> wide;
         std::size_t filled = 0;
         // The next row to finish.
         int y;
@@ -438,7 +439,7 @@ namespace tiv::Decode {
                          static_cast<std::size_t>(png->_filterStep));
 
                 if (std::uint8_t *out = target(y); out != nullptr) {
-                    png->expand(row.data(), out);
+                    png->expand(row.data(), out, wide);
                 }
 
                 above.swap(row);
@@ -573,11 +574,12 @@ namespace tiv::Decode {
 
     bool PngBands::supported(const std::span<const std::uint8_t> start, const bool plain) const {
         const bool depth = _depth == 8 || (_depth == 16 && colour_of(_colour) != Colour::Palette);
+        const bool mappable = !Png::tone(start).hdr() || (colour_of(_colour) != Colour::Palette && !_keyed);
 
-        return plain && samples_of(_colour) > 0 && depth && _width > 0 && _height > 0 && !Png::tone(start).hdr();
+        return plain && samples_of(_colour) > 0 && depth && _width > 0 && _height > 0 && mappable;
     }
 
-    std::unique_ptr<PngBands> PngBands::open(const std::filesystem::path &file) {
+    std::unique_ptr<PngBands> PngBands::open(const std::filesystem::path &file, const Tone::Display &display) {
         const File reader(file);
         std::array<std::uint8_t, SIGNATURE.size()> signature{};
 
@@ -618,10 +620,11 @@ namespace tiv::Decode {
                 return nullptr;
             }
 
+            // With its CRC, as Png::tone() walks the chunks as they lie in the file.
             start.insert(start.end(), chunk.begin(), chunk.end());
-            start.resize(body + length);
+            start.resize(body + length + CRC);
 
-            if (reader.read(at + CHUNK_HEAD, start.data() + body, length) != length) {
+            if (reader.read(at + CHUNK_HEAD, start.data() + body, length + CRC) != length + CRC) {
                 return nullptr;
             }
 
@@ -631,6 +634,11 @@ namespace tiv::Decode {
 
         if (!held->supported(start, plain)) {
             return nullptr;
+        }
+
+        if (const Tone::Source tone = Png::tone(start); tone.hdr()) {
+            held->_mapper.emplace(tone, display);
+            held->_encoding = display.hdr() ? Bitmap::Encoding::Pq : Bitmap::Encoding::Srgb;
         }
 
         held->_filterStep = samples_of(held->_colour) * held->_depth / 8;
@@ -697,7 +705,32 @@ namespace tiv::Decode {
         }
     }
 
-    void PngBands::expand(const std::uint8_t *row, std::uint8_t *out) const {
+    void PngBands::expand_mapped(const Tone::Mapper &mapper, const std::uint8_t *row, std::uint8_t *out,
+                                 std::vector<std::uint16_t> &wide) const {
+        const int channels = samples_of(_colour);
+        const std::size_t samples = static_cast<std::size_t>(_width) * static_cast<std::size_t>(channels);
+        constexpr std::uint16_t WIDEN = 257;
+
+        wide.resize(samples);
+
+        // The samples as libvips gives them, 8 bit ones widened by 257 as Vips::prepare() does.
+        std::uint16_t *to = wide.data();
+
+        for (std::size_t i = 0; i < samples; ++i) {
+            to[i] = _depth == 16 ? word(row + (i * 2)) : static_cast<std::uint16_t>(row[i] * WIDEN);
+        }
+
+        mapper.map(std::span<const std::uint16_t>(wide), channels,
+                   std::span(out, static_cast<std::size_t>(_width) * Bitmap::CHANNELS));
+    }
+
+    void PngBands::expand(const std::uint8_t *row, std::uint8_t *out, std::vector<std::uint16_t> &wide) const {
+        if (_mapper) {
+            expand_mapped(*_mapper, row, out, wide);
+
+            return;
+        }
+
         // The common layouts as they are, without a pass pixel by pixel.
         if (_depth == 8 && !_keyed && colour_of(_colour) == Colour::Rgb) {
             Channels::expand(row, out, _width);
@@ -735,7 +768,7 @@ namespace tiv::Decode {
         Scan scan(*this, keep);
         Lines lines(*this, 0, std::vector<std::uint8_t>(_rowBytes, 0));
         std::vector<std::uint8_t> out(INFLATE_BYTES);
-        Bitmap band = Bitmap::allocate(_width, std::min(rows, _height));
+        Bitmap band = Bitmap::allocate(_width, std::min(rows, _height), _encoding);
         int bandTop = 0;
 
         _checkpoints.clear();

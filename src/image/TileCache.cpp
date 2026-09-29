@@ -1044,6 +1044,7 @@ namespace tiv {
             [[nodiscard]] int width() const override { return _bands->width(); }
             [[nodiscard]] int height() const override { return _bands->height(); }
             [[nodiscard]] bool alpha() const override { return _bands->alpha(); }
+            [[nodiscard]] Bitmap::Encoding encoding() const override { return _bands->encoding(); }
 
             bool pass(const Take &take, const Keep &keep, const Decode::Abort *abort) override {
                 const std::unique_ptr<ZSTD_CCtx, TileCodec::ContextFree> context(ZSTD_createCCtx());
@@ -1168,7 +1169,8 @@ namespace tiv {
         // The file as the source of its finest level, when its format allows. The index kept from
         // before spares the pass over the file. A PNG only gives its own when asked for small.
         std::unique_ptr<TileCache::Source> open_source(const std::filesystem::path &file,
-                                                       const std::vector<std::uint8_t> *kept, const bool small) {
+                                                       const std::vector<std::uint8_t> *kept, const bool small,
+                                                       const Tone::Display &display) {
             constexpr std::size_t HEAD = 64;
             const Reader head(file);
             std::array<std::uint8_t, HEAD> start{};
@@ -1188,7 +1190,7 @@ namespace tiv {
             }
 
             if (kind == Decode::Format::Png && (small || kept != nullptr)) {
-                std::unique_ptr<Decode::PngBands> rows = Decode::PngBands::open(file);
+                std::unique_ptr<Decode::PngBands> rows = Decode::PngBands::open(file, display);
 
                 if (rows == nullptr) {
                     return nullptr;
@@ -1269,8 +1271,8 @@ namespace tiv {
             const int height = source.height();
 
             made->levels = level_sizes(source.width(), height);
-            made->channels = channels_for(source.alpha(), Bitmap::Encoding::Srgb);
-            made->encoding = Bitmap::Encoding::Srgb;
+            made->channels = channels_for(source.alpha(), source.encoding());
+            made->encoding = source.encoding();
 
             Sink *sink = ready(*made);
 
@@ -1550,7 +1552,7 @@ namespace tiv {
 
         std::shared_ptr<TileCache> tileCache(new TileCache());
 
-        if (!tileCache->load(path, file)) {
+        if (!tileCache->load(path, file, display)) {
             std::filesystem::remove(path, failure);
 
             return nullptr;
@@ -1566,7 +1568,12 @@ namespace tiv {
                                                 std::atomic<float> *progress, std::string *error,
                                                 Decode::Abort *abort) {
         // An HDR JPEG is lifted by its gain map as a whole, which the source's bands do not do.
-        std::unique_ptr<Source> source = display.hdr() ? nullptr : open_source(file, nullptr, small);
+        // Only a PNG tone maps its own rows. A JPEG's gain map lifts the whole image, which bands do not.
+        std::unique_ptr<Source> source = open_source(file, nullptr, small, display);
+
+        if (source != nullptr && display.hdr() && source->encoding() != Bitmap::Encoding::Pq) {
+            source = nullptr;
+        }
 
         if (store == Store::Disk) {
             const std::filesystem::path dir = location(file, folder);
@@ -1618,6 +1625,8 @@ namespace tiv {
 
         tileCache->_blocks = std::move(blocks.held);
         tileCache->_source = std::move(source);
+        tileCache->_file = file;
+        tileCache->_display = display;
         tileCache->attach_source();
         tileCache->pin();
         tileCache->start();
@@ -1625,7 +1634,8 @@ namespace tiv {
         return tileCache;
     }
 
-    bool TileCache::load(const std::filesystem::path &path, const std::filesystem::path &file) {
+    bool TileCache::load(const std::filesystem::path &path, const std::filesystem::path &file,
+                         const Tone::Display &display) {
         const Reader reader(path);
         Header header;
         std::error_code failure;
@@ -1702,7 +1712,7 @@ namespace tiv {
                 return false;
             }
 
-            _source = open_source(file, &kept, false);
+            _source = open_source(file, &kept, false, display);
 
             if (_source == nullptr || _source->width() != _levels.front().width
                 || _source->height() != _levels.front().height) {
@@ -1711,13 +1721,26 @@ namespace tiv {
         }
 
         _path = path;
+        _file = file;
+        _display = display;
         attach_source();
         pin();
 
         return true;
     }
 
+    bool TileCache::suits(const bool small) const {
+        if (_checkpoints || !small) {
+            return _checkpoints == small;
+        }
+
+        // Every tile is kept, which small only allows for a file it cannot give checkpoints of.
+        return _source != nullptr || Decode::PngBands::open(_file, _display) == nullptr;
+    }
+
     void TileCache::attach_source() {
+        _checkpoints = dynamic_cast<const PngSource *>(_source.get()) != nullptr;
+
         if (_source == nullptr) {
             return;
         }
@@ -1775,7 +1798,7 @@ namespace tiv {
         const int rows = std::min(TILE, level.height - top);
 
         if (band.width() != level.width || band.height() < rows) {
-            band = Bitmap::allocate(level.width, std::min(TILE, level.height));
+            band = Bitmap::allocate(level.width, std::min(TILE, level.height), _encoding);
         }
 
         const bool read = _source->read(top, rows, &band);
@@ -1787,7 +1810,7 @@ namespace tiv {
             for (int column = next++; column < level.columns; column = next++) {
                 const int width = std::min(TILE, level.width - (column * TILE));
                 const std::size_t from = static_cast<std::size_t>(column) * TILE * Bitmap::CHANNELS;
-                Bitmap tile = Bitmap::allocate(width, rows);
+                Bitmap tile = Bitmap::allocate(width, rows, _encoding);
 
                 for (int y = 0; y < rows; ++y) {
                     const std::span<std::uint8_t> target = tile.row(y);

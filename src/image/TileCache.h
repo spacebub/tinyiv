@@ -91,9 +91,10 @@ namespace tiv {
             [[nodiscard]] virtual int width() const = 0;
             [[nodiscard]] virtual int height() const = 0;
             [[nodiscard]] virtual bool alpha() const = 0;
+            [[nodiscard]] virtual Bitmap::Encoding encoding() const { return Bitmap::Encoding::Srgb; }
 
-            // Rows from top, count of them or to the bottom, in sRGB as wide as the image. The top is
-            // a multiple of TILE.
+            // Rows from top, count of them or to the bottom, in its encoding as wide as the image. The
+            // top is a multiple of TILE.
             virtual bool read(int top, int count, Bitmap *out) const = 0;
 
             // Rows of the image from y, as RGBA.
@@ -169,6 +170,10 @@ namespace tiv {
         // The compressed tiles held in memory, none for a pyramid on disk.
         [[nodiscard]] std::size_t stored_bytes() const { return _storedBytes; }
 
+        // Made the way the cache mode asks: a PNG keeps checkpoints for small where it can, and every
+        // tile for fast. False sends it to be made again.
+        [[nodiscard]] bool suits(bool small) const;
+
     private:
         struct Slot {
             std::shared_ptr<const Bitmap> bitmap;
@@ -184,8 +189,8 @@ namespace tiv {
 
         TileCache() = default;
 
-        // The pyramid at the path, made for the file.
-        bool load(const std::filesystem::path &path, const std::filesystem::path &file);
+        // The pyramid at the path, made for the file and shown on the display.
+        bool load(const std::filesystem::path &path, const std::filesystem::path &file, const Tone::Display &display);
         // A row of the finest level's tiles from the source, all kept. The band is scratch for the
         // rows. Not under the lock.
         void read_source(int row, bool pinned, Bitmap &band);
@@ -216,6 +221,10 @@ namespace tiv {
         std::vector<std::vector<Span>> _spans;
         // Gives the finest level when set, which is then not stored.
         std::unique_ptr<Source> _source;
+        // The image and display it was made for, and whether its source is a PNG's checkpoints.
+        std::filesystem::path _file;
+        Tone::Display _display;
+        bool _checkpoints = false;
 
         mutable std::mutex _guard;
         mutable std::condition_variable _wake;
