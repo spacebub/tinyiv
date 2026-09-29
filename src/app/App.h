@@ -101,7 +101,7 @@ namespace tiv {
         [[nodiscard]] int wait_ms() const;
         [[nodiscard]] Rect play_bar() const;
 
-        // Tagged leads with the streaming mode when it is on.
+        // Tagged leads with STREAMING while the mode is on or the image streams anyway.
         [[nodiscard]] std::string bar_left(bool tagged = true) const;
         [[nodiscard]] std::string failure_text(const std::string &error) const;
         // The streaming mode shows for a moment after it switches, in the bar or as a badge.

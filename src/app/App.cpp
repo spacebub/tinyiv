@@ -1263,7 +1263,7 @@ namespace tiv {
     }
 
     std::string App::bar_left(const bool tagged) const {
-        const std::string tag = std::string(tagged && _loader->streaming_all() ? "STREAMING  " : "")
+        const std::string tag = std::string(tagged && (_streamed || _loader->streaming_all()) ? "STREAMING  " : "")
                                 + (tagged && _linear ? "HDR  " : "");
 
         if (_folder.count() == 0) {
@@ -1307,7 +1307,6 @@ namespace tiv {
                                _playback.frames(), human_size(_bytes));
         }
 
-        return std::format("{}x{}, {}, {}{}", size.width, size.height, format, human_size(_bytes),
-                           _streamed && !_loader->streaming_all() ? ", streaming" : "");
+        return std::format("{}x{}, {}, {}", size.width, size.height, format, human_size(_bytes));
     }
 }
