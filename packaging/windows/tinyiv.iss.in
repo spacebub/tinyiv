@@ -41,6 +41,11 @@ WizardStyle=modern
 Name: associate; Description: "Offer {#AppName} for images in Open with and Default apps"
 Name: desktopicon; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+; What an older version shipped and this one no longer does. The config beside the exe stays.
+[InstallDelete]
+Type: files; Name: "{app}\*.dll"
+Type: filesandordirs; Name: "{app}\etc"
+
 [Files]
 ; fontconfig reads its configuration from etc\fonts beside its DLL.
 Source: "{#StageDir}\bin\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

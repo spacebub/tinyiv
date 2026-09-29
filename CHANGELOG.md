@@ -33,7 +33,8 @@
 
 ### Fixed
 
-- HDR images on Windows were drawn in SDR, as SDL's Direct3D 12 backend never enabled HDR output. tinyiv now draws through Vulkan, falling back to what SDL picks
+- HDR images on Windows were drawn in SDR, as SDL's Direct3D 12 backend never enabled HDR output. tinyiv now draws through Vulkan
+- Updating on Windows left behind the DLLs an older version shipped that are no longer needed, those are now cleaned
 - Writing a tile cache could fill the drive. It now stops while 1 GB is still free
 
 ## 1.2.0 - 2026-09-28
