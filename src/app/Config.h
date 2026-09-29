@@ -30,6 +30,9 @@ namespace tiv {
         // Streaming mode is on from the start, before S is ever pressed.
         bool streaming = false;
 
+        // Streamed images that fit in memory keep their tiles on disk too, as the huge ones do.
+        bool persist = false;
+
         // How a folder's images are ordered from the start, before O is ever pressed.
         Folder::Order order = Folder::Order::AToZ;
 

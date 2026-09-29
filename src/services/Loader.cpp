@@ -186,11 +186,12 @@ namespace tiv {
         _screenHeight = std::max(height, 1);
     }
 
-    void Loader::set_tiles(std::filesystem::path folder, const bool small) {
+    void Loader::set_tiles(std::filesystem::path folder, const bool small, const bool persist) {
         const std::scoped_lock hold(_guard);
 
         _tileFolder = std::move(folder);
         _smallTiles = small;
+        _persistTiles = persist;
     }
 
     Tone::Display Loader::display_for(const Decode::Info &info) const {
@@ -746,12 +747,13 @@ namespace tiv {
     // Opens the pyramid made for the file before, or makes one when it is the current image.
     // The others wait for a pyramid until they are shown, since it takes a pass over the whole file.
     // An image that fits in memory, streamed only because streaming mode is on, keeps its pyramid in
-    // memory and never touches the disk.
+    // memory and never touches the disk, unless every stream persists.
     void Loader::decode_stream(Job &job, Entry entry) {
         entry.streamed = true;
 
         bool waiting = false;
         bool small = false;
+        bool persist = false;
         std::filesystem::path folder;
 
         {
@@ -761,6 +763,7 @@ namespace tiv {
             waiting = entry.info.hdr && !_displayKnown;
             folder = _tileFolder;
             small = _smallTiles;
+            persist = _persistTiles;
         }
 
         // Kept without a tile cache, and wants_job() picks it up again once the display is said.
@@ -771,7 +774,7 @@ namespace tiv {
         }
 
         const TileCache::Store where =
-                entry.info.pixels() > max_pixels() ? TileCache::Store::Disk : TileCache::Store::Memory;
+                persist || entry.info.pixels() > max_pixels() ? TileCache::Store::Disk : TileCache::Store::Memory;
 
         if (where == TileCache::Store::Disk) {
             entry.tileCache = TileCache::open(job.file, folder, entry.display);

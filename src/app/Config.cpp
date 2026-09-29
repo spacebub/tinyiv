@@ -136,6 +136,17 @@ namespace tiv {
 
                                     return value == "on" || value == "off";
                                 }},
+                Setting{.key = "persist_streams",
+                        .text = "# Whether every streamed image keeps its tiles on disk, on or off. Off keeps the\n"
+                                "# tiles of an image that fits in memory in memory, so only images too large for\n"
+                                "# memory are cached. On caches them all, so they open at once the next time.\n"
+                                "persist_streams = off\n",
+                        .apply =
+                                [](Config &config, const std::string_view value) {
+                                    config.persist = value == "on";
+
+                                    return value == "on" || value == "off";
+                                }},
                 Setting{.key = "sort",
                         .text = "# The order of the images in a folder: a-z, z-a, newest, oldest or size. Newest\n"
                                 "# and oldest go by when each file was last modified, and size puts the smallest\n"

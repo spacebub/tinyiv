@@ -101,9 +101,10 @@ namespace tiv {
         // Previews are sized to this.
         void set_screen(int width, int height);
 
-        // Where pyramids on disk go, as TileCache::location() takes it, and whether a PNG keeps
-        // only places to begin again. Said before the first show().
-        void set_tiles(std::filesystem::path folder, bool small);
+        // Where pyramids on disk go, as TileCache::location() takes it, whether a PNG keeps
+        // only places to begin again, and whether images that fit in memory go on disk too.
+        // Said before the first show().
+        void set_tiles(std::filesystem::path folder, bool small, bool persist);
 
         // HDR images decode for this display, and wait until it has been said, so nothing is
         // made for the wrong one. What is decoded of them for another goes, and so does
@@ -131,7 +132,7 @@ namespace tiv {
         [[nodiscard]] bool idle() const;
 
         // S: streaming mode, where every still image shows from a pyramid of tiles, not only
-        // those too large for memory. Only those go on disk, the rest stay in memory. Everything
+        // those too large for memory. Only those go on disk unless set_tiles() persists all. Everything
         // decoded goes, so the next show() decodes the new way.
         void stream_all(bool on);
         [[nodiscard]] bool streaming_all() const;
@@ -241,6 +242,7 @@ namespace tiv {
         bool _streamAll = false;
         std::filesystem::path _tileFolder;
         bool _smallTiles = false;
+        bool _persistTiles = false;
         std::atomic<float> _progress = 0.0F;
 
         int _screenWidth = 3840;

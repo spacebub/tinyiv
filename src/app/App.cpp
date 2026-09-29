@@ -261,7 +261,7 @@ namespace tiv {
         _tileCacheEvent = _loaderEvent + 2;
         _loader = std::make_unique<Loader>(_loaderEvent);
 
-        _loader->set_tiles(config.cache, config.small);
+        _loader->set_tiles(config.cache, config.small, config.persist);
         _loader->stream_all(config.streaming);
         _refiner = std::make_unique<Refiner>(_refinerEvent);
 
