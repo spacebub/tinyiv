@@ -235,6 +235,7 @@ namespace tiv {
         }
 
         _loader->set_tiles(config.cache, config.small);
+        _loader->stream_all(config.streaming);
         _refiner = std::make_unique<Refiner>(_refinerEvent);
 
         show(_folder.index(), 1);

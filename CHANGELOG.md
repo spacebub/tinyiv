@@ -7,6 +7,7 @@
 - A config file, `tinyiv.conf`. Settings missing from it are added with their default values
 - `cache` setting to choose where tile caches are kept
 - `cache_mode` setting. `small` caches huge PNGs in about a third of the space, at the cost of slower panning at full size
+- `streaming_mode` setting to start tinyiv with streaming mode on
 
 ### Changed
 

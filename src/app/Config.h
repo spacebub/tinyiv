@@ -25,6 +25,9 @@ namespace tiv {
         // of every tile, at the cost of waiting for bands of rows when panning at full size.
         bool small = false;
 
+        // Streaming mode is on from the start, before S is ever pressed.
+        bool streaming = false;
+
         // $XDG_CONFIG_HOME/tinyiv/tinyiv.conf, or tinyiv.conf beside the executable on Windows.
         [[nodiscard]] static std::filesystem::path location();
 

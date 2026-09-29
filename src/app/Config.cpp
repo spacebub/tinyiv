@@ -111,6 +111,16 @@ namespace tiv {
 
                                     return value == "small" || value == "fast";
                                 }},
+                Setting{.key = "streaming_mode",
+                        .text = "# Whether streaming mode is on when tinyiv starts, on or off. S switches it while\n"
+                                "# tinyiv runs. Images too large for memory always stream.\n"
+                                "streaming_mode = off\n",
+                        .apply =
+                                [](Config &config, const std::string_view value) {
+                                    config.streaming = value == "on";
+
+                                    return value == "on" || value == "off";
+                                }},
         };
 
         const Setting *setting_for(const std::string_view key) {
