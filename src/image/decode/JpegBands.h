@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <vector>
 
@@ -29,6 +30,11 @@ namespace tiv::Decode {
     class JpegBands {
 
     public:
+        // The bytes of the file from the offset, read into the scratch or found where they already lie.
+        // Empty when they cannot be had.
+        using Fetch = std::function<std::span<const std::uint8_t>(std::uint64_t offset, std::uint64_t bytes,
+                                                                  std::vector<std::uint8_t> &scratch)>;
+
         // Decoding can only begin this near to a row, else the bands are too coarse to be worth it.
         static constexpr int MAX_STEP = 1024;
 
@@ -37,7 +43,7 @@ namespace tiv::Decode {
         [[nodiscard]] static bool index(std::span<const std::uint8_t> data, JpegBands *out);
 
         // As index(), taking the starts from an earlier index() of the same data instead of a pass over
-        // it. False when they do not fit the data.
+        // it. False when they do not fit the data. Only the header and the last step are read.
         [[nodiscard]] static bool adopt(std::span<const std::uint8_t> data, std::vector<std::uint64_t> starts,
                                         JpegBands *out);
 
@@ -55,6 +61,9 @@ namespace tiv::Decode {
         // The top has to be a multiple of 8, where a scaled row begins.
         bool decode(std::span<const std::uint8_t> data, int top, int count, unsigned num, Bitmap *out, int threads,
                     const Abort *abort) const;
+        // As above, the data read as it is needed.
+        bool decode(const Fetch &fetch, int top, int count, unsigned num, Bitmap *out, int threads,
+                    const Abort *abort) const;
 
         // The scaled image's rows, as libjpeg counts them.
         [[nodiscard]] static int scaled(int rows, unsigned num);
@@ -62,8 +71,8 @@ namespace tiv::Decode {
     private:
         // Decodes the steps from first to last, not including last, keeping the scaled rows from
         // keepTop to keepBottom, where outTop is out's first row, and dropping the rest.
-        bool decode_steps(std::span<const std::uint8_t> data, int first, int last, unsigned num, int keepTop,
-                          int keepBottom, int outTop, Bitmap *out, const Abort *abort) const;
+        bool decode_steps(const Fetch &fetch, int first, int last, unsigned num, int keepTop, int keepBottom,
+                          int outTop, Bitmap *out, const Abort *abort) const;
 
         struct Frame {
             int width = 0;

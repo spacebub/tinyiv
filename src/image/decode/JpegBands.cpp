@@ -357,11 +357,9 @@ namespace tiv::Decode {
             return false;
         }
 
+        // Only ordered and within the file: reading each marker would touch the whole file again.
         for (std::size_t i = 1; i < starts.size(); ++i) {
-            const std::uint64_t start = starts.at(i);
-
-            if (start <= starts.at(i - 1) || start >= data.size() || data[start - 2] != MARK
-                || !is_restart(data[start - 1])) {
+            if (starts.at(i) <= starts.at(i - 1) || starts.at(i) >= data.size()) {
                 return false;
             }
         }
@@ -385,9 +383,9 @@ namespace tiv::Decode {
         return true;
     }
 
-    bool JpegBands::decode_steps(const std::span<const std::uint8_t> data, const int first, const int last,
-                                 const unsigned num, const int keepTop, const int keepBottom, const int outTop,
-                                 Bitmap *out, const Abort *abort) const {
+    bool JpegBands::decode_steps(const Fetch &fetch, const int first, const int last, const unsigned num,
+                                 const int keepTop, const int keepBottom, const int outTop, Bitmap *out,
+                                 const Abort *abort) const {
         const int top = first * _step;
         const int rows = std::min(last * _step, _height) - top;
         const std::uint64_t from = _starts.at(static_cast<std::size_t>(first));
@@ -397,7 +395,14 @@ namespace tiv::Decode {
         header.at(_heightAt) = static_cast<std::uint8_t>(static_cast<unsigned>(rows) >> 8U);
         header.at(_heightAt + 1) = static_cast<std::uint8_t>(static_cast<unsigned>(rows) & 0xFFU);
 
-        Chain chain({header, data.subspan(from, to - from), std::span(END)});
+        std::vector<std::uint8_t> scratch;
+        const std::span<const std::uint8_t> scan = fetch(from, to - from, scratch);
+
+        if (scan.size() != to - from) {
+            return false;
+        }
+
+        Chain chain({header, scan, std::span(END)});
         JpegHandle handle;
         std::vector<std::uint8_t> spill(static_cast<std::size_t>(out->width()) * Bitmap::CHANNELS);
         std::array<JSAMPROW, MAX_BATCH> targets{};
@@ -459,6 +464,16 @@ namespace tiv::Decode {
 
     bool JpegBands::decode(const std::span<const std::uint8_t> data, const int top, const int count, const unsigned num,
                            Bitmap *out, const int threads, const Abort *abort) const {
+        const Fetch lying = [&](const std::uint64_t offset, const std::uint64_t bytes,
+                                std::vector<std::uint8_t> & /*scratch*/) {
+            return offset + bytes <= data.size() ? data.subspan(offset, bytes) : std::span<const std::uint8_t>();
+        };
+
+        return decode(lying, top, count, num, out, threads, abort);
+    }
+
+    bool JpegBands::decode(const Fetch &fetch, const int top, const int count, const unsigned num, Bitmap *out,
+                           const int threads, const Abort *abort) const {
         const int bottom = std::min(top + count, _height);
 
         if (top < 0 || top % BLOCK != 0 || bottom <= top || out->width() != scaled(_width, num)
@@ -480,7 +495,7 @@ namespace tiv::Decode {
             const int keepTop = std::max(scaled(from * _step, num), outTop);
             const int keepBottom = scaled(std::min(to * _step, bottom), num);
 
-            if (!decode_steps(data, std::max(from - margin, 0), std::min(to + margin, steps()), num, keepTop,
+            if (!decode_steps(fetch, std::max(from - margin, 0), std::min(to + margin, steps()), num, keepTop,
                               keepBottom, outTop, out, abort)) {
                 ok = false;
             }

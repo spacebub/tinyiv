@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -19,6 +20,8 @@
 #include <vector>
 
 #include <benchmark/benchmark.h>
+#include <glib.h>
+#include <vips/vips8>
 
 #include "support/Corpus.h"
 #include "support/Memory.h"
@@ -26,10 +29,13 @@
 
 #include "image/Bitmap.h"
 #include "image/TileCache.h"
+#include "image/decode/Vips.h"
 
 namespace bench {
     namespace {
-        constexpr std::array<std::string_view, 3> FILES = {"noise.jpg", "noise.png", "noise.tif"};
+        // The restart JPEGs read their full resolution from the file, the rest store it.
+        constexpr std::array<std::string_view, 5> FILES = {"noise.jpg", "noise.png", "noise.tif", "restart.jpg",
+                                                           "restart444.jpg"};
 
         std::filesystem::path tile_folder() {
             return Corpus::dir() / "tiles";
@@ -176,6 +182,59 @@ namespace bench {
                 }
             }
         }
+
+        // The full resolution tiles against libvips' decode of the same region, wherever they come from.
+        void TileCache_finest_exact(benchmark::State &state, const std::filesystem::path &file) {
+            std::string error;
+            const std::shared_ptr<tiv::TileCache> tileCache = made(file, tiv::TileCache::Store::Memory, &error);
+
+            if (tileCache == nullptr) {
+                state.SkipWithError("build failed: " + error);
+
+                return;
+            }
+
+            tiv::Decode::Vips::ensure();
+
+            const vips::VImage image = vips::VImage::new_from_file(file.string().c_str());
+            const std::vector<tiv::TileCache::Key> keys = every_tile(*tileCache, 0);
+
+            for ([[maybe_unused]] auto step : state) {
+                const auto tiles = read_all(*tileCache, keys);
+
+                for (std::size_t i = 0; i < keys.size(); ++i) {
+                    const tiv::Bitmap &tile = *tiles.at(i);
+                    const vips::VImage region =
+                            image.crop(keys.at(i).column * tiv::TileCache::TILE, keys.at(i).row * tiv::TileCache::TILE,
+                                       tile.width(), tile.height());
+                    std::size_t size = 0;
+                    auto *pixels = static_cast<std::uint8_t *>(region.write_to_memory(&size));
+                    const auto bands = static_cast<std::size_t>(region.bands());
+                    bool same = true;
+
+                    for (int y = 0; y < tile.height() && same; ++y) {
+                        const std::span<const std::uint8_t> row = tile.row(y);
+                        const std::uint8_t *expected =
+                                pixels + (static_cast<std::size_t>(y) * static_cast<std::size_t>(tile.width()) * bands);
+
+                        for (std::size_t x = 0; x < static_cast<std::size_t>(tile.width()) && same; ++x) {
+                            same = std::memcmp(&row[x * tiv::Bitmap::CHANNELS], &expected[x * bands],
+                                               std::min<std::size_t>(bands, 3))
+                                   == 0;
+                        }
+                    }
+
+                    g_free(pixels);
+
+                    if (!same) {
+                        state.SkipWithError(
+                                std::format("tile {},{} differs from libvips", keys.at(i).column, keys.at(i).row));
+
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     void register_tile_cache() {
@@ -198,6 +257,9 @@ namespace bench {
                                          tiv::TileCache::Store::Memory)
                     ->Unit(benchmark::kMillisecond);
             benchmark::RegisterBenchmark("TileCache_stores_agree/" + label, TileCache_stores_agree, file)
+                    ->Unit(benchmark::kMillisecond)
+                    ->Iterations(1);
+            benchmark::RegisterBenchmark("TileCache_finest_exact/" + label, TileCache_finest_exact, file)
                     ->Unit(benchmark::kMillisecond)
                     ->Iterations(1);
         }

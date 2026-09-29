@@ -34,8 +34,11 @@
 namespace tiv {
     // An image as a pyramid of compressed tiles, made by decoding top to bottom. One too large for
     // memory goes in a file on disk and is kept so reopening is instant, one that fits is held in
-    // memory and never written. Tiles are unpacked on background threads as the view asks for them
-    // and cached, so memory follows what the screen shows, whatever the image's size.
+    // memory and never written. A file that can be decoded from partway, such as a JPEG with restart
+    // markers, gives its full resolution itself, and only the smaller levels are stored, as GDAL's
+    // external overviews do: https://gdal.org/en/stable/programs/gdaladdo.html
+    // Tiles are unpacked on background threads as the view asks for them and cached, so memory
+    // follows what the screen shows, whatever the image's size.
     class TileCache {
 
     public:
@@ -70,6 +73,29 @@ namespace tiv {
             int level = 0;
             int column = 0;
             int row = 0;
+        };
+
+        // The image file, read for the finest level.
+        class Source {
+
+        public:
+            Source() = default;
+            virtual ~Source() = default;
+
+            Source(const Source &) = delete;
+            Source(Source &&) = delete;
+            Source &operator=(const Source &) = delete;
+            Source &operator=(Source &&) = delete;
+
+            [[nodiscard]] virtual int width() const = 0;
+            [[nodiscard]] virtual int height() const = 0;
+
+            // Rows from top, count of them or to the bottom, in sRGB as wide as the image. The top is
+            // a multiple of TILE.
+            virtual bool read(int top, int count, Bitmap *out) const = 0;
+
+            // What opens the same source again without a pass over the file.
+            [[nodiscard]] virtual std::vector<std::uint64_t> index() const = 0;
         };
 
         // The folder the file's pyramid goes in: the one asked for, taken from the file's folder
@@ -138,11 +164,19 @@ namespace tiv {
 
         TileCache() = default;
 
-        bool load(const std::filesystem::path &path);
+        // The pyramid at the path, made for the file.
+        bool load(const std::filesystem::path &path, const std::filesystem::path &file);
+        // A row of the finest level's tiles from the source, all kept. The band is scratch for the
+        // rows. Not under the lock.
+        void read_source(int row, bool pinned, Bitmap &band);
         // Reads whole the levels of few enough tiles, so there is always something to draw.
         void pin();
         void start();
         void read_loop();
+        // Under the lock, which it lets go of while it reads.
+        void read_source_row(std::unique_lock<std::mutex> &hold, int row, Bitmap &band);
+        // Tells whoever listens that a tile arrived, outside the lock.
+        void announce(std::unique_lock<std::mutex> &hold) const;
         // Under the lock.
         void keep(std::uint64_t id, std::shared_ptr<const Bitmap> bitmap, bool pinned) const;
         [[nodiscard]] static std::uint64_t id_of(const Key &key);
@@ -158,6 +192,8 @@ namespace tiv {
         std::vector<Level> _levels;
         // Per level, where each tile lies in the file, row by row.
         std::vector<std::vector<Span>> _spans;
+        // Gives the finest level when set, which is then not stored.
+        std::unique_ptr<Source> _source;
 
         mutable std::mutex _guard;
         mutable std::condition_variable _wake;
