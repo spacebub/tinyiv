@@ -84,6 +84,8 @@ namespace tiv {
         void save();
         // Switches streaming mode, where every still image shows from a pyramid of tiles.
         void toggle_stream();
+        // Sorts the folder the next way along, keeping the image on screen.
+        void next_order();
         // How the image on screen is drawn, from how it is stored.
         [[nodiscard]] int orientation() const;
         // The size of the image on screen as stored, and as shown.
@@ -166,7 +168,7 @@ namespace tiv {
         int _direction = 1;
         // Shown in place of an image that could not be opened.
         std::string _failure;
-        // What the last press of S did, shown for a moment after.
+        // What the last press of S or O did, shown for a moment after.
         std::string _flash;
         // Where the tiles being made go on disk, empty when they stay in memory.
         std::filesystem::path _tileFolder;
@@ -174,7 +176,7 @@ namespace tiv {
         bool _seeking = false;
 
         std::uint64_t _movedAt = 0;
-        // When streaming mode last switched, zero before it ever has.
+        // When streaming mode or the order last switched, zero before either has.
         std::uint64_t _switchedAt = 0;
         // Moved and not yet looked at by refine().
         bool _settling = false;

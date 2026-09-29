@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+#include "gallery/Folder.h"
+
 namespace tiv {
     // The user's settings, one key = value a line, # starting a comment.
     struct Config {
@@ -27,6 +29,9 @@ namespace tiv {
 
         // Streaming mode is on from the start, before S is ever pressed.
         bool streaming = false;
+
+        // How a folder's images are ordered from the start, before O is ever pressed.
+        Folder::Order order = Folder::Order::AToZ;
 
         // $XDG_CONFIG_HOME/tinyiv/tinyiv.conf, or tinyiv.conf beside the executable on Windows.
         [[nodiscard]] static std::filesystem::path location();

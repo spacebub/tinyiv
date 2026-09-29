@@ -28,6 +28,7 @@ Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 |-------------------------|-------------------------------|
 | Wheel  ←  →             | Previous, next image          |
 | Home  End               | First, last image             |
+| O                       | Sort by name, date, size      |
 | R                       | Reload from disk              |
 | Left drag               | Pan                           |
 | Right drag ↑ ↓          | Zoom in, out                  |
@@ -62,6 +63,7 @@ any setting it is missing with its default value.
 | `cache`          | Where tile caches are kept. Empty keeps each cache in a `tinyiv-cache` folder next to its image. A relative path starts from the image's folder, and `~` means your home folder.                                                                                                                                                         |
 | `cache_mode`     | `fast` or `small`. Fast caches every tile of a huge PNG, so panning is instant. Small caches only the points decoding can resume from, which takes about a third of the space, but panning at full size waits a few tens of milliseconds for each band of rows. A cache made in the other mode is rebuilt the next time its image opens. |
 | `streaming_mode` | `on` or `off`. Whether streaming mode is on when tinyiv starts. S switches it while tinyiv runs, and images too large for memory always stream.                                                                                                                                                                                          |
+| `sort`           | `a-z`, `z-a`, `newest`, `oldest` or `size`. The order of the images in a folder. Newest and oldest go by when each file was last modified, and size puts the smallest first. O steps through them while tinyiv runs without changing the file.                                                                                           |
 
 If the cache folder can't be written, tinyiv falls back to your user cache folder.
 

@@ -8,6 +8,8 @@
 - `cache` setting to choose where tile caches are kept
 - `cache_mode` setting. `small` caches huge PNGs in about a third of the space, at the cost of slower panning at full size
 - `streaming_mode` setting to start tinyiv with streaming mode on
+- `sort` setting to choose the order a folder starts in
+- `O` steps through the sort orders: name A to Z, name Z to A, newest first, oldest first and smallest first. The status bar always shows the order in use
 
 ### Changed
 

@@ -14,10 +14,12 @@
 #include <cstdio>
 #include <filesystem>
 #include <format>
+#include <iterator>
 #include <memory>
 #include <print>
 #include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -62,17 +64,18 @@ namespace tiv {
         constexpr int PREFETCH_AHEAD = 6;
         constexpr int PREFETCH_BEHIND = 2;
         constexpr double BADGE_MARGIN = 12.0;
-        // How long fullscreen shows the streaming mode after it switches.
+        // How long fullscreen shows the streaming mode or the order after it switches.
         constexpr std::uint64_t MODE_FLASH_MS = 1500;
         // A scalable image renders this share of the view beyond each edge, so a short pan stays sharp.
         constexpr double REFINE_MARGIN = 0.25;
         constexpr SDL_Color BACKGROUND{.r = 0, .g = 0, .b = 0, .a = 255};
 
         // Keys are two spaces apart, the words of one key a single space.
-        constexpr std::array<StatusBar::Row, 17> HELP = {
+        constexpr std::array<StatusBar::Row, 18> HELP = {
                 {
                         {.left = "Wheel  ←  →", .right = "Previous, next image"},
                         {.left = "Home  End", .right = "First, last image"},
+                        {.left = "O", .right = "Sort by name, date, size"},
                         {.left = "R", .right = "Reload from disk"},
                         {.left = "Left drag", .right = "Pan"},
                         {.left = "Right drag ↑ ↓", .right = "Zoom in, out"},
@@ -121,6 +124,28 @@ namespace tiv {
             SDL_DestroySurface(surface);
         }
 #endif
+
+        // In the order O steps through them.
+        struct OrderText {
+            Folder::Order order;
+            // Leads the status bar for as long as the order holds.
+            std::string_view tag;
+            // Said for a moment when O switches to it.
+            std::string_view text;
+        };
+
+        constexpr std::array ORDERS{
+                OrderText{.order = Folder::Order::AToZ, .tag = "A-Z", .text = "Sorted by name, A to Z"},
+                OrderText{.order = Folder::Order::ZToA, .tag = "Z-A", .text = "Sorted by name, Z to A"},
+                OrderText{.order = Folder::Order::Newest, .tag = "NEWEST", .text = "Sorted by date, newest first"},
+                OrderText{.order = Folder::Order::Oldest, .tag = "OLDEST", .text = "Sorted by date, oldest first"},
+                OrderText{
+                        .order = Folder::Order::Smallest, .tag = "SMALLEST", .text = "Sorted by size, smallest first"},
+        };
+
+        const OrderText &order_text(const Folder::Order order) {
+            return *std::ranges::find(ORDERS, order, &OrderText::order);
+        }
 
         std::string human_size(const std::uintmax_t bytes) {
             constexpr double KIB = 1024.0;
@@ -217,6 +242,15 @@ namespace tiv {
     }
 
     bool App::start(const std::filesystem::path &file, std::string *error) {
+        std::vector<std::string> warnings;
+        const Config config = Config::load(Config::location(), &warnings);
+
+        for (const std::string &warning : warnings) {
+            std::println(stderr, "tinyiv: {}", warning);
+        }
+
+        _folder.sort(config.order);
+
         if (!file.empty() && !_folder.open(file, Decode::suffixes(), error)) {
             return false;
         }
@@ -226,13 +260,6 @@ namespace tiv {
         _refinerEvent = _loaderEvent + 1;
         _tileCacheEvent = _loaderEvent + 2;
         _loader = std::make_unique<Loader>(_loaderEvent);
-
-        std::vector<std::string> warnings;
-        const Config config = Config::load(Config::location(), &warnings);
-
-        for (const std::string &warning : warnings) {
-            std::println(stderr, "tinyiv: {}", warning);
-        }
 
         _loader->set_tiles(config.cache, config.small);
         _loader->stream_all(config.streaming);
@@ -573,6 +600,9 @@ namespace tiv {
                 break;
             case Input::Action::ToggleStream:
                 toggle_stream();
+                break;
+            case Input::Action::NextOrder:
+                next_order();
                 break;
             case Input::Action::ToggleBar:
                 toggle_bar();
@@ -1009,6 +1039,17 @@ namespace tiv {
         show(_folder.index(), _direction);
     }
 
+    // The images prefetched stay as they are, and the next step fetches the new neighbours.
+    void App::next_order() {
+        const OrderText *at = &order_text(_folder.order());
+        const OrderText &next = std::next(at) == ORDERS.end() ? ORDERS.front() : *std::next(at);
+
+        _folder.sort(next.order);
+        _flash = next.text;
+        _switchedAt = SDL_GetTicks();
+        _dirty = true;
+    }
+
     std::string App::where_tiles_go() const {
         if (_tileFolder.empty()) {
             return {};
@@ -1229,9 +1270,10 @@ namespace tiv {
             return std::format("{}tinyiv", tag);
         }
 
-        // Marked while turned or flipped and not saved, and led by the modes that are on.
-        return std::format("{}[{}/{}] {}{}", tag, _folder.index() + 1, _folder.count(),
-                           _folder.current().filename().string(), _turn != 1 ? " *" : "");
+        // Marked while turned or flipped and not saved, and led by the modes that are on and the order.
+        return std::format("{}{}[{}/{}] {}{}", tag, tagged ? std::format("{}  ", order_text(_folder.order()).tag) : "",
+                           _folder.index() + 1, _folder.count(), _folder.current().filename().string(),
+                           _turn != 1 ? " *" : "");
     }
 
     std::string App::bar_right() const {

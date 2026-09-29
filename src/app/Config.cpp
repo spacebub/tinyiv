@@ -21,6 +21,7 @@
 #include <SDL3/SDL.h>
 
 #include "app/Config.h"
+#include "gallery/Folder.h"
 
 namespace tiv {
     namespace {
@@ -65,6 +66,19 @@ namespace tiv {
 
             return text;
         }
+
+        struct OrderName {
+            std::string_view name;
+            Folder::Order order;
+        };
+
+        constexpr std::array ORDER_NAMES{
+                OrderName{.name = "a-z", .order = Folder::Order::AToZ},
+                OrderName{.name = "z-a", .order = Folder::Order::ZToA},
+                OrderName{.name = "newest", .order = Folder::Order::Newest},
+                OrderName{.name = "oldest", .order = Folder::Order::Oldest},
+                OrderName{.name = "size", .order = Folder::Order::Smallest},
+        };
 
         std::filesystem::path expanded(const std::string_view text) {
             if (text == "~") {
@@ -121,6 +135,23 @@ namespace tiv {
                                     config.streaming = value == "on";
 
                                     return value == "on" || value == "off";
+                                }},
+                Setting{.key = "sort",
+                        .text = "# The order of the images in a folder: a-z, z-a, newest, oldest or size. Newest\n"
+                                "# and oldest go by when each file was last modified, and size puts the smallest\n"
+                                "# first. O switches it while tinyiv runs, without changing this file.\n"
+                                "sort = a-z\n",
+                        .apply =
+                                [](Config &config, const std::string_view value) {
+                                    const auto *found = std::ranges::find(ORDER_NAMES, value, &OrderName::name);
+
+                                    if (found == ORDER_NAMES.end()) {
+                                        return false;
+                                    }
+
+                                    config.order = found->order;
+
+                                    return true;
                                 }},
         };
 

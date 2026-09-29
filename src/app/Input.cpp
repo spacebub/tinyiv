@@ -139,6 +139,8 @@ namespace tiv {
                 return Action::FlipHorizontal;
             case SDLK_S:
                 return (event.mod & SDL_KMOD_CTRL) != 0 ? Action::Save : Action::ToggleStream;
+            case SDLK_O:
+                return Action::NextOrder;
             case SDLK_I:
                 return Action::ToggleBar;
             case SDLK_H:

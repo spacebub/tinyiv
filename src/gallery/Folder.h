@@ -10,6 +10,7 @@
 #define TIV_GALLERY_FOLDER_H
 
 
+#include <cstdint>
 #include <filesystem>
 #include <span>
 #include <string>
@@ -20,6 +21,15 @@ namespace tiv {
     class Folder {
 
     public:
+        // Newest and oldest go by when a file was last modified. Ties fall back to A to Z.
+        enum class Order : std::uint8_t {
+            AToZ,
+            ZToA,
+            Newest,
+            Oldest,
+            Smallest,
+        };
+
         // Suffixes are lowercase with the dot. The opened file is listed whatever its suffix.
         bool open(const std::filesystem::path &file, std::span<const std::string_view> suffixes,
                   std::string *error = nullptr);
@@ -34,12 +44,17 @@ namespace tiv {
         [[nodiscard]] int wrap(int index) const;
         void step(int delta);
 
+        [[nodiscard]] Order order() const { return _order; }
+        // The current file stays current wherever it lands.
+        void sort(Order order);
+
         // Digit runs compare by value, letters without case: img2 before img10.
         [[nodiscard]] static bool natural_less(const std::string &a, const std::string &b);
 
     private:
         std::vector<std::filesystem::path> _files;
         int _index = 0;
+        Order _order = Order::AToZ;
     };
 }
 

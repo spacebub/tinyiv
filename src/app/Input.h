@@ -36,6 +36,7 @@ namespace tiv {
             FlipHorizontal,
             Save,
             ToggleStream,
+            NextOrder,
             ToggleBar,
             ToggleHelp,
             TogglePlay,

@@ -8,11 +8,13 @@
  */
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "gallery/Folder.h"
@@ -52,6 +54,60 @@ namespace tiv {
 
             return a.compare(b);
         }
+
+        // A file that cannot be read sorts as the oldest or smallest.
+        std::int64_t key_of(const std::filesystem::path &file, const Folder::Order order) {
+            std::error_code failure;
+
+            switch (order) {
+                case Folder::Order::Newest:
+                case Folder::Order::Oldest:
+                    return static_cast<std::int64_t>(
+                            std::filesystem::last_write_time(file, failure).time_since_epoch().count());
+                case Folder::Order::Smallest: {
+                    const std::uintmax_t bytes = std::filesystem::file_size(file, failure);
+
+                    return failure ? -1 : static_cast<std::int64_t>(bytes);
+                }
+                case Folder::Order::AToZ:
+                case Folder::Order::ZToA:
+                    break;
+            }
+
+            return 0;
+        }
+
+        // Names and keys are taken once each, not on every comparison.
+        void arrange(std::vector<std::filesystem::path> &files, const Folder::Order order) {
+            struct Entry {
+                std::string name;
+                std::int64_t key = 0;
+                std::filesystem::path file;
+            };
+
+            std::vector<Entry> entries;
+
+            entries.reserve(files.size());
+
+            for (std::filesystem::path &file : files) {
+                entries.push_back(
+                        {.name = file.filename().string(), .key = key_of(file, order), .file = std::move(file)});
+            }
+
+            std::ranges::sort(entries, [order](const Entry &a, const Entry &b) {
+                if (order == Folder::Order::ZToA) {
+                    return Folder::natural_less(b.name, a.name);
+                }
+
+                if (a.key != b.key) {
+                    return order == Folder::Order::Newest ? a.key > b.key : a.key < b.key;
+                }
+
+                return Folder::natural_less(a.name, b.name);
+            });
+
+            std::ranges::transform(entries, files.begin(), [](Entry &entry) { return std::move(entry.file); });
+        }
     }
 
     bool Folder::open(const std::filesystem::path &file, const std::span<const std::string_view> suffixes,
@@ -83,10 +139,7 @@ namespace tiv {
         }
 
         found.push_back(opened);
-
-        std::ranges::sort(found, [](const std::filesystem::path &a, const std::filesystem::path &b) {
-            return natural_less(a.filename().string(), b.filename().string());
-        });
+        arrange(found, _order);
 
         _files = std::move(found);
         _index = static_cast<int>(std::ranges::find(_files, opened) - _files.begin());
@@ -107,6 +160,19 @@ namespace tiv {
 
     void Folder::step(const int delta) {
         _index = wrap(_index + delta);
+    }
+
+    void Folder::sort(const Order order) {
+        _order = order;
+
+        if (_files.empty()) {
+            return;
+        }
+
+        const std::filesystem::path shown = current();
+
+        arrange(_files, _order);
+        _index = static_cast<int>(std::ranges::find(_files, shown) - _files.begin());
     }
 
     bool Folder::natural_less(const std::string &a, const std::string &b) {
