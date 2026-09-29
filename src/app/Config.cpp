@@ -154,7 +154,7 @@ namespace tiv {
                                 "sort = a-z\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {
-                                    const auto *found = std::ranges::find(ORDER_NAMES, value, &OrderName::name);
+                                    const auto found = std::ranges::find(ORDER_NAMES, value, &OrderName::name);
 
                                     if (found == ORDER_NAMES.end()) {
                                         return false;

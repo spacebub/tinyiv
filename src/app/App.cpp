@@ -1054,7 +1054,7 @@ namespace tiv {
 
     // The images prefetched stay as they are, and the next step fetches the new neighbours.
     void App::next_order() {
-        const OrderText *at = &order_text(_folder.order());
+        const auto at = std::ranges::find(ORDERS, _folder.order(), &OrderText::order);
         const OrderText &next = std::next(at) == ORDERS.end() ? ORDERS.front() : *std::next(at);
 
         _folder.sort(next.order);
