@@ -52,6 +52,7 @@ add_executable(tiv_bench
         image/TileCache_bench.cpp
 
         image/decode/Bmp_bench.cpp
+        image/decode/JpegBands_bench.cpp
         image/decode/Decode_bench.cpp
 
         render/Upload_bench.cpp

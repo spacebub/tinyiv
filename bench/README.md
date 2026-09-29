@@ -32,6 +32,9 @@ python3 ../.download-cache/benchmark-v1.9.5/tools/compare.py benchmarks before.j
 | `TileCache_read`      | Unpacking every full resolution tile, from disk or memory       |
 | `TileCache_stores_agree` | Fails when the two stores give different tiles               |
 | `Bmp_decode`          | The BMP row kernels, scalar to AVX2, whole and forced           |
+| `JpegBands_exact`     | Fails when a restart band decodes differently from the whole file |
+| `JpegBands_index`     | Finding the restart markers, a pass over the file               |
+| `JpegBands_band`      | A tile row decoded from its restart marker, one thread and many |
 | `Upload_static`       | Texture upload throughput                                       |
 | `Tiles_visible_4k`    | The tiles one screen of a 128 MP image needs                    |
 | `Canvas_draw`         | One frame of draw calls                                         |

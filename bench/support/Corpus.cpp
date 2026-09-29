@@ -36,7 +36,7 @@ namespace bench {
         constexpr double LOSSLESS_NOISE = 18.0;
         constexpr double LOSSY_NOISE = 45.0;
 
-        constexpr std::array<Corpus::Spec, 10> SPECS = {
+        constexpr std::array<Corpus::Spec, 12> SPECS = {
                 {
                         {
                                 .name = "noise.png",
@@ -52,6 +52,24 @@ namespace bench {
                                 .targetBytes = 45 * MIB,
                                 .width = 0,
                                 .height = 0,
+                                .sigma = LOSSY_NOISE,
+                        },
+                        {
+                                // 4:2:0 with a restart every 16 MCUs, which lands on rows only every few MCU rows.
+                                .name = "restart.jpg",
+                                .options = "[Q=95,subsample_mode=on,restart_interval=16]",
+                                .targetBytes = 45 * MIB,
+                                .width = 0,
+                                .height = 0,
+                                .sigma = LOSSY_NOISE,
+                        },
+                        {
+                                // 4:4:4 with a restart every MCU row, as Photoshop saves.
+                                .name = "restart444.jpg",
+                                .options = "[Q=95,subsample_mode=off,restart_interval=1000]",
+                                .targetBytes = 0,
+                                .width = 8000,
+                                .height = 6000,
                                 .sigma = LOSSY_NOISE,
                         },
                         {

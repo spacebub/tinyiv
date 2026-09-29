@@ -49,6 +49,10 @@ add_executable(tinyiv
         image/decode/Icon.h
         image/decode/Jpeg.cpp
         image/decode/Jpeg.h
+        image/decode/JpegBands.cpp
+        image/decode/JpegBands.h
+        image/decode/JpegHandle.cpp
+        image/decode/JpegHandle.h
         image/decode/Jxl.cpp
         image/decode/Jxl.h
         image/decode/Png.cpp

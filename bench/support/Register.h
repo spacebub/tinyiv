@@ -15,6 +15,7 @@ namespace bench {
     // Benchmarks over corpus files register once the corpus is known, so each file adds its own.
     void register_bitmap();
     void register_bmp();
+    void register_jpeg_bands();
     void register_decode();
     void register_pyramid();
     void register_tile_cache();

@@ -29,6 +29,7 @@ namespace {
 
         bench::register_bitmap();
         bench::register_bmp();
+        bench::register_jpeg_bands();
         bench::register_decode();
         bench::register_pyramid();
         bench::register_tile_cache();

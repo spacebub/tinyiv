@@ -33,50 +33,12 @@
 #include "image/Tone.h"
 #include "image/decode/GainMap.h"
 #include "image/decode/Jpeg.h"
+#include "image/decode/JpegBands.h"
+#include "image/decode/JpegHandle.h"
 #include "image/decode/Support.h"
 
 namespace tiv::Decode {
     namespace {
-        struct JpegError {
-            jpeg_error_mgr pub{};
-            // NOLINTNEXTLINE(cert-err52-cpp,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays): libjpeg reports errors by longjmp only.
-            std::jmp_buf jump{};
-        };
-
-        [[noreturn]] void jpeg_fail(j_common_ptr info) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): pub is the first member, as libjpeg requires.
-            auto *error = reinterpret_cast<JpegError *>(info->err);
-
-            // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp,cppcoreguidelines-pro-bounds-array-to-pointer-decay): libjpeg reports errors by longjmp only.
-            std::longjmp(error->jump, 1);
-        }
-
-        void jpeg_quiet(j_common_ptr /*info*/) {
-        }
-
-        struct JpegHandle {
-            jpeg_decompress_struct info{};
-            JpegError error{};
-            bool created = false;
-
-            JpegHandle() {
-                info.err = jpeg_std_error(&error.pub);
-                error.pub.error_exit = jpeg_fail;
-                error.pub.output_message = jpeg_quiet;
-            }
-
-            ~JpegHandle() {
-                if (created) {
-                    jpeg_destroy_decompress(&info);
-                }
-            }
-
-            JpegHandle(const JpegHandle &) = delete;
-            JpegHandle(JpegHandle &&) = delete;
-            JpegHandle &operator=(const JpegHandle &) = delete;
-            JpegHandle &operator=(JpegHandle &&) = delete;
-        };
-
         // XMP travels in APP1 too, so the Exif one is looked for.
         int jpeg_orientation(const jpeg_decompress_struct &info) {
             for (const jpeg_marker_struct *marker = info.marker_list; marker != nullptr; marker = marker->next) {
@@ -90,21 +52,10 @@ namespace tiv::Decode {
             return 1;
         }
 
-        bool jpeg_open(JpegHandle &handle, const std::span<const std::uint8_t> data) {
-            // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp,cppcoreguidelines-pro-bounds-array-to-pointer-decay): libjpeg reports errors by longjmp only.
-            if (setjmp(handle.error.jump) != 0) {
-                return false;
-            }
-
-            jpeg_create_decompress(&handle.info);
-            handle.created = true;
-            jpeg_mem_src(&handle.info, data.data(), static_cast<unsigned long>(data.size()));
-            jpeg_save_markers(&handle.info, JPEG_APP0 + 1, 0xFFFF);
-
-            return jpeg_read_header(&handle.info, TRUE) == JPEG_HEADER_OK;
-        }
-
         constexpr unsigned JPEG_DENOM = 8;
+
+        // Below this, one thread decodes about as fast as several would start.
+        constexpr std::int64_t BANDED_PIXELS = std::int64_t{4} * 1000 * 1000;
 
         Size jpeg_scaled(const jpeg_decompress_struct &info, const unsigned num) {
             return {
@@ -218,9 +169,20 @@ namespace tiv::Decode {
 
             Bitmap held = Bitmap::allocate(static_cast<int>(handle.info.output_width),
                                            static_cast<int>(handle.info.output_height));
+
+            // Restart markers split the image into bands that decode side by side. Should the bands fail
+            // for any reason but an abort, the plain decode below still gets its turn.
+            if (JpegBands bands; static_cast<std::int64_t>(width) * height >= BANDED_PIXELS
+                                 && JpegBands::index(data, &bands)
+                                 && bands.decode(data, 0, height, handle.info.scale_num, &held, MAX_THREADS, abort)) {
+                *out = std::move(held);
+
+                return Direct::Done;
+            }
+
             std::vector<JSAMPROW> rows(static_cast<std::size_t>(std::max(handle.info.rec_outbuf_height, 1)) + 1);
 
-            if (!jpeg_read(handle, held, rows, abort)) {
+            if (aborted(abort) || !jpeg_read(handle, held, rows, abort)) {
                 fail(error, file, aborted(abort) ? "aborted" : "jpeg decode failed");
 
                 return Direct::Failed;

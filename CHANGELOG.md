@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Large JPEGs with restart markers decode on several threads at once, about five times faster
 - Streaming mode keeps the tiles of an image that fits in memory in memory, and writes only images too large for it to disk
 
 ## 1.2.0 - 2026-09-28
