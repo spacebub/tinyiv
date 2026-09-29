@@ -101,8 +101,9 @@ namespace tiv {
 
         // The folder the file's pyramid goes in: the one asked for, taken from the file's folder
         // when relative, else one beside the file. Where that cannot be made, the user's cache.
-        [[nodiscard]] static std::filesystem::path location(const std::filesystem::path &file,
-                                                            const std::filesystem::path &folder = {});
+        // Without create, the first that is already there, or empty.
+        [[nodiscard]] static std::filesystem::path
+        location(const std::filesystem::path &file, const std::filesystem::path &folder = {}, bool create = true);
 
         // The pyramid made for the file as it is now and shown on the display, if there is one.
         // The display only tells pyramids of an HDR image apart.

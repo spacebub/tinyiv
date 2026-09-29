@@ -15,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -33,7 +34,10 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <sys/uio.h>
 #include <unistd.h>
+
+#include <cerrno>
 #endif
 
 #include <SDL3/SDL.h>
@@ -68,8 +72,11 @@ namespace tiv {
         constexpr std::string_view SUFFIX = ".tiles";
         constexpr std::string_view PART = ".part";
         constexpr int MAX_ENCODERS = 16;
-        // Guesses the tiles at a third of their raw size, to know how much room to make before any are written.
-        constexpr std::uint64_t EXPECTED_RATIO = 3;
+        // Guesses the tiles at half their raw size, to know how much room to make before any are
+        // written. Photographs come to half or more, so the drive is watched as they are written too.
+        constexpr std::uint64_t EXPECTED_RATIO = 2;
+        // How often, in bytes written, the drive's free room is looked at.
+        constexpr std::uint64_t ROOM_CHECK_BYTES = std::uint64_t{256} * 1024 * 1024;
         // What of an image is read to tell it apart: its ends, where the headers and the last
         // of the data sit, and blocks spread evenly between them. A file this small is read whole.
         constexpr std::uint64_t EDGE_BYTES = std::uint64_t{64} * 1024;
@@ -161,20 +168,43 @@ namespace tiv {
 #endif
         }
 
-        bool usable(const std::filesystem::path &dir) {
+        // Marks the folder as a cache, which backup tools such as borg, restic and tar's --exclude-caches
+        // then pass by: https://bford.info/cachedir/
+        void tag(const std::filesystem::path &dir) {
+            const std::filesystem::path file = dir / "CACHEDIR.TAG";
             std::error_code failure;
 
-            std::filesystem::create_directories(dir, failure);
+            if (std::filesystem::exists(file, failure) || failure) {
+                return;
+            }
+
+            std::ofstream out(file, std::ios::binary);
+
+            out << "Signature: 8a477f597d28d172789f06886806bc55\n"
+                   "# This file is a cache directory tag created by tinyiv.\n"
+                   "# For information about cache directory tags, see https://bford.info/cachedir/\n";
+        }
+
+        // The folder there to take pyramids, made first when create is set. Only a folder tinyiv owns
+        // or made is tagged, never one the user pointed it at, which may hold the images themselves.
+        bool usable(const std::filesystem::path &dir, const bool create, const bool owned) {
+            std::error_code failure;
+            const bool made = create && std::filesystem::create_directories(dir, failure);
 
             if (failure || !std::filesystem::is_directory(dir, failure)) {
                 return false;
             }
-#ifdef _WIN32
-            return true;
-#else
+#ifndef _WIN32
             // A folder another user made on a shared drive is there but cannot take our files.
-            return ::access(dir.c_str(), W_OK | X_OK) == 0;
+            if (::access(dir.c_str(), W_OK | X_OK) != 0) {
+                return false;
+            }
 #endif
+            if (create && (made || owned)) {
+                tag(dir);
+            }
+
+            return true;
         }
 
         // Reads at an offset, so each reader thread has its own handle and none waits on another's seek.
@@ -367,16 +397,18 @@ namespace tiv {
         };
 
         // Gathers writes into a large buffer and puts each down at its offset, as the Reader reads.
+        // Stops once the drive holding the folder has no more than its spare room left.
         class Writer final : public Sink {
 
         public:
-            explicit Writer(const std::filesystem::path &file)
+            Writer(const std::filesystem::path &file, std::filesystem::path dir)
+                : _dir(std::move(dir)),
 #ifdef _WIN32
-                : _handle(CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_FLAG_SEQUENTIAL_SCAN,
+                  _handle(CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_FLAG_SEQUENTIAL_SCAN,
                                       nullptr))
 #else
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
-                : _fd(::open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644))
+                  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
+                  _fd(::open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644))
 #endif
             {
                 _buffer.reserve(WRITE_BUFFER);
@@ -391,6 +423,7 @@ namespace tiv {
 
             [[nodiscard]] bool ok() const override { return valid() && _ok; }
             [[nodiscard]] std::uint64_t at() const { return _at; }
+            [[nodiscard]] bool full() const { return _full; }
 
             std::uint64_t put(const std::span<const std::uint8_t> bytes) override {
                 const std::uint64_t offset = _at;
@@ -448,10 +481,41 @@ namespace tiv {
 #endif
             }
 
+#ifndef _WIN32
+            // A pyramid of many gigabytes would push everything else out of the page cache, so from
+            // Linux 6.14 its pages go once written: https://lwn.net/Articles/998783/
+            // An older kernel or a file system without it takes plain writes.
+            ssize_t write_at(const std::uint8_t *from, const std::size_t bytes, const std::uint64_t offset) {
+#ifdef RWF_DONTCACHE
+                if (_uncached) {
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast): iovec takes what it only reads, minus the const.
+                    const iovec part{.iov_base = const_cast<std::uint8_t *>(from), .iov_len = bytes};
+                    const ssize_t done = ::pwritev2(_fd, &part, 1, static_cast<off_t>(offset), RWF_DONTCACHE);
+
+                    if (done >= 0 || (errno != EOPNOTSUPP && errno != EINVAL)) {
+                        return done;
+                    }
+
+                    _uncached = false;
+                }
+#endif
+                return ::pwrite(_fd, from, bytes, static_cast<off_t>(offset));
+            }
+#endif
+
             void flush() {
                 put(_flushed, _buffer.data(), _buffer.size());
                 _flushed += _buffer.size();
                 _buffer.clear();
+
+                if (_flushed - _checked >= ROOM_CHECK_BYTES) {
+                    std::error_code failure;
+                    const std::filesystem::space_info space = std::filesystem::space(_dir, failure);
+
+                    _checked = _flushed;
+                    _full = !failure && space.available < SPARE_DISK;
+                    _ok = _ok && !_full;
+                }
             }
 
             void put(std::uint64_t offset, const std::uint8_t *from, std::size_t bytes) {
@@ -471,7 +535,7 @@ namespace tiv {
                         return;
                     }
 #else
-                    const ssize_t done = ::pwrite(_fd, from, chunk, static_cast<off_t>(offset));
+                    const ssize_t done = write_at(from, chunk, offset);
 
                     if (done <= 0) {
                         _ok = false;
@@ -485,6 +549,7 @@ namespace tiv {
                 }
             }
 
+            std::filesystem::path _dir;
 #ifdef _WIN32
             HANDLE _handle = INVALID_HANDLE_VALUE;
 #else
@@ -494,7 +559,11 @@ namespace tiv {
             // Where the buffer goes when next put down.
             std::uint64_t _flushed = 0;
             std::uint64_t _at = 0;
+            // Where the room left was last looked at.
+            std::uint64_t _checked = 0;
             bool _ok = true;
+            bool _full = false;
+            bool _uncached = true;
         };
 
         // Keeps each tile as its own block, for a pyramid of an image that fits in memory, which
@@ -637,27 +706,26 @@ namespace tiv {
                 }
             }
 
-            // Rows of the finest level, starting on a tile row.
+            // Rows of the finest level, starting on a tile row. They are copied and cut into tiles on a
+            // thread of their own, so the decoder goes on to the next band meanwhile. The copy costs a
+            // few milliseconds a band, the overlap the whole time the tiles take.
             bool band(const int rows, const std::span<const std::uint8_t> pixels) {
-                State &finest = _states.front();
-                const std::size_t pitch = static_cast<std::size_t>(finest.level.width) * Bitmap::CHANNELS;
+                settle();
 
-                if (_keepFinest) {
-                    write_band(finest, pixels.data(), rows);
-                } else {
-                    ++finest.tileRow;
-                    finest.received += rows;
+                if (!_out->ok() || _failed) {
+                    return false;
                 }
 
-                for (int y = 0; y < rows; ++y) {
-                    feed(0, pixels.data() + (pitch * static_cast<std::size_t>(y)));
-                }
+                _copy.assign(pixels.begin(), pixels.end());
+                _cutting = std::jthread([this, rows] { cut(rows, _copy.data()); });
 
-                return _out->ok() && !_failed;
+                return true;
             }
 
             // Every level whole.
-            [[nodiscard]] bool finished() const {
+            [[nodiscard]] bool finished() {
+                settle();
+
                 return !_failed && _out->ok() && std::ranges::all_of(_states, [](const State &state) {
                     return state.received == state.level.height;
                 });
@@ -707,6 +775,29 @@ namespace tiv {
                 std::vector<std::uint8_t> half;
                 std::vector<Placed> spans;
             };
+
+            // Waits for the band before to be cut.
+            void settle() {
+                if (_cutting.joinable()) {
+                    _cutting.join();
+                }
+            }
+
+            void cut(const int rows, const std::uint8_t *pixels) {
+                State &finest = _states.front();
+                const std::size_t pitch = static_cast<std::size_t>(finest.level.width) * Bitmap::CHANNELS;
+
+                if (_keepFinest) {
+                    write_band(finest, pixels, rows);
+                } else {
+                    ++finest.tileRow;
+                    finest.received += rows;
+                }
+
+                for (int y = 0; y < rows; ++y) {
+                    feed(0, pixels + (pitch * static_cast<std::size_t>(y)));
+                }
+            }
 
             void encode(const TileCache::Level &level, const std::uint8_t *rows, const int count, const int column,
                         Encoded &slot) const {
@@ -801,6 +892,9 @@ namespace tiv {
             std::vector<State> _states;
             std::vector<Encoded> _slots;
             bool _failed = false;
+            // The band being cut, and the thread cutting it, last so it is joined before the rest goes.
+            std::vector<std::uint8_t> _copy;
+            std::jthread _cutting;
         };
 
         bool sound(const Header &header, const std::uintmax_t size) {
@@ -1125,7 +1219,7 @@ namespace tiv {
                     return nullptr;
                 }
 
-                out = std::make_unique<Writer>(part);
+                out = std::make_unique<Writer>(part, dir);
 
                 if (!out->ok()) {
                     made.why = "could not create the tile file";
@@ -1144,6 +1238,12 @@ namespace tiv {
 
             bool done = source != nullptr ? run_source_pass(file, *source, progress, error, abort, ready, &made)
                                           : run_pass(file, display, progress, error, abort, ready, &made);
+
+            if (!done && out != nullptr && out->full()) {
+                fail(error, file,
+                     std::format("the drive filled up, {:.1f} GB has to stay free",
+                                 static_cast<double>(SPARE_DISK) / 1e9));
+            }
 
             if (done) {
                 header.index = out->at();
@@ -1189,7 +1289,8 @@ namespace tiv {
         }
     }
 
-    std::filesystem::path TileCache::location(const std::filesystem::path &file, const std::filesystem::path &folder) {
+    std::filesystem::path TileCache::location(const std::filesystem::path &file, const std::filesystem::path &folder,
+                                              const bool create) {
         std::error_code failure;
 
         if (const std::filesystem::path parent = std::filesystem::absolute(file, failure).parent_path();
@@ -1197,20 +1298,22 @@ namespace tiv {
             // An absolute folder replaces the parent whole.
             std::filesystem::path dir = parent / (folder.empty() ? std::filesystem::path("tinyiv-cache") : folder);
 
-            if (usable(dir)) {
+            if (usable(dir, create, folder.empty())) {
                 return dir;
             }
         }
 
         std::filesystem::path dir = user_cache();
 
-        if (!dir.empty() && usable(dir)) {
+        if (!dir.empty() && usable(dir, create, true)) {
             return dir;
         }
 
         std::error_code missing;
 
-        return std::filesystem::temp_directory_path(missing) / "tinyiv";
+        dir = std::filesystem::temp_directory_path(missing) / "tinyiv";
+
+        return usable(dir, create, true) ? dir : std::filesystem::path{};
     }
 
     std::shared_ptr<TileCache> TileCache::open(const std::filesystem::path &file, const std::filesystem::path &folder,
@@ -1221,7 +1324,12 @@ namespace tiv {
             return nullptr;
         }
 
-        const std::filesystem::path dir = location(file, folder);
+        const std::filesystem::path dir = location(file, folder, false);
+
+        if (dir.empty()) {
+            return nullptr;
+        }
+
         std::filesystem::path path = dir / name_of(identity, display);
         std::error_code failure;
 
@@ -1257,7 +1365,15 @@ namespace tiv {
         std::unique_ptr<Source> source = display.hdr() ? nullptr : open_source(file, nullptr);
 
         if (store == Store::Disk) {
-            if (!write_pyramid(file, location(file, folder), display, source.get(), progress, error, abort)) {
+            const std::filesystem::path dir = location(file, folder);
+
+            if (dir.empty()) {
+                fail(error, file, "no folder can take the tiles");
+
+                return nullptr;
+            }
+
+            if (!write_pyramid(file, dir, display, source.get(), progress, error, abort)) {
                 return nullptr;
             }
 

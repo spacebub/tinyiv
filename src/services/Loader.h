@@ -60,6 +60,8 @@ namespace tiv {
             std::shared_ptr<const Animation> animation;
             // Instead of the pyramid, for an image shown from tiles.
             std::shared_ptr<const TileCache> tileCache;
+            // Where tiles being made go on disk. Empty when they stay in memory.
+            std::filesystem::path tileFolder;
         };
 
         // Full resolution is capped where the image's pyramid would take more than half the
@@ -180,6 +182,7 @@ namespace tiv {
             bool streaming = false;
             // What the image is, once streaming, for showing it again while the tiles are written.
             Decode::Info info;
+            std::filesystem::path tileFolder;
         };
 
         static constexpr int FAR = 1U << 20U;

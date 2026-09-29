@@ -255,6 +255,7 @@ namespace tiv {
                         .unsupported = false,
                         .animation = nullptr,
                         .tileCache = nullptr,
+                        .tileFolder = job->tileFolder,
                 });
             }
 
@@ -774,6 +775,20 @@ namespace tiv {
         }
 
         bool build = false;
+        bool current = false;
+
+        {
+            const std::scoped_lock hold(_guard);
+
+            current = job.file == _request.current;
+        }
+
+        // Said while the tiles are made, so where the room goes is never hidden. Only the image that
+        // builds makes its folder.
+        const std::filesystem::path shownFolder =
+                where == TileCache::Store::Disk && entry.tileCache == nullptr && current
+                        ? TileCache::location(job.file, folder)
+                        : std::filesystem::path{};
 
         {
             const std::scoped_lock hold(_guard);
@@ -783,6 +798,7 @@ namespace tiv {
                 found != _jobs.end()) {
                 found->streaming = true;
                 found->info = entry.info;
+                found->tileFolder = shownFolder;
             }
 
             build = entry.tileCache == nullptr && job.file == _request.current;
@@ -798,6 +814,7 @@ namespace tiv {
                         .unsupported = false,
                         .animation = nullptr,
                         .tileCache = nullptr,
+                        .tileFolder = shownFolder,
                 });
             }
         }
@@ -1127,6 +1144,7 @@ namespace tiv {
                     .unsupported = entry.unsupported,
                     .animation = nullptr,
                     .tileCache = nullptr,
+                    .tileFolder = {},
             });
 
             return;
@@ -1143,6 +1161,7 @@ namespace tiv {
                         .unsupported = false,
                         .animation = nullptr,
                         .tileCache = entry.tileCache,
+                        .tileFolder = {},
                 });
             } else {
                 _progress.store(0.0F, std::memory_order_relaxed);
@@ -1155,6 +1174,7 @@ namespace tiv {
                         .unsupported = false,
                         .animation = nullptr,
                         .tileCache = nullptr,
+                        .tileFolder = {},
                 });
             }
 
@@ -1172,6 +1192,7 @@ namespace tiv {
                 .unsupported = false,
                 .animation = entry.animation,
                 .tileCache = nullptr,
+                .tileFolder = {},
         });
     }
 

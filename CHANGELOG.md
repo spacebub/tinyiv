@@ -12,6 +12,10 @@
 - 8 bit TIFFs decode their strips or tiles on several threads at once through libtiff, about seven times faster, and stream their full resolution from the file
 - A streamed JPEG with restart markers reads its full resolution from the file and stores only the smaller levels, a quarter of the room it took
 - Tiles are stored as planes, red and blue less green, each row filtered up or by gradient, and tiles of 256 colours or fewer as a palette: 15 to 55% smaller, and as quick to read
+- Tile folders tinyiv makes carry a CACHEDIR.TAG, so backup tools pass them by
+- While tiles are written to disk, the status says which folder they go to
+- Writing tiles watches the drive and stops before it fills, and on Linux 6.14 or newer keeps them out of the page cache
+- Tile bands are cut and compressed while the next band decodes, making huge images about 15% faster to open the first time
 - Streaming mode keeps the tiles of an image that fits in memory in memory, and writes only images too large for it to disk
 
 ## 1.2.0 - 2026-09-28

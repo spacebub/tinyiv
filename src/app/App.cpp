@@ -734,6 +734,7 @@ namespace tiv {
                 _info = result.info;
                 _turn = 1;
                 _building = true;
+                _tileFolder = result.tileFolder;
                 _loading = true;
                 _canvas->clear();
                 _viewport.set_image(0, 0);
@@ -998,6 +999,25 @@ namespace tiv {
         show(_folder.index(), _direction);
     }
 
+    std::string App::where_tiles_go() const {
+        if (_tileFolder.empty()) {
+            return {};
+        }
+
+#ifdef _WIN32
+        const char *home = SDL_getenv("USERPROFILE");
+#else
+        const char *home = SDL_getenv("HOME");
+#endif
+        const std::string folder = _tileFolder.string();
+
+        if (home != nullptr && *home != '\0' && folder.starts_with(home)) {
+            return " in ~" + folder.substr(std::string_view(home).size());
+        }
+
+        return " in " + folder;
+    }
+
     std::string App::mode_text() const {
         return _loader->streaming_all() ? "Streaming mode on" : "Streaming mode off";
     }
@@ -1072,7 +1092,8 @@ namespace tiv {
                               {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
                               scale, _failure);
         } else if (_building) {
-            const std::string notice = std::format("Making tiles: {:.0f}%", _loader->progress() * 100.0F);
+            const std::string notice =
+                    std::format("Making tiles{}: {:.0f}%", where_tiles_go(), _loader->progress() * 100.0F);
 
             StatusBar::notice(_renderer,
                               {.x = 0.0, .y = 0.0, .width = _viewport.area_width(), .height = _viewport.area_height()},
@@ -1214,8 +1235,8 @@ namespace tiv {
 
         // Ahead of any message, which would hide how far it is.
         if (_building && _info.width != 0) {
-            return std::format("{}x{}, {}, {}, making tiles {:.0f}%", size.width, size.height, format,
-                               human_size(_bytes), _loader->progress() * 100.0F);
+            return std::format("{}x{}, {}, {}, making tiles{} {:.0f}%", size.width, size.height, format,
+                               human_size(_bytes), where_tiles_go(), _loader->progress() * 100.0F);
         }
 
         // Switching the mode says so for a moment, as the badge does in fullscreen.
