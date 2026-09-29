@@ -148,15 +148,25 @@ namespace tiv {
         }
 
         std::string human_size(const std::uintmax_t bytes) {
-            constexpr double KIB = 1024.0;
-            constexpr double MIB = KIB * 1024.0;
+            constexpr double KB = 1000.0;
+            constexpr double MB = KB * 1000.0;
+            constexpr double GB = MB * 1000.0;
             const auto amount = static_cast<double>(bytes);
 
-            if (amount >= MIB) {
-                return std::format("{:.1f} MiB", amount / MIB);
+            if (amount < KB) {
+                return std::format("{} B", bytes);
             }
 
-            return std::format("{:.0f} KiB", amount / KIB);
+            // Each unit gives way where rounding would show 1000 of it.
+            if (amount < MB - (KB / 2.0)) {
+                return std::format("{:.0f} kB", amount / KB);
+            }
+
+            if (amount < GB - (MB / 20.0)) {
+                return std::format("{:.1f} MB", amount / MB);
+            }
+
+            return std::format("{:.1f} GB", amount / GB);
         }
 
         int scaled(const int value, const float by) {
