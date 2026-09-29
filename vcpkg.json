@@ -42,7 +42,6 @@
       "name": "pkgconf",
       "host": true
     },
-    "sdl3",
     "tiff",
     "zlib",
     "zstd"

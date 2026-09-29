@@ -237,6 +237,11 @@ namespace tiv {
             _request.at = std::chrono::steady_clock::now();
             _starved = false;
 
+            // Moving on cancels a rebuild.
+            if (_rebuild.file != current) {
+                _rebuild = {};
+            }
+
             if (const auto found = _cache.find(current); found != _cache.end()) {
                 found->second.used = _request.sequence;
                 post_cached(found->second);
@@ -322,6 +327,27 @@ namespace tiv {
         }
 
         if (const auto found = _cache.find(file); found != _cache.end()) {
+            release(found->second);
+            _cache.erase(found);
+        }
+    }
+
+    void Loader::rebuild(const std::filesystem::path &file) {
+        const std::scoped_lock hold(_guard);
+
+        _rebuild = {.file = file, .old = {}};
+
+        for (const Job &job : _jobs) {
+            if (job.file == file) {
+                job.abort->request();
+            }
+        }
+
+        if (const auto found = _cache.find(file); found != _cache.end()) {
+            if (found->second.tileCache != nullptr) {
+                _rebuild.old = found->second.tileCache->path();
+            }
+
             release(found->second);
             _cache.erase(found);
         }
@@ -753,16 +779,19 @@ namespace tiv {
         store(job.file, std::move(entry));
     }
 
-    // Opens the pyramid made for the file before, or makes one when it is the current image.
-    // The others wait for a pyramid until they are shown, since it takes a pass over the whole file.
-    // An image that fits in memory, streamed only because streaming mode is on, keeps its pyramid in
-    // memory and never touches the disk, unless every stream persists.
+    // Opens the pyramid made for the file before, in either cache mode, or makes one when it is the
+    // current image. The others wait for a pyramid until they are shown, since it takes a pass over
+    // the whole file. An image that fits in memory, streamed only because streaming mode is on, keeps
+    // its pyramid in memory and never touches the disk, unless every stream persists or a rebuild
+    // replaces one on disk.
     void Loader::decode_stream(Job &job, Entry entry) {
         entry.streamed = true;
 
         bool waiting = false;
         bool small = false;
         bool persist = false;
+        bool rebuild = false;
+        std::filesystem::path old;
         std::filesystem::path folder;
 
         {
@@ -773,6 +802,8 @@ namespace tiv {
             folder = _tileFolder;
             small = _smallTiles;
             persist = _persistTiles;
+            rebuild = job.file == _rebuild.file && !job.abort->requested();
+            old = _rebuild.old;
         }
 
         // Kept without a tile cache, and wants_job() picks it up again once the display is said.
@@ -782,17 +813,12 @@ namespace tiv {
             return;
         }
 
-        const TileCache::Store where =
-                persist || entry.info.pixels() > max_pixels() ? TileCache::Store::Disk : TileCache::Store::Memory;
+        const TileCache::Store where = (rebuild && !old.empty()) || persist || entry.info.pixels() > max_pixels()
+                                               ? TileCache::Store::Disk
+                                               : TileCache::Store::Memory;
 
-        if (where == TileCache::Store::Disk) {
+        if (!rebuild) {
             entry.tileCache = TileCache::open(job.file, folder, entry.display);
-
-            // Made in the other cache mode, it is made again and takes the place of the old one, so
-            // the room it takes follows the setting.
-            if (entry.tileCache != nullptr && !entry.tileCache->suits(small)) {
-                entry.tileCache = nullptr;
-            }
         }
 
         bool build = false;
@@ -824,6 +850,10 @@ namespace tiv {
 
             build = entry.tileCache == nullptr && job.file == _request.current;
 
+            if (build && rebuild) {
+                _rebuild = {};
+            }
+
             if (build) {
                 _progress.store(0.0F, std::memory_order_relaxed);
                 post({
@@ -838,6 +868,13 @@ namespace tiv {
                         .tileFolder = shownFolder,
                 });
             }
+        }
+
+        // Else it outlives a new one made under another name or folder.
+        if (build && rebuild && !old.empty()) {
+            std::error_code failure;
+
+            std::filesystem::remove(old, failure);
         }
 
         if (build) {

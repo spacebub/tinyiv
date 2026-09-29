@@ -124,7 +124,7 @@ namespace tiv {
 
                 return Action::Scroll;
             case SDLK_R:
-                return Action::Reload;
+                return (event.mod & SDL_KMOD_SHIFT) != 0 ? Action::Rebuild : Action::Reload;
             case SDLK_HOME:
                 return Action::First;
             case SDLK_END:

@@ -30,6 +30,7 @@ namespace tiv {
             First,
             Last,
             Reload,
+            Rebuild,
             TurnLeft,
             TurnRight,
             FlipVertical,

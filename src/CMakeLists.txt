@@ -105,7 +105,7 @@ target_compile_options(tinyiv PRIVATE ${TIV_COMPILE_FLAGS})
 target_compile_definitions(tinyiv PRIVATE VIPS_DISABLE_COMPAT)
 target_compile_definitions(tinyiv PRIVATE TIV_VERSION="${PROJECT_VERSION}")
 tiv_git_revision(tinyiv)
-target_link_libraries(tinyiv PRIVATE SDL3::SDL3 PkgConfig::VIPS PkgConfig::CODECS)
+target_link_libraries(tinyiv PRIVATE SDL3::SDL3-static PkgConfig::VIPS PkgConfig::CODECS)
 
 set_target_properties(tinyiv PROPERTIES WIN32_EXECUTABLE ON)
 

@@ -80,6 +80,7 @@ namespace tiv {
         void warm_neighbours();
         // Reads the image from disk again, dropping any turn not saved.
         void reload();
+        void rebuild();
         // Composes a turn or flip with how the image is shown.
         void turn(int by);
         // Writes how the image is turned into its file, when it is turned.

@@ -122,8 +122,8 @@ namespace tiv {
         [[nodiscard]] static std::filesystem::path
         location(const std::filesystem::path &file, const std::filesystem::path &folder = {}, bool create = true);
 
-        // The pyramid made for the file as it is now and shown on the display, if there is one.
-        // The display only tells pyramids of an HDR image apart.
+        // The pyramid made for the file as it is now, in any folder location() may pick and either cache
+        // mode. An HDR display falls back to one made for another headroom, then to an SDR one.
         [[nodiscard]] static std::shared_ptr<TileCache> open(const std::filesystem::path &file,
                                                              const std::filesystem::path &folder = {},
                                                              const Tone::Display &display = {});
@@ -171,9 +171,8 @@ namespace tiv {
         // The compressed tiles held in memory, none for a pyramid on disk.
         [[nodiscard]] std::size_t stored_bytes() const { return _storedBytes; }
 
-        // Made the way the cache mode asks: a PNG keeps checkpoints for small where it can, and every
-        // tile for fast. False sends it to be made again.
-        [[nodiscard]] bool suits(bool small) const;
+        // Empty for one in memory.
+        [[nodiscard]] const std::filesystem::path &path() const { return _path; }
 
     private:
         struct Slot {
@@ -190,6 +189,9 @@ namespace tiv {
 
         TileCache() = default;
 
+        [[nodiscard]] static std::shared_ptr<TileCache> open_at(const std::filesystem::path &path,
+                                                                const std::filesystem::path &file,
+                                                                const Tone::Display &display);
         // The pyramid at the path, made for the file and shown on the display.
         bool load(const std::filesystem::path &path, const std::filesystem::path &file, const Tone::Display &display);
         // A row of the finest level's tiles from the source, all kept. The band is scratch for the
@@ -222,10 +224,6 @@ namespace tiv {
         std::vector<std::vector<Span>> _spans;
         // Gives the finest level when set, which is then not stored.
         std::unique_ptr<Source> _source;
-        // The image and display it was made for, and whether its source is a PNG's checkpoints.
-        std::filesystem::path _file;
-        Tone::Display _display;
-        bool _checkpoints = false;
 
         mutable std::mutex _guard;
         mutable std::condition_variable _wake;

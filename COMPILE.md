@@ -1,11 +1,15 @@
 # Compiling tinyiv
 
-Needs a C++23 compiler, CMake 3.25, SDL3, libvips with its C++ API, libjpeg, libpng, libwebp,
-libjxl, libtiff, libheif, zlib and zstd. The benchmarks in `bench/` build on Linux only, see [bench/README.md](bench/README.md).
+Needs a C++23 compiler, CMake 3.25, Git, libvips with its C++ API, libjpeg, libpng, libwebp,
+libjxl, libtiff, libheif, zlib and zstd. SDL 3 is fetched and built with tinyiv on every system,
+and linked in statically. The benchmarks in `bench/` build on Linux only, see [bench/README.md](bench/README.md).
 
 ## Linux
 
-Install the libraries and pkg-config from the distribution, then:
+Install the libraries and pkg-config from the distribution, and the development files SDL
+builds its windowing from, as it leaves out whichever it finds missing: wayland, wayland-protocols,
+libxkbcommon and libdecor for Wayland, and libx11, libxext, libxcursor, libxfixes, libxi and
+libxrandr for X11. On Arch they are packages of those names. Then:
 
 ```
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

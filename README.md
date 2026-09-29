@@ -30,6 +30,7 @@ Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 | Home  End               | First, last image             |
 | O                       | Sort by name, date, size      |
 | R                       | Reload from disk              |
+| Shift+R                 | Rebuild the tile cache        |
 | Left drag               | Pan                           |
 | Right drag ↑ ↓          | Zoom in, out                  |
 | ↑  ↓                    | Zoom in, out a step           |
@@ -58,15 +59,21 @@ Settings are kept in `tinyiv.conf`, in `$XDG_CONFIG_HOME/tinyiv` (usually `~/.co
 on Linux and next to `tinyiv.exe` on Windows. tinyiv creates the file on first start and adds
 any setting it is missing with its default value.
 
-| Setting           | Meaning                                                                                                                                                                                                                                                                                                                                  |
-|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cache`           | Where tile caches are kept. Empty keeps each cache in a `tinyiv-cache` folder next to its image. A relative path starts from the image's folder, and `~` means your home folder.                                                                                                                                                         |
-| `cache_mode`      | `fast` or `small`. Fast caches every tile of a huge PNG, so panning is instant. Small caches only the points decoding can resume from, which takes about a third of the space, but panning at full size waits a few tens of milliseconds for each band of rows. A cache made in the other mode is rebuilt the next time its image opens. |
-| `streaming_mode`  | `on` or `off`. Whether streaming mode is on when tinyiv starts. S switches it while tinyiv runs, and images too large for memory always stream.                                                                                                                                                                                          |
-| `persist_streams` | `on` or `off`. Whether streamed images that fit in memory keep their tiles on disk too. Off caches only images too large for memory, on caches every streamed image so it opens at once the next time.                                                                                                                                   |
-| `sort`            | `a-z`, `z-a`, `newest`, `oldest` or `size`. The order of the images in a folder. Newest and oldest go by when each file was last modified, and size puts the smallest first. O steps through them while tinyiv runs without changing the file.                                                                                           |
+| Setting           | Meaning                                                                                                                                                                                                                                                                                                                                          |
+|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `cache`           | Where tile caches are kept. Empty keeps each cache in a `tinyiv-cache` folder next to its image. A relative path starts from the image's folder, and `~` means your home folder.                                                                                                                                                                 |
+| `cache_mode`      | `fast` or `small`. Fast caches every tile of a huge PNG, so panning is instant. Small caches only the points decoding can resume from, which takes about a third of the space, but panning at full size waits a few tens of milliseconds for each band of rows. Only new caches follow it: a cache made before is used as it is, in either mode. |
+| `streaming_mode`  | `on` or `off`. Whether streaming mode is on when tinyiv starts. S switches it while tinyiv runs, and images too large for memory always stream.                                                                                                                                                                                                  |
+| `persist_streams` | `on` or `off`. Whether streamed images that fit in memory keep their tiles on disk too. Off caches only images too large for memory, on caches every streamed image so it opens at once the next time.                                                                                                                                           |
+| `sort`            | `a-z`, `z-a`, `newest`, `oldest` or `size`. The order of the images in a folder. Newest and oldest go by when each file was last modified, and size puts the smallest first. O steps through them while tinyiv runs without changing the file.                                                                                                   |
 
 If the cache folder can't be written, tinyiv falls back to your user cache folder.
+
+A streamed image uses the cache that is already there, whatever the settings, the cache mode or
+the system it was made with, so a cache made on Linux opens on Windows and the other way around.
+tinyiv looks for it in the `cache` folder, the `tinyiv-cache` folder next to the image and your
+user cache folder. Shift+R makes the cache of the streamed image on screen again with the current
+settings.
 
 ## License
 

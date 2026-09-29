@@ -117,8 +117,8 @@ namespace tiv {
                         .text = "# How huge PNGs are cached, fast or small. Fast stores every tile, so panning is\n"
                                 "# instant. Small stores only the points decoding can resume from, which takes\n"
                                 "# about a third of the space, but panning at full size waits a few tens of\n"
-                                "# milliseconds for each band of rows. A cache made in the other mode is rebuilt\n"
-                                "# the next time its image opens.\n"
+                                "# milliseconds for each band of rows. A cache made before is used as it is, in\n"
+                                "# either mode. Shift+R rebuilds the cache of the image on screen in this mode.\n"
                                 "cache_mode = fast\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {

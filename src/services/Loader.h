@@ -125,6 +125,9 @@ namespace tiv {
         // The file changed on disk, so what is decoded of it goes and decodes of it stop.
         void forget(const std::filesystem::path &file);
 
+        // The file's next stream makes its tiles again, replacing the pyramid it showed from.
+        void rebuild(const std::filesystem::path &file);
+
         // The file now says this orientation. Decodes of it still running read the old one, so they stop.
         void reoriented(const std::filesystem::path &file, int orientation);
 
@@ -170,6 +173,12 @@ namespace tiv {
             std::uint64_t used = 0;
             // What an HDR image was decoded for.
             Tone::Display display;
+        };
+
+        struct Rebuild {
+            std::filesystem::path file;
+            // Empty when it showed from memory.
+            std::filesystem::path old;
         };
 
         struct Job {
@@ -243,6 +252,7 @@ namespace tiv {
         std::filesystem::path _tileFolder;
         bool _smallTiles = false;
         bool _persistTiles = false;
+        Rebuild _rebuild;
         std::atomic<float> _progress = 0.0F;
 
         int _screenWidth = 3840;

@@ -71,12 +71,13 @@ namespace tiv {
         constexpr SDL_Color BACKGROUND{.r = 0, .g = 0, .b = 0, .a = 255};
 
         // Keys are two spaces apart, the words of one key a single space.
-        constexpr std::array<StatusBar::Row, 18> HELP = {
+        constexpr std::array<StatusBar::Row, 19> HELP = {
                 {
                         {.left = "Wheel  ←  →", .right = "Previous, next image"},
                         {.left = "Home  End", .right = "First, last image"},
                         {.left = "O", .right = "Sort by name, date, size"},
                         {.left = "R", .right = "Reload from disk"},
+                        {.left = "Shift+R", .right = "Rebuild the tile cache"},
                         {.left = "Left drag", .right = "Pan"},
                         {.left = "Right drag ↑ ↓", .right = "Zoom in, out"},
                         {.left = "↑  ↓", .right = "Zoom in, out a step"},
@@ -180,6 +181,7 @@ namespace tiv {
         // What the gpu renderer would make for itself, kept so a renderer made again for another
         // output skips making a device. The features are the ones it turns off:
         // https://github.com/libsdl-org/SDL/blob/release-3.4.x/src/render/gpu/SDL_render_gpu.c
+        // Vulkan first, as SDL's Direct3D 12 backend never presents HDR, then whatever SDL picks.
         SDL_GPUDevice *create_device() {
             const SDL_PropertiesID properties = SDL_CreateProperties();
 
@@ -195,7 +197,14 @@ namespace tiv {
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_FEATURE_ANISOTROPY_BOOLEAN, false);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_METAL_ALLOW_MACFAMILY1_BOOLEAN, false);
 
+            SDL_SetStringProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, "vulkan");
+
             SDL_GPUDevice *device = SDL_CreateGPUDeviceWithProperties(properties);
+
+            if (device == nullptr) {
+                SDL_ClearProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING);
+                device = SDL_CreateGPUDeviceWithProperties(properties);
+            }
 
             SDL_DestroyProperties(properties);
 
@@ -332,10 +341,8 @@ namespace tiv {
         set_icon(_window);
 #endif
 
-        // The device is kept to share between renderers, and only an HDR display ever makes a second one.
-        if (SDL_GetBooleanProperty(SDL_GetWindowProperties(_window), SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false)) {
-            _device = create_device();
-        }
+        // Kept to share between renderers, as an HDR display makes a second one.
+        _device = create_device();
 
         if (!make_renderer(false)) {
             *error = SDL_GetError();
@@ -357,12 +364,9 @@ namespace tiv {
 
         _renderer = _device != nullptr ? create_renderer(_window, _device, linear) : nullptr;
 
+        // Else whichever renderer SDL has.
         if (_renderer == nullptr && !linear) {
-            _renderer = SDL_CreateRenderer(_window, "gpu");
-
-            if (_renderer == nullptr) {
-                _renderer = SDL_CreateRenderer(_window, nullptr);
-            }
+            _renderer = SDL_CreateRenderer(_window, nullptr);
         }
 
         if (_renderer == nullptr) {
@@ -594,6 +598,9 @@ namespace tiv {
                 break;
             case Input::Action::Reload:
                 reload();
+                break;
+            case Input::Action::Rebuild:
+                rebuild();
                 break;
             case Input::Action::TurnLeft:
                 turn(Orient::TURN_LEFT);
@@ -985,6 +992,24 @@ namespace tiv {
         }
 
         _loader->forget(_folder.current());
+        _canvas->clear();
+        show(_folder.index(), _direction);
+    }
+
+    void App::rebuild() {
+        if (_folder.count() == 0) {
+            return;
+        }
+
+        if (!_streamed && !_building) {
+            _flash = "Not streamed, no tile cache to rebuild";
+            _switchedAt = SDL_GetTicks();
+            _dirty = true;
+
+            return;
+        }
+
+        _loader->rebuild(_folder.current());
         _canvas->clear();
         show(_folder.index(), _direction);
     }

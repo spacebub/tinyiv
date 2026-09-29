@@ -87,7 +87,6 @@ if (DEFINED VCPKG_INSTALLED_DIR AND EXISTS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGE
             "CMAKE_BUILD_TYPE.")
 endif ()
 
-find_package(SDL3 REQUIRED CONFIG COMPONENTS SDL3-shared)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
 pkg_check_modules(CODECS REQUIRED IMPORTED_TARGET libwebp libjxl libjxl_threads libjpeg libpng libtiff-4 libheif libzstd zlib)
@@ -97,6 +96,31 @@ include(DownloadCache)
 include(Embed)
 include(Format)
 include(GitRevision)
+
+# Built here on every system, as few have SDL 3 installed, and linked statically, so nothing of it
+# is installed.
+include(FetchContent)
+
+set(TIV_SDL_VERSION release-3.4.16)
+
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+# tinyiv only opens a window, so none of their headers are needed to build.
+foreach (subsystem IN ITEMS AUDIO CAMERA HAPTIC HIDAPI JOYSTICK SENSOR)
+    set(SDL_${subsystem} OFF CACHE BOOL "" FORCE)
+endforeach ()
+
+tiv_cache_source(SDL3 https://github.com/libsdl-org/SDL.git ${TIV_SDL_VERSION})
+
+FetchContent_Declare(SDL3
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG ${TIV_SDL_VERSION}
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL
+        SYSTEM)
+
+FetchContent_MakeAvailable(SDL3)
 
 add_subdirectory(src)
 

@@ -381,6 +381,68 @@ namespace tiv {
             return {};
         }
 
+        // The existing folders location() may pick under any cache setting.
+        std::vector<std::filesystem::path> folders(const std::filesystem::path &file,
+                                                   const std::filesystem::path &folder) {
+            std::vector<std::filesystem::path> found;
+            const auto add = [&](const std::filesystem::path &dir) {
+                std::error_code failure;
+
+                if (!dir.empty() && std::filesystem::is_directory(dir, failure)
+                    && std::ranges::find(found, dir) == found.end()) {
+                    found.push_back(dir);
+                }
+            };
+            std::error_code failure;
+
+            if (const std::filesystem::path parent = std::filesystem::absolute(file, failure).parent_path();
+                !failure && !parent.empty()) {
+                if (!folder.empty()) {
+                    add(parent / folder);
+                }
+
+                add(parent / "tinyiv-cache");
+            }
+
+            add(user_cache());
+
+            if (const std::filesystem::path temp = std::filesystem::temp_directory_path(failure); !failure) {
+                add(temp / "tinyiv");
+            }
+
+            return found;
+        }
+
+        // Best first. An SDR pyramid has one name, so only an HDR display falls back.
+        std::vector<std::filesystem::path> candidates(const std::span<const std::filesystem::path> dirs,
+                                                      const Identity &identity, const Tone::Display &display) {
+            std::vector<std::filesystem::path> found;
+            const auto add = [&](const std::filesystem::path &path) {
+                std::error_code failure;
+
+                if (!path.empty() && std::filesystem::is_regular_file(path, failure)
+                    && std::ranges::find(found, path) == found.end()) {
+                    found.push_back(path);
+                }
+            };
+
+            for (const std::filesystem::path &dir : dirs) {
+                add(dir / name_of(identity, display));
+            }
+
+            if (display.hdr()) {
+                for (const std::filesystem::path &dir : dirs) {
+                    add(made_for(dir, identity, display));
+                }
+
+                for (const std::filesystem::path &dir : dirs) {
+                    add(dir / name_of(identity, {}));
+                }
+            }
+
+            return found;
+        }
+
         // Where a Builder puts the tiles it makes.
         class Sink {
 
@@ -1401,7 +1463,7 @@ namespace tiv {
         // Makes the file's pyramid in the folder, under a temporary name until it is whole.
         bool write_pyramid(const std::filesystem::path &file, const std::filesystem::path &dir,
                            const Tone::Display &display, TileCache::Source *source, std::atomic<float> *progress,
-                           std::string *error, Decode::Abort *abort) {
+                           std::string *error, Decode::Abort *abort, std::filesystem::path *written) {
             Identity identity;
 
             if (!identify(file, &identity)) {
@@ -1497,6 +1559,8 @@ namespace tiv {
                 if (!done) {
                     fail(error, file, "could not keep the tile file");
                 }
+
+                *written = finished;
             }
 
             if (!done) {
@@ -1551,40 +1615,35 @@ namespace tiv {
 
     std::shared_ptr<TileCache> TileCache::open(const std::filesystem::path &file, const std::filesystem::path &folder,
                                                const Tone::Display &display) {
+        const std::vector<std::filesystem::path> dirs = folders(file, folder);
         Identity identity;
 
-        if (!identify(file, &identity)) {
+        if (dirs.empty() || !identify(file, &identity)) {
             return nullptr;
         }
 
-        const std::filesystem::path dir = location(file, folder, false);
-
-        if (dir.empty()) {
-            return nullptr;
+        for (const std::filesystem::path &path : candidates(dirs, identity, display)) {
+            if (std::shared_ptr<TileCache> tileCache = open_at(path, file, display); tileCache != nullptr) {
+                return tileCache;
+            }
         }
 
-        std::filesystem::path path = dir / name_of(identity, display);
-        std::error_code failure;
+        return nullptr;
+    }
 
-        if (!std::filesystem::is_regular_file(path, failure)) {
-            path = made_for(dir, identity, display);
-        }
-
-        if (path.empty()) {
-            return nullptr;
-        }
-
-        // Opened now, so the last to go when room is made.
-        std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now(), failure);
-
+    // An unreadable one is kept, as another version of tinyiv may read it.
+    std::shared_ptr<TileCache> TileCache::open_at(const std::filesystem::path &path, const std::filesystem::path &file,
+                                                  const Tone::Display &display) {
         std::shared_ptr<TileCache> tileCache(new TileCache());
 
         if (!tileCache->load(path, file, display)) {
-            std::filesystem::remove(path, failure);
-
             return nullptr;
         }
 
+        std::error_code failure;
+
+        // Opened now, so the last to go when room is made.
+        std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now(), failure);
         tileCache->start();
 
         return tileCache;
@@ -1611,11 +1670,13 @@ namespace tiv {
                 return nullptr;
             }
 
-            if (!write_pyramid(file, dir, display, source.get(), progress, error, abort)) {
+            std::filesystem::path written;
+
+            if (!write_pyramid(file, dir, display, source.get(), progress, error, abort, &written)) {
                 return nullptr;
             }
 
-            std::shared_ptr<TileCache> tileCache = open(file, folder, display);
+            std::shared_ptr<TileCache> tileCache = open_at(written, file, display);
 
             if (tileCache == nullptr) {
                 fail(error, file, "could not open the tile file just made");
@@ -1652,8 +1713,6 @@ namespace tiv {
 
         tileCache->_blocks = std::move(blocks.held);
         tileCache->_source = std::move(source);
-        tileCache->_file = file;
-        tileCache->_display = display;
         tileCache->attach_source();
         tileCache->pin();
         tileCache->start();
@@ -1748,26 +1807,13 @@ namespace tiv {
         }
 
         _path = path;
-        _file = file;
-        _display = display;
         attach_source();
         pin();
 
         return true;
     }
 
-    bool TileCache::suits(const bool small) const {
-        if (_checkpoints || !small) {
-            return _checkpoints == small;
-        }
-
-        // Every tile is kept, which small only allows for a file it cannot give checkpoints of.
-        return _source != nullptr || Decode::PngBands::open(_file, _display) == nullptr;
-    }
-
     void TileCache::attach_source() {
-        _checkpoints = dynamic_cast<const PngSource *>(_source.get()) != nullptr;
-
         if (_source == nullptr) {
             return;
         }

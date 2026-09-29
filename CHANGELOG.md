@@ -10,10 +10,13 @@
 - `streaming_mode` setting to start tinyiv with streaming mode on
 - `persist_streams` setting to cache every streamed image on disk, not only those too large for memory
 - `sort` setting to choose the order a folder starts in
+- Shift+R rebuilds the tile cache of the streamed image on screen with the current settings
 - `O` steps through the sort orders: name A to Z, name Z to A, newest first, oldest first and smallest first. The top bar always shows the order in use
 
 ### Changed
 
+- A streamed image uses the tile cache that is already there, whatever the settings, the cache mode or the system it was made with, so caches made on Linux open on Windows and the other way around. tinyiv looks for it next to the image and in the user cache folder as well as in the `cache` folder
+- A tile cache made in the other cache mode is no longer rebuilt, and one tinyiv can't read is left in place instead of deleted
 - Large JPEGs with restart markers decode on all cores
 - 8 bit TIFFs decode on all cores through libtiff
 - JPEGs with restart markers, most TIFFs and HEIF or AVIF grids are streamed straight from the file at full size, so only the smaller levels are cached. Their caches take about a quarter of the space they used to
@@ -30,6 +33,7 @@
 
 ### Fixed
 
+- HDR images on Windows were drawn in SDR, as SDL's Direct3D 12 backend never enabled HDR output. tinyiv now draws through Vulkan, falling back to what SDL picks
 - Writing a tile cache could fill the drive. It now stops while 1 GB is still free
 
 ## 1.2.0 - 2026-09-28
