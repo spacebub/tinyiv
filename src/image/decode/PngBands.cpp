@@ -294,7 +294,7 @@ namespace tiv::Decode {
         }
 
 #if defined(__x86_64__) || defined(_M_X64)
-        // Paeth on whole pixels of 3 or 4 bytes at once: each still waits on the one to its left, but
+        // Paeth on whole pixels of 3 to 8 bytes at once: each still waits on the one to its left, but
         // its channels go together in 16 bit lanes, ties going left, then up, then to the corner.
         // As libpng's filter_sse2_intrinsics.c does it (libpng licence):
         // https://github.com/pnggroup/libpng/blob/libpng16/intel/filter_sse2_intrinsics.c
@@ -306,14 +306,14 @@ namespace tiv::Decode {
             __m128i corner = zero;
 
             for (std::size_t i = 0; i + step <= bytes; i += step) {
-                std::uint32_t up = 0;
-                std::uint32_t filtered = 0;
+                std::uint64_t up = 0;
+                std::uint64_t filtered = 0;
 
                 std::memcpy(&up, above + i, step);
                 std::memcpy(&filtered, in + i, step);
 
-                const __m128i b = _mm_unpacklo_epi8(_mm_cvtsi32_si128(static_cast<int>(up)), zero);
-                const __m128i x = _mm_unpacklo_epi8(_mm_cvtsi32_si128(static_cast<int>(filtered)), zero);
+                const __m128i b = _mm_unpacklo_epi8(_mm_cvtsi64_si128(static_cast<long long>(up)), zero);
+                const __m128i x = _mm_unpacklo_epi8(_mm_cvtsi64_si128(static_cast<long long>(filtered)), zero);
                 const __m128i toLeft = _mm_abs_epi16(_mm_sub_epi16(b, corner));
                 const __m128i toUp = _mm_abs_epi16(_mm_sub_epi16(left, corner));
                 const __m128i toCorner =
@@ -324,7 +324,7 @@ namespace tiv::Decode {
 
                 left = _mm_and_si128(_mm_add_epi16(x, guess), low);
 
-                const auto out = static_cast<std::uint32_t>(_mm_cvtsi128_si32(_mm_packus_epi16(left, zero)));
+                const auto out = static_cast<std::uint64_t>(_mm_cvtsi128_si64(_mm_packus_epi16(left, zero)));
 
                 std::memcpy(row + i, &out, step);
                 corner = b;
@@ -368,7 +368,7 @@ namespace tiv::Decode {
                     break;
                 case PAETH:
 #if defined(__x86_64__) || defined(_M_X64)
-                    if ((step == 3 || step == 4) && Simd::avx2()) {
+                    if (step >= 3 && step <= sizeof(std::uint64_t) && Simd::avx2()) {
                         paeth_pixels(in, above, row, bytes, step);
 
                         break;
