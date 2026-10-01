@@ -268,6 +268,12 @@ namespace tiv {
             std::println(stderr, "tinyiv: {}", warning);
         }
 
+        _footprint = config.footprint;
+
+        if (_footprint) {
+            Memory::lean();
+        }
+
         _folder.sort(config.order);
 
         if (!file.empty() && !_folder.open(file, Decode::suffixes(), error)) {
@@ -278,7 +284,7 @@ namespace tiv {
         _loaderEvent = SDL_RegisterEvents(3);
         _refinerEvent = _loaderEvent + 1;
         _tileCacheEvent = _loaderEvent + 2;
-        _loader = std::make_unique<Loader>(_loaderEvent);
+        _loader = std::make_unique<Loader>(_loaderEvent, Loader::DEFAULT_CACHE_BYTES, 0, _footprint);
 
         _loader->set_tiles(config.cache, config.small, config.persist);
         _loader->stream_all(config.streaming);
@@ -378,7 +384,7 @@ namespace tiv {
 
         const auto maxTexture = static_cast<int>(SDL_GetNumberProperty(
                 SDL_GetRendererProperties(_renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, Tiles::SIZE));
-        _canvas = std::make_unique<Canvas>(_renderer, maxTexture);
+        _canvas = std::make_unique<Canvas>(_renderer, maxTexture, Canvas::DEFAULT_VRAM_BUDGET, _footprint);
         _dirty = true;
 
         return true;
@@ -465,7 +471,7 @@ namespace tiv {
 
         std::vector<std::filesystem::path> ahead;
         std::vector<std::filesystem::path> behind;
-        const int count = _folder.count();
+        const int count = _footprint ? 0 : _folder.count();
 
         for (int i = 1; i <= PREFETCH_AHEAD && i < count; ++i) {
             ahead.push_back(_folder.at(_folder.index() + (i * direction)));
@@ -956,6 +962,17 @@ namespace tiv {
 
     // The images either side stay on the GPU, so stepping to them draws at once.
     void App::warm_neighbours() {
+        if (_footprint) {
+            // The image before a failed one would otherwise stay on the canvas, hidden.
+            if (!_failure.empty()) {
+                _canvas->clear();
+            }
+
+            _canvas->keep({});
+
+            return;
+        }
+
         if (_folder.count() < 2) {
             return;
         }
@@ -1079,7 +1096,7 @@ namespace tiv {
 
     // The images prefetched stay as they are, and the next step fetches the new neighbours.
     void App::next_order() {
-        const auto at = std::ranges::find(ORDERS, _folder.order(), &OrderText::order);
+        const auto *const at = std::ranges::find(ORDERS, _folder.order(), &OrderText::order);
         const OrderText &next = std::next(at) == ORDERS.end() ? ORDERS.front() : *std::next(at);
 
         _folder.sort(next.order);

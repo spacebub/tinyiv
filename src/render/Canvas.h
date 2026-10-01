@@ -30,8 +30,11 @@ namespace tiv {
 
     public:
         static constexpr std::size_t DEFAULT_VRAM_BUDGET = std::size_t{1024} * 1024 * 1024;
+        // Tiles not drawn in the last frame go once past this, when lean.
+        static constexpr std::size_t LEAN_VRAM_BUDGET = std::size_t{64} * 1024 * 1024;
 
-        Canvas(SDL_Renderer *renderer, int maxTexture, std::size_t vramBudget = DEFAULT_VRAM_BUDGET);
+        // Lean asks for and uploads only the tiles the view meets, nothing around them or below.
+        Canvas(SDL_Renderer *renderer, int maxTexture, std::size_t vramBudget = DEFAULT_VRAM_BUDGET, bool lean = false);
 
         // The image to draw. Width and height are the image's own as stored, which the pyramid
         // may be smaller than, and the orientation is how it is shown. Levels the same size as
@@ -142,6 +145,7 @@ namespace tiv {
         SDL_Renderer *_renderer;
         int _maxTexture;
         std::size_t _budget;
+        bool _lean;
         Held _current;
         std::vector<Held> _warm;
         Detail _detail;

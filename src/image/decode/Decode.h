@@ -134,12 +134,14 @@ namespace tiv::Decode {
 
     // Hands the image over as stored, top to bottom, in bands of the rows given, so any size decodes in
     // the memory of one band. Begin first hears the size, the alpha and the bands' encoding, chosen as
-    // load() would for the display. Either returning false stops the decode.
+    // load() would for the display. Either returning false stops the decode. A JPEG shrinks on the way
+    // by 2, 4 or 8, as cheaply as its blocks scale. Any other format comes at full size whatever is asked.
     using Begin = std::function<bool(int width, int height, bool alpha, Bitmap::Encoding encoding)>;
     using Take = std::function<bool(int y, int rows, std::span<const std::uint8_t> pixels)>;
 
     bool stream(const std::filesystem::path &file, int rows, const Begin &begin, const Take &take,
-                std::string *error = nullptr, Abort *abort = nullptr, const Tone::Display &display = {});
+                std::string *error = nullptr, Abort *abort = nullptr, const Tone::Display &display = {},
+                int shrink = 1);
 
     // About the most memory stream() holds for the file in bands of the rows given, for the
     // formats whose decoder holds much of the image. Zero for the rest.

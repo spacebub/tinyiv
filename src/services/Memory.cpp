@@ -33,6 +33,17 @@ namespace tiv {
 #endif
     }
 
+    void Memory::lean() {
+#ifdef __GLIBC__
+        // glibc's own starting point, held there: it otherwise rises to the largest block freed, and
+        // tiles and bands below it stay in the heap once freed.
+        constexpr int MMAP_THRESHOLD = 128 * 1024;
+
+        // NOLINTNEXTLINE(concurrency-mt-unsafe): called before any thread starts.
+        mallopt(M_MMAP_THRESHOLD, MMAP_THRESHOLD);
+#endif
+    }
+
     std::uint64_t Memory::available() {
         constexpr std::uint64_t MIB = std::uint64_t{1024} * 1024;
 #ifdef _WIN32

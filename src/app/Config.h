@@ -33,6 +33,9 @@ namespace tiv {
         // Streamed images that fit in memory keep their tiles on disk too, as the huge ones do.
         bool persist = false;
 
+        // Holds only what the image on screen shows, as little of it as the view allows.
+        bool footprint = false;
+
         // How a folder's images are ordered from the start, before O is ever pressed.
         Folder::Order order = Folder::Order::AToZ;
 

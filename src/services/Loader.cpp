@@ -136,6 +136,25 @@ namespace tiv {
 
             return planned;
         }
+
+        // Why making the file's tiles would take more memory than the system has free, else empty. A
+        // decoder that holds much of the image would take the system down with it, and so would the
+        // pyramid of a huge image held in memory.
+        std::string short_of_memory(const std::filesystem::path &file, const Decode::Info &info, const bool held) {
+            std::uint64_t needed = Decode::stream_bytes(file, TileCache::TILE);
+            const std::uint64_t free = Memory::available();
+
+            if (held) {
+                needed += TileCache::memory_bytes(info.kind, info.pixels());
+            }
+
+            if (needed <= free) {
+                return {};
+            }
+
+            return std::format("{}: needs {:.1f} GB of memory to decode, {:.1f} GB is free", file.string(),
+                               static_cast<double>(needed) / 1e9, static_cast<double>(free) / 1e9);
+        }
     }
 
     std::int64_t Loader::max_pixels() {
@@ -150,9 +169,14 @@ namespace tiv {
         return held;
     }
 
-    Loader::Loader(const std::uint32_t eventType, const std::size_t cacheBytes, const int workers)
-        : _event(eventType), _budget(cacheBytes) {
-        const int count = workers > 0 ? workers : default_workers();
+    Loader::Loader(const std::uint32_t eventType, const std::size_t cacheBytes, const int workers, const bool footprint)
+        : _event(eventType), _budget(cacheBytes), _footprint(footprint) {
+        int count = workers > 0 ? workers : default_workers();
+
+        // Only the current file decodes, and one aborted frees its memory before the next starts.
+        if (workers <= 0 && footprint) {
+            count = 1;
+        }
 
         _workers.reserve(static_cast<std::size_t>(count));
 
@@ -691,11 +715,11 @@ namespace tiv {
             all = _streamAll;
         }
 
-        // Too large for memory, or in streaming mode, a still image shows from disk. Drawings
-        // and animations have no pyramid to stream, so they stay in memory.
+        // Too large for memory, in streaming mode or in footprint mode, a still image shows from tiles.
+        // Drawings and animations have no pyramid to stream, so they stay in memory.
         const bool still = !Decode::scalable(entry.info.kind) && entry.info.frames <= 1;
 
-        if (still && (all || entry.info.pixels() > max_pixels())) {
+        if (still && (all || _footprint || entry.info.pixels() > max_pixels())) {
             decode_stream(job, std::move(entry));
 
             return;
@@ -788,6 +812,7 @@ namespace tiv {
         entry.streamed = true;
 
         bool waiting = false;
+        bool all = false;
         bool small = false;
         bool persist = false;
         bool rebuild = false;
@@ -799,6 +824,7 @@ namespace tiv {
 
             entry.display = display_for(entry.info);
             waiting = entry.info.hdr && !_displayKnown;
+            all = _streamAll;
             folder = _tileFolder;
             small = _smallTiles;
             persist = _persistTiles;
@@ -813,12 +839,16 @@ namespace tiv {
             return;
         }
 
-        const TileCache::Store where = (rebuild && !old.empty()) || persist || entry.info.pixels() > max_pixels()
-                                               ? TileCache::Store::Disk
-                                               : TileCache::Store::Memory;
+        const bool huge = entry.info.pixels() > max_pixels();
+        // Footprint mode writes to disk only in streaming mode, holding even a huge image in memory.
+        const bool disk = (!_footprint || all) && ((rebuild && !old.empty()) || persist || huge);
+        const TileCache::Store where = disk ? TileCache::Store::Disk : TileCache::Store::Memory;
+
+        // A PNG's checkpoints take far less memory than its tiles.
+        small = small || (_footprint && !disk);
 
         if (!rebuild) {
-            entry.tileCache = TileCache::open(job.file, folder, entry.display);
+            entry.tileCache = TileCache::open(job.file, folder, entry.display, _footprint);
         }
 
         bool build = false;
@@ -871,24 +901,18 @@ namespace tiv {
         }
 
         // Else it outlives a new one made under another name or folder.
-        if (build && rebuild && !old.empty()) {
+        if (build && rebuild && disk && !old.empty()) {
             std::error_code failure;
 
             std::filesystem::remove(old, failure);
         }
 
         if (build) {
-            // A decoder that holds much of the image would take the system down with it.
-            const std::uint64_t needed = Decode::stream_bytes(job.file, TileCache::TILE);
-            const std::uint64_t free = Memory::available();
+            entry.error = short_of_memory(job.file, entry.info, huge && !disk);
 
-            if (needed > free) {
-                entry.error =
-                        std::format("{}: needs {:.1f} GB of memory to decode, {:.1f} GB is free", job.file.string(),
-                                    static_cast<double>(needed) / 1e9, static_cast<double>(free) / 1e9);
-            } else {
+            if (entry.error.empty()) {
                 entry.tileCache = TileCache::build(job.file, folder, entry.display, where, small, &_progress,
-                                                   &entry.error, job.abort.get());
+                                                   &entry.error, job.abort.get(), _footprint);
             }
         }
 
@@ -915,6 +939,7 @@ namespace tiv {
         Decode::Info info;
         int thumbWidth = 0;
         int thumbHeight = 0;
+        std::size_t screenBytes = 0;
 
         {
             const std::scoped_lock hold(_guard);
@@ -925,6 +950,7 @@ namespace tiv {
 
             thumbWidth = _screenWidth / THUMB_DIVISOR;
             thumbHeight = _screenHeight / THUMB_DIVISOR;
+            screenBytes = pyramid_bytes({.width = _screenWidth, .height = _screenHeight});
         }
 
         if (info.frames < 2) {
@@ -933,8 +959,11 @@ namespace tiv {
             return;
         }
 
-        const std::size_t estimate =
-                std::min(pyramid_bytes(capped(info)) * static_cast<std::size_t>(info.frames), MAX_ANIMATION_BYTES);
+        const auto count = static_cast<std::size_t>(info.frames);
+        // Footprint mode shrinks the frames to no larger than the screen.
+        const std::size_t budget =
+                _footprint ? std::min(screenBytes * count, MAX_ANIMATION_BYTES) : MAX_ANIMATION_BYTES;
+        const std::size_t estimate = std::min(pyramid_bytes(capped(info)) * count, budget);
 
         if (!admit(job, estimate)) {
             return;
@@ -943,7 +972,7 @@ namespace tiv {
         std::vector<Decode::Frame> frames;
 
         // The levels below each frame add up to a third of it again.
-        if (!Decode::load_frames(job.file, MAX_ANIMATION_BYTES / 4 * 3, &frames, nullptr, job.abort.get())) {
+        if (!Decode::load_frames(job.file, budget / 4 * 3, &frames, nullptr, job.abort.get())) {
             if (job.abort->requested()) {
                 drop();
             } else {

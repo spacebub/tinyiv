@@ -182,6 +182,8 @@ namespace tiv {
         std::filesystem::path _tileFolder;
         // A drag that started on the play bar's track.
         bool _seeking = false;
+        // Only the image on screen is decoded and held, as little of it as the view allows.
+        bool _footprint = false;
 
         std::uint64_t _movedAt = 0;
         // When streaming mode or the order last switched, zero before either has.

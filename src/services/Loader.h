@@ -89,8 +89,11 @@ namespace tiv {
         static constexpr std::size_t DEFAULT_CACHE_BYTES = std::size_t{2048} * 1024 * 1024;
         static constexpr int MAX_WORKERS = 4;
 
-        // Zero workers means as many as the machine warrants.
-        explicit Loader(std::uint32_t eventType, std::size_t cacheBytes = DEFAULT_CACHE_BYTES, int workers = 0);
+        // Zero workers means as many as the machine warrants, or one in footprint mode. Footprint mode
+        // streams every still image and holds as little of it in memory as the view allows, writing
+        // nothing to disk outside streaming mode. Show it no files ahead or behind.
+        explicit Loader(std::uint32_t eventType, std::size_t cacheBytes = DEFAULT_CACHE_BYTES, int workers = 0,
+                        bool footprint = false);
         ~Loader();
 
         Loader(const Loader &) = delete;
@@ -229,11 +232,13 @@ namespace tiv {
         void post(Result result);
 
         std::uint32_t _event;
+        int _screenWidth = 3840;
+        int _screenHeight = 2160;
+        std::atomic<float> _progress = 0.0F;
         std::size_t _budget;
 
         mutable std::mutex _guard;
         std::condition_variable _wake;
-        bool _running = true;
         Request _request;
         std::deque<Result> _results;
 
@@ -241,23 +246,22 @@ namespace tiv {
         std::size_t _bytes = 0;
         std::vector<Job> _jobs;
         std::size_t _inflight = 0;
-        // Set when a prefetch could not be admitted, cleared when memory or the request changes.
-        bool _starved = false;
         // Pyramids and animations evicted on the main thread, freed by whichever worker wakes next.
         std::vector<std::shared_ptr<const void>> _trash;
+
+        std::filesystem::path _tileFolder;
+        Rebuild _rebuild;
+        Tone::Display _display;
+
+        bool _running = true;
+        // Set when a prefetch could not be admitted, cleared when memory or the request changes.
+        bool _starved = false;
         // Memory was freed since it was last given back.
         bool _freed = false;
-
         bool _streamAll = false;
-        std::filesystem::path _tileFolder;
         bool _smallTiles = false;
         bool _persistTiles = false;
-        Rebuild _rebuild;
-        std::atomic<float> _progress = 0.0F;
-
-        int _screenWidth = 3840;
-        int _screenHeight = 2160;
-        Tone::Display _display;
+        bool _footprint = false;
         bool _displayKnown = false;
 
         std::vector<std::thread> _workers;

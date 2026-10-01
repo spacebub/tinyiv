@@ -66,6 +66,10 @@ namespace tiv {
         constexpr std::uint32_t MAX_LEVELS = 32;
         // Far past any image, and far enough from the limit of an int that sums of sides stay within it.
         constexpr std::uint32_t MAX_SIDE = std::uint32_t{1} << 30U;
+        // The eighths libjpeg scales a JPEG by at full size, halved for each level it reads smaller.
+        constexpr unsigned EIGHTHS = 8;
+        // Full size, a half, a quarter and an eighth.
+        constexpr int JPEG_LEVELS = 4;
         // Tiles asked for beyond this many are dropped, the view having moved on by the time they would come.
         constexpr std::size_t MAX_QUEUE = 64;
         // Left free on the drive beyond the pyramid, so making one never fills it.
@@ -74,6 +78,8 @@ namespace tiv {
         constexpr std::string_view SUFFIX = ".tiles";
         constexpr std::string_view PART = ".part";
         constexpr int MAX_ENCODERS = 16;
+        // Each encoder holds a tile's worth of buffers, so a lean build keeps to few.
+        constexpr int LEAN_ENCODERS = 2;
         // Guesses the tiles at half their raw size, to know how much room to make before any are
         // written. Photographs come to half or more, so the drive is watched as they are written too.
         constexpr std::uint64_t EXPECTED_RATIO = 2;
@@ -743,21 +749,24 @@ namespace tiv {
         class Builder {
 
         public:
-            // Without keeping the finest level, the pyramid stores only the levels below it.
+            // The first skipped levels are not stored, as a source reads them. Lean cuts each band where
+            // the decoder left it, on few threads.
             Builder(Sink &out, const std::vector<TileCache::Level> &levels, const int channels,
-                    const Bitmap::Encoding encoding, const bool keepFinest = true)
-                : _out(&out), _channels(channels), _encoding(encoding), _keepFinest(keepFinest),
+                    const Bitmap::Encoding encoding, const int skipped, const bool lean)
+                : _out(&out), _channels(channels), _encoding(encoding), _lean(lean),
                   _slots(static_cast<std::size_t>(
-                          std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_ENCODERS))) {
+                          lean ? LEAN_ENCODERS
+                               : std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_ENCODERS))) {
                 for (const TileCache::Level &level : levels) {
                     State state;
                     const std::size_t pitch = static_cast<std::size_t>(level.width) * Bitmap::CHANNELS;
 
                     state.level = level;
+                    state.kept = std::cmp_greater_equal(_states.size(), skipped);
                     state.spans.resize(static_cast<std::size_t>(level.columns) * static_cast<std::size_t>(level.rows));
                     state.held.resize(pitch);
                     // The finest level arrives in whole bands, so only the rest gather them.
-                    if (!_states.empty()) {
+                    if (!_states.empty() && state.kept) {
                         state.band.resize(pitch * TileCache::TILE);
                     }
 
@@ -778,6 +787,12 @@ namespace tiv {
 
                 if (!_out->ok() || _failed) {
                     return false;
+                }
+
+                if (_lean) {
+                    cut(rows, pixels.data());
+
+                    return true;
                 }
 
                 _copy.assign(pixels.begin(), pixels.end());
@@ -826,6 +841,8 @@ namespace tiv {
         private:
             struct State {
                 TileCache::Level level;
+                // Stored, not read from a source.
+                bool kept = true;
                 // RGBA8 rows of the tile row being gathered.
                 std::vector<std::uint8_t> band;
                 int filled = 0;
@@ -851,7 +868,7 @@ namespace tiv {
                 State &finest = _states.front();
                 const std::size_t pitch = static_cast<std::size_t>(finest.level.width) * Bitmap::CHANNELS;
 
-                if (_keepFinest) {
+                if (finest.kept) {
                     write_band(finest, pixels, rows);
                 } else {
                     ++finest.tileRow;
@@ -912,11 +929,20 @@ namespace tiv {
             void gather(State &state, const std::uint8_t *row) {
                 const std::size_t pitch = static_cast<std::size_t>(state.level.width) * Bitmap::CHANNELS;
 
-                std::memcpy(state.band.data() + (pitch * static_cast<std::size_t>(state.filled)), row, pitch);
+                if (state.kept) {
+                    std::memcpy(state.band.data() + (pitch * static_cast<std::size_t>(state.filled)), row, pitch);
+                }
+
                 ++state.filled;
 
                 if (state.filled == TileCache::TILE || state.received + state.filled == state.level.height) {
-                    write_band(state, state.band.data(), state.filled);
+                    if (state.kept) {
+                        write_band(state, state.band.data(), state.filled);
+                    } else {
+                        ++state.tileRow;
+                        state.received += state.filled;
+                    }
+
                     state.filled = 0;
                 }
             }
@@ -952,7 +978,7 @@ namespace tiv {
             Sink *_out;
             int _channels;
             Bitmap::Encoding _encoding;
-            bool _keepFinest;
+            bool _lean;
             std::vector<State> _states;
             std::vector<Encoded> _slots;
             bool _failed = false;
@@ -1053,6 +1079,13 @@ namespace tiv {
             [[nodiscard]] bool alpha() const override { return false; }
 
             bool read(const int top, const int count, Bitmap *out) const override {
+                return read_level(0, top, count, out);
+            }
+
+            // Down to an eighth, as libjpeg scales its blocks.
+            [[nodiscard]] int levels() const override { return JPEG_LEVELS; }
+
+            bool read_level(const int level, const int top, const int count, Bitmap *out) const override {
                 const Decode::JpegBands::Fetch fetch = [this](const std::uint64_t offset, const std::uint64_t bytes,
                                                               std::vector<std::uint8_t> &scratch) {
                     scratch.resize(static_cast<std::size_t>(bytes));
@@ -1060,8 +1093,10 @@ namespace tiv {
                     return _reader.read(offset, scratch.data(), scratch.size()) ? std::span<const std::uint8_t>(scratch)
                                                                                 : std::span<const std::uint8_t>();
                 };
+                const int factor = 1 << level;
 
-                return _bands.decode(fetch, top, count, 8, out, read_threads(), nullptr);
+                return _bands.decode(fetch, top * factor, count * factor, EIGHTHS >> level, out, read_threads(),
+                                     nullptr);
             }
 
             [[nodiscard]] std::vector<std::uint8_t> index() const override {
@@ -1317,6 +1352,200 @@ namespace tiv {
             return source->valid() ? std::move(source) : nullptr;
         }
 
+        // The finest level decoded again from the top of the file for each band read, for a format whose
+        // decoder streams but cannot begin partway. Reads near the bottom take as long as a whole decode.
+        class RescanSource final : public TileCache::Source {
+
+        public:
+            // A JPEG decodes smaller as cheaply, so its smaller levels are read the same way.
+            RescanSource(std::filesystem::path file, const Tone::Display &display, const bool jpeg)
+                : _file(std::move(file)), _display(display), _jpeg(jpeg) {}
+
+            // Hears what the decode gives, stopping before its first row.
+            bool probe() {
+                const Decode::Begin begin = [this](const int width, const int height, const bool alpha,
+                                                   const Bitmap::Encoding encoding) {
+                    _width = width;
+                    _height = height;
+                    _alpha = alpha;
+                    _encoding = encoding;
+
+                    return false;
+                };
+
+                Decode::stream(
+                        _file, TileCache::TILE, begin, [](int, int, std::span<const std::uint8_t>) { return false; },
+                        nullptr, nullptr, _display);
+
+                return _width > 0 && _height > 0;
+            }
+
+            [[nodiscard]] int width() const override { return _width; }
+            [[nodiscard]] int height() const override { return _height; }
+            [[nodiscard]] bool alpha() const override { return _alpha; }
+            [[nodiscard]] Bitmap::Encoding encoding() const override { return _encoding; }
+
+            bool pass(const Take &take, const Keep & /*keep*/, const Decode::Abort *abort) override {
+                return Decode::stream(
+                        _file, TileCache::TILE,
+                        [this](const int width, const int height, const bool alpha, const Bitmap::Encoding encoding) {
+                            return same(width, height, alpha, encoding);
+                        },
+                        [&](const int y, const int rows, const std::span<const std::uint8_t> pixels) {
+                            return !Decode::aborted(abort) && take(y, rows, pixels);
+                        },
+                        nullptr, nullptr, _display);
+            }
+
+            bool read(const int top, const int count, Bitmap *out) const override {
+                return read_level(0, top, count, out);
+            }
+
+            [[nodiscard]] int levels() const override { return _jpeg ? JPEG_LEVELS : 1; }
+
+            // libvips rounds a shrunk JPEG's size down where libjpeg and the levels round up, so the last
+            // column or row it leaves off repeats the one before.
+            bool read_level(const int level, const int top, const int count, Bitmap *out) const override {
+                bool got = false;
+                int height = 0;
+
+                const auto fill = [&](const std::span<const std::uint8_t> pixels, const int rows, const int first) {
+                    const std::size_t pitch = pixels.size() / static_cast<std::size_t>(rows);
+
+                    for (int y = 0; y < count; ++y) {
+                        const std::span<std::uint8_t> target = out->row(y);
+                        const auto from = static_cast<std::size_t>(std::min(first + y, rows - 1)) * pitch;
+
+                        std::memcpy(target.data(), pixels.data() + from, pitch);
+
+                        if (target.size() > pitch) {
+                            std::memcpy(target.data() + pitch, target.data() + pitch - Bitmap::CHANNELS,
+                                        Bitmap::CHANNELS);
+                        }
+                    }
+
+                    got = true;
+                };
+
+                Decode::stream(
+                        _file, TileCache::TILE,
+                        [&](const int width, const int shrunk, const bool alpha, const Bitmap::Encoding encoding) {
+                            height = shrunk;
+
+                            return (width == out->width() || width + 1 == out->width()) && alpha == _alpha
+                                   && encoding == _encoding;
+                        },
+                        [&](const int y, const int rows, const std::span<const std::uint8_t> pixels) {
+                            if (_stop.requested()) {
+                                return false;
+                            }
+
+                            if (y + rows > top) {
+                                fill(pixels, rows, 0);
+
+                                return false;
+                            }
+
+                            // A last row the level has and libvips does not, alone in its tile row.
+                            if (y + rows == height) {
+                                fill(pixels, rows, rows);
+
+                                return false;
+                            }
+
+                            return true;
+                        },
+                        nullptr, nullptr, _display, 1 << level);
+
+                return got;
+            }
+
+            // Nothing to keep, the file being read again each time.
+            [[nodiscard]] std::vector<std::uint8_t> index() const override { return {}; }
+
+            void cancel() override { _stop.request(); }
+
+        private:
+            [[nodiscard]] bool same(const int width, const int height, const bool alpha,
+                                    const Bitmap::Encoding encoding) const {
+                return width == _width && height == _height && alpha == _alpha && encoding == _encoding;
+            }
+
+            std::filesystem::path _file;
+            Tone::Display _display;
+            bool _jpeg;
+            int _width = 0;
+            int _height = 0;
+            bool _alpha = false;
+            Bitmap::Encoding _encoding = Bitmap::Encoding::Srgb;
+            mutable Decode::Abort _stop;
+        };
+
+        // Baseline or extended Huffman, which libjpeg decodes a few rows at a time. A progressive JPEG
+        // holds every coefficient of the image until its last scan.
+        bool sequential_jpeg(const Reader &reader, const std::uint64_t size) {
+            constexpr std::uint8_t MARK = 0xFF;
+            constexpr std::uint8_t SOF0 = 0xC0;
+            constexpr std::uint8_t SOF1 = 0xC1;
+            constexpr std::uint8_t SOF15 = 0xCF;
+            constexpr std::uint8_t DHT = 0xC4;
+            constexpr std::uint8_t JPG = 0xC8;
+            constexpr std::uint8_t DAC = 0xCC;
+            constexpr std::uint8_t SOS = 0xDA;
+            std::array<std::uint8_t, 4> marker{};
+            std::uint64_t at = 2;
+
+            while (at + marker.size() <= size && reader.read(at, marker.data(), marker.size())) {
+                if (marker.at(0) != MARK) {
+                    return false;
+                }
+
+                if (marker.at(1) == MARK) {
+                    ++at;
+
+                    continue;
+                }
+
+                const std::uint8_t kind = marker.at(1);
+
+                if (kind == SOF0 || kind == SOF1) {
+                    return true;
+                }
+
+                if (kind == SOS || (kind > SOF1 && kind <= SOF15 && kind != DHT && kind != JPG && kind != DAC)) {
+                    return false;
+                }
+
+                at += 2 + ((static_cast<std::uint64_t>(marker.at(2)) << 8U) | marker.at(3));
+            }
+
+            return false;
+        }
+
+        // Only a format whose decoder holds a band at a time, so each read costs time and not memory.
+        std::unique_ptr<TileCache::Source> open_rescan(const std::filesystem::path &file,
+                                                       const Tone::Display &display) {
+            constexpr std::size_t HEAD = 64;
+            const Reader head(file);
+            std::array<std::uint8_t, HEAD> start{};
+            std::error_code failure;
+            const std::uintmax_t size = std::filesystem::file_size(file, failure);
+
+            if (failure || !head.valid() || !head.read(0, start.data(), std::min<std::uintmax_t>(size, HEAD))) {
+                return nullptr;
+            }
+
+            const Decode::Format kind = Decode::sniff(std::span(start).first(std::min<std::size_t>(size, HEAD)));
+
+            if (kind != Decode::Format::Tiff && (kind != Decode::Format::Jpeg || !sequential_jpeg(head, size))) {
+                return nullptr;
+            }
+
+            auto source = std::make_unique<RescanSource>(file, display, kind == Decode::Format::Jpeg);
+
+            return source->probe() ? std::move(source) : nullptr;
+        }
+
         // A sink two threads put into, the Builder cutting its bands and the source keeping its state.
         class Locked final : public Sink {
 
@@ -1351,6 +1580,10 @@ namespace tiv {
             std::unique_ptr<Builder> builder;
             // Why the pass stopped, when it was not the decoder's doing.
             std::string why;
+            // Builds in as little memory as it can, said before the pass.
+            bool lean = false;
+            // Levels a source pass reads from the source and does not store, the finest first.
+            int sourced = 1;
         };
 
         // The finest level read band by band from the source, and only the levels below it made.
@@ -1372,8 +1605,8 @@ namespace tiv {
             }
 
             made->locked = std::make_unique<Locked>(*sink);
-            made->builder =
-                    std::make_unique<Builder>(*made->locked, made->levels, made->channels, made->encoding, false);
+            made->builder = std::make_unique<Builder>(*made->locked, made->levels, made->channels, made->encoding,
+                                                      made->sourced, made->lean);
 
             const TileCache::Source::Take take = [&](const int y, const int rows,
                                                      const std::span<const std::uint8_t> pixels) {
@@ -1426,7 +1659,7 @@ namespace tiv {
                     return false;
                 }
 
-                made->builder = std::make_unique<Builder>(*sink, made->levels, made->channels, encoding);
+                made->builder = std::make_unique<Builder>(*sink, made->levels, made->channels, encoding, 0, made->lean);
 
                 return true;
             };
@@ -1463,7 +1696,7 @@ namespace tiv {
         // Makes the file's pyramid in the folder, under a temporary name until it is whole.
         bool write_pyramid(const std::filesystem::path &file, const std::filesystem::path &dir,
                            const Tone::Display &display, TileCache::Source *source, std::atomic<float> *progress,
-                           std::string *error, Decode::Abort *abort, std::filesystem::path *written) {
+                           std::string *error, Decode::Abort *abort, const bool lean, std::filesystem::path *written) {
             Identity identity;
 
             if (!identify(file, &identity)) {
@@ -1480,6 +1713,8 @@ namespace tiv {
             Header header;
             std::unique_ptr<Writer> out;
             Pass made;
+
+            made.lean = lean;
 
             header.version = VERSION;
             header.tile = TileCache::TILE;
@@ -1586,6 +1821,15 @@ namespace tiv {
         return true;
     }
 
+    // A progressive JPEG has no source either, and is counted as though it had.
+    std::uint64_t TileCache::memory_bytes(const Decode::Format kind, const std::int64_t pixels) {
+        const std::uint64_t raw = static_cast<std::uint64_t>(pixels) * Bitmap::CHANNELS;
+        const bool sourced = kind == Decode::Format::Jpeg || kind == Decode::Format::Png || kind == Decode::Format::Tiff
+                             || kind == Decode::Format::Heif;
+
+        return (raw / 3) + (sourced ? 0 : raw / EXPECTED_RATIO);
+    }
+
     std::filesystem::path TileCache::location(const std::filesystem::path &file, const std::filesystem::path &folder,
                                               const bool create) {
         std::error_code failure;
@@ -1614,7 +1858,7 @@ namespace tiv {
     }
 
     std::shared_ptr<TileCache> TileCache::open(const std::filesystem::path &file, const std::filesystem::path &folder,
-                                               const Tone::Display &display) {
+                                               const Tone::Display &display, const bool lean) {
         const std::vector<std::filesystem::path> dirs = folders(file, folder);
         Identity identity;
 
@@ -1623,7 +1867,7 @@ namespace tiv {
         }
 
         for (const std::filesystem::path &path : candidates(dirs, identity, display)) {
-            if (std::shared_ptr<TileCache> tileCache = open_at(path, file, display); tileCache != nullptr) {
+            if (std::shared_ptr<TileCache> tileCache = open_at(path, file, display, lean); tileCache != nullptr) {
                 return tileCache;
             }
         }
@@ -1633,8 +1877,10 @@ namespace tiv {
 
     // An unreadable one is kept, as another version of tinyiv may read it.
     std::shared_ptr<TileCache> TileCache::open_at(const std::filesystem::path &path, const std::filesystem::path &file,
-                                                  const Tone::Display &display) {
+                                                  const Tone::Display &display, const bool lean) {
         std::shared_ptr<TileCache> tileCache(new TileCache());
+
+        tileCache->_lean = lean;
 
         if (!tileCache->load(path, file, display)) {
             return nullptr;
@@ -1651,14 +1897,20 @@ namespace tiv {
 
     std::shared_ptr<TileCache> TileCache::build(const std::filesystem::path &file, const std::filesystem::path &folder,
                                                 const Tone::Display &display, const Store store, const bool small,
-                                                std::atomic<float> *progress, std::string *error,
-                                                Decode::Abort *abort) {
+                                                std::atomic<float> *progress, std::string *error, Decode::Abort *abort,
+                                                const bool lean) {
         // An HDR JPEG is lifted by its gain map as a whole, which the source's bands do not do.
         // Only a PNG tone maps its own rows. A JPEG's gain map lifts the whole image, which bands do not.
         std::unique_ptr<Source> source = open_source(file, nullptr, small, display);
 
         if (source != nullptr && display.hdr() && source->encoding() != Bitmap::Encoding::Pq) {
             source = nullptr;
+        }
+
+        // Decoded as a pass without a source is, so its rows are the same. A pyramid on disk could not
+        // find it again when opened, having nothing kept to open it by.
+        if (source == nullptr && lean && store == Store::Memory) {
+            source = open_rescan(file, display);
         }
 
         if (store == Store::Disk) {
@@ -1672,11 +1924,11 @@ namespace tiv {
 
             std::filesystem::path written;
 
-            if (!write_pyramid(file, dir, display, source.get(), progress, error, abort, &written)) {
+            if (!write_pyramid(file, dir, display, source.get(), progress, error, abort, lean, &written)) {
                 return nullptr;
             }
 
-            std::shared_ptr<TileCache> tileCache = open_at(written, file, display);
+            std::shared_ptr<TileCache> tileCache = open_at(written, file, display, lean);
 
             if (tileCache == nullptr) {
                 fail(error, file, "could not open the tile file just made");
@@ -1687,6 +1939,13 @@ namespace tiv {
 
         Blocks blocks;
         Pass made;
+
+        made.lean = lean;
+
+        // In memory lean, a source that reads smaller levels itself spares storing them too.
+        if (source != nullptr && lean) {
+            made.sourced = source->levels();
+        }
         const auto ready = [&](const Pass & /*pass*/) -> Sink * { return &blocks; };
 
         if (source != nullptr ? !run_source_pass(file, *source, progress, error, abort, ready, &made)
@@ -1712,7 +1971,9 @@ namespace tiv {
         }
 
         tileCache->_blocks = std::move(blocks.held);
+        tileCache->_sourced = source != nullptr ? std::min(made.sourced, static_cast<int>(made.levels.size())) : 0;
         tileCache->_source = std::move(source);
+        tileCache->_lean = lean;
         tileCache->attach_source();
         tileCache->pin();
         tileCache->start();
@@ -1804,6 +2065,8 @@ namespace tiv {
                 || _source->height() != _levels.front().height) {
                 return false;
             }
+
+            _sourced = 1;
         }
 
         _path = path;
@@ -1834,13 +2097,13 @@ namespace tiv {
         for (std::size_t index = 0; index < _levels.size(); ++index) {
             const Level &level = _levels.at(index);
 
-            if (level.columns * level.rows > PINNED_TILES) {
+            if (level.columns * level.rows > PINNED_TILES || (_lean && index + 1 < _levels.size())) {
                 continue;
             }
 
-            if (index == 0 && _source != nullptr) {
+            if (std::cmp_less(index, _sourced)) {
                 for (int row = 0; row < level.rows; ++row) {
-                    read_source(row, true, band);
+                    read_source(static_cast<int>(index), row, true, band);
                 }
 
                 continue;
@@ -1865,8 +2128,8 @@ namespace tiv {
         }
     }
 
-    void TileCache::read_source(const int row, const bool pinned, Bitmap &band) {
-        const Level &level = _levels.front();
+    void TileCache::read_source(const int index, const int row, const bool pinned, Bitmap &band) {
+        const Level &level = _levels.at(static_cast<std::size_t>(index));
         const int top = row * TILE;
         const int rows = std::min(TILE, level.height - top);
 
@@ -1874,7 +2137,7 @@ namespace tiv {
             band = Bitmap::allocate(level.width, std::min(TILE, level.height), _encoding);
         }
 
-        const bool read = _source->read(top, rows, &band);
+        const bool read = _source->read_level(index, top, rows, &band);
         std::vector<std::shared_ptr<const Bitmap>> tiles(static_cast<std::size_t>(level.columns));
         std::atomic<int> next = 0;
 
@@ -1914,13 +2177,13 @@ namespace tiv {
         const std::scoped_lock hold(_guard);
 
         for (int column = 0; column < level.columns; ++column) {
-            keep(id_of({.level = 0, .column = column, .row = row}),
+            keep(id_of({.level = index, .column = column, .row = row}),
                  std::move(tiles.at(static_cast<std::size_t>(column))), pinned);
         }
     }
 
     void TileCache::start() {
-        for (int i = 0; i < READERS; ++i) {
+        for (int i = 0; i < (_lean ? 1 : READERS); ++i) {
             _readers.emplace_back([this] { read_loop(); });
         }
     }
@@ -1933,6 +2196,10 @@ namespace tiv {
         }
 
         _wake.notify_all();
+
+        if (_source != nullptr) {
+            _source->cancel();
+        }
 
         for (std::thread &reader : _readers) {
             reader.join();
@@ -1962,8 +2229,13 @@ namespace tiv {
 
             const Key key = key_of(id);
 
-            if (key.level == 0 && _source != nullptr) {
-                read_source_row(hold, key.row, band);
+            if (key.level < _sourced) {
+                read_source_row(hold, key.level, key.row, band);
+
+                // A band of the finest level is the widest buffer there is.
+                if (_lean) {
+                    band = {};
+                }
 
                 continue;
             }
@@ -1988,11 +2260,11 @@ namespace tiv {
     }
 
     // The source decodes whole rows of tiles, so the row is read at once and kept whole.
-    void TileCache::read_source_row(std::unique_lock<std::mutex> &hold, const int row, Bitmap &band) {
+    void TileCache::read_source_row(std::unique_lock<std::mutex> &hold, const int index, const int row, Bitmap &band) {
         std::vector<std::uint64_t> reading;
 
-        for (int column = 0; column < _levels.front().columns; ++column) {
-            const std::uint64_t each = id_of({.level = 0, .column = column, .row = row});
+        for (int column = 0; column < _levels.at(static_cast<std::size_t>(index)).columns; ++column) {
+            const std::uint64_t each = id_of({.level = index, .column = column, .row = row});
 
             if (!_cache.contains(each) && _reading.insert(each).second) {
                 reading.push_back(each);
@@ -2004,7 +2276,7 @@ namespace tiv {
         }
 
         hold.unlock();
-        read_source(row, false, band);
+        read_source(index, row, false, band);
         hold.lock();
 
         for (const std::uint64_t each : reading) {
@@ -2041,7 +2313,7 @@ namespace tiv {
         slot.bitmap = std::move(bitmap);
         _cache.insert_or_assign(id, std::move(slot));
 
-        while (_bytes > CACHE_BYTES && !_used.empty()) {
+        while (_bytes > budget() && !_used.empty()) {
             const auto oldest = _cache.find(_used.back());
 
             _used.pop_back();
@@ -2051,6 +2323,34 @@ namespace tiv {
                 _cache.erase(oldest);
             }
         }
+    }
+
+    std::size_t TileCache::budget() const {
+        if (!_lean) {
+            return CACHE_BYTES;
+        }
+
+        const std::size_t row = static_cast<std::size_t>(_levels.front().width) * TILE * Bitmap::CHANNELS;
+
+        return std::max(LEAN_CACHE_BYTES, 2 * row);
+    }
+
+    void TileCache::uploaded(const Key &key) const {
+        if (!_lean) {
+            return;
+        }
+
+        const std::scoped_lock hold(_guard);
+
+        const auto found = _cache.find(id_of(key));
+
+        if (found == _cache.end() || found->second.pinned) {
+            return;
+        }
+
+        _bytes -= found->second.bitmap->bytes();
+        _used.erase(found->second.used);
+        _cache.erase(found);
     }
 
     std::shared_ptr<const Bitmap> TileCache::find(const Key &key) const {

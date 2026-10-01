@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `memory_mode` setting. `footprint` keeps only what the image on screen shows in memory, reading large PNGs, TIFFs and non-progressive JPEGs again from their file instead of holding them
+
 ## 1.3.0 - 2026-09-30
 
 ### Added

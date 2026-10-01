@@ -108,8 +108,9 @@ namespace tiv {
         }
     }
 
-    Canvas::Canvas(SDL_Renderer *renderer, const int maxTexture, const std::size_t vramBudget)
-        : _renderer(renderer), _maxTexture(maxTexture), _budget(vramBudget) {
+    Canvas::Canvas(SDL_Renderer *renderer, const int maxTexture, const std::size_t vramBudget, const bool lean)
+        : _renderer(renderer), _maxTexture(maxTexture),
+          _budget(lean ? std::min(vramBudget, LEAN_VRAM_BUDGET) : vramBudget), _lean(lean) {
     }
 
     Canvas::Held Canvas::build(std::shared_ptr<const Pyramid> pyramid, const std::uint64_t image, const int width,
@@ -263,12 +264,15 @@ namespace tiv {
             const Tiles &tiles = *_current.sheets.at(sheet).tiles;
             const Rect area = area_of(_current, sheet, visible, image);
 
-            if (sheet > 0) {
+            if (sheet > 0 && !_lean) {
                 _current.sheets.at(sheet - 1).tiles->missing(area_of(_current, sheet - 1, visible, image), &keys);
             }
 
             tiles.missing(area, &keys);
-            tiles.missing(grow(area, Tiles::SIZE), &keys);
+
+            if (!_lean) {
+                tiles.missing(grow(area, Tiles::SIZE), &keys);
+            }
         }
 
         _current.tileCache->want(keys);
@@ -440,11 +444,11 @@ namespace tiv {
 
                 spent += tiles.upload(area, budget - std::min(spent, budget), _frame);
 
-                if (spent < budget) {
+                if (spent < budget && !_lean) {
                     spent += tiles.upload(grow(area, Tiles::SIZE), budget - spent, _frame);
                 }
 
-                if (spent < budget && sheet > 0) {
+                if (spent < budget && sheet > 0 && !_lean) {
                     Tiles &below = *_current.sheets.at(sheet - 1).tiles;
 
                     spent += below.upload(grow(area_of(_current, sheet - 1, visible, image), Tiles::SIZE),

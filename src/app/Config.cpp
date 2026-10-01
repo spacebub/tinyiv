@@ -147,6 +147,20 @@ namespace tiv {
 
                                     return value == "on" || value == "off";
                                 }},
+                Setting{.key = "memory_mode",
+                        .text = "# How tinyiv uses memory: speed or footprint. Speed decodes the images around\n"
+                                "# the one on screen ahead, so stepping through a folder is instant. Footprint\n"
+                                "# holds only what the image on screen shows: images stream, tiles leave memory\n"
+                                "# once drawn, and PNGs, TIFFs and JPEGs that are not progressive are read again\n"
+                                "# from their file at full size rather than kept. Nothing is written to disk\n"
+                                "# unless streaming mode is on. Each step and zoom waits for decoding.\n"
+                                "memory_mode = speed\n",
+                        .apply =
+                                [](Config &config, const std::string_view value) {
+                                    config.footprint = value == "footprint";
+
+                                    return value == "speed" || value == "footprint";
+                                }},
                 Setting{.key = "sort",
                         .text = "# The order of the images in a folder: a-z, z-a, newest, oldest or size. Newest\n"
                                 "# and oldest go by when each file was last modified, and size puts the smallest\n"
@@ -154,7 +168,7 @@ namespace tiv {
                                 "sort = a-z\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {
-                                    const auto found = std::ranges::find(ORDER_NAMES, value, &OrderName::name);
+                                    const auto *const found = std::ranges::find(ORDER_NAMES, value, &OrderName::name);
 
                                     if (found == ORDER_NAMES.end()) {
                                         return false;

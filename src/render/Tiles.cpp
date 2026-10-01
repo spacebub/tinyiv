@@ -239,6 +239,7 @@ namespace tiv {
 
             if (pixels != nullptr) {
                 SDL_UpdateTexture(tile.texture, nullptr, pixels->data(), static_cast<int>(pixels->pitch()));
+                _tileCache->uploaded({.level = _level, .column = column, .row = row});
             } else {
                 fill(tile);
             }

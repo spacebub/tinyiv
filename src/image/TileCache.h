@@ -49,6 +49,9 @@ namespace tiv {
 
         // Tiles held in memory at most, as RGBA8.
         static constexpr std::size_t CACHE_BYTES = std::size_t{512} * 1024 * 1024;
+        // Tiles held in memory at most when lean, where each goes once on the GPU. Never under two rows
+        // of the finest level, which the source reads whole.
+        static constexpr std::size_t LEAN_CACHE_BYTES = std::size_t{64} * 1024 * 1024;
 
         // The files kept in one folder at most, the least recently opened going first.
         static constexpr std::uintmax_t DISK_BYTES = std::uintmax_t{100} * 1024 * 1024 * 1024;
@@ -97,6 +100,12 @@ namespace tiv {
             // Rows from top, count of them or to the bottom, in its encoding as wide as the image. The
             // top is a multiple of TILE.
             virtual bool read(int top, int count, Bitmap *out) const = 0;
+            // The levels it reads itself, each half the one before, the finest first.
+            [[nodiscard]] virtual int levels() const { return 1; }
+            // As read(), of a level up to levels(), in its rows.
+            virtual bool read_level(const int level, const int top, const int count, Bitmap *out) const {
+                return level == 0 && read(top, count, out);
+            }
 
             // Rows of the image from y, as RGBA.
             using Take = std::function<bool(int y, int count, std::span<const std::uint8_t> pixels)>;
@@ -114,7 +123,13 @@ namespace tiv {
 
             // What opens the same source again without a pass over the file.
             [[nodiscard]] virtual std::vector<std::uint8_t> index() const = 0;
+            // Cuts short a read() on another thread, as the tile cache closes.
+            virtual void cancel() {}
         };
+
+        // About the memory a pyramid of the image takes held in memory: the levels below the finest,
+        // and the finest too, compressed, for a format no source reads from the file.
+        [[nodiscard]] static std::uint64_t memory_bytes(Decode::Format kind, std::int64_t pixels);
 
         // The folder the file's pyramid goes in: the one asked for, taken from the file's folder
         // when relative, else one beside the file. Where that cannot be made, the user's cache.
@@ -124,18 +139,20 @@ namespace tiv {
 
         // The pyramid made for the file as it is now, in any folder location() may pick and either cache
         // mode. An HDR display falls back to one made for another headroom, then to an SDR one.
+        // Lean holds as few tiles in memory as the view allows, with one reader.
         [[nodiscard]] static std::shared_ptr<TileCache> open(const std::filesystem::path &file,
                                                              const std::filesystem::path &folder = {},
-                                                             const Tone::Display &display = {});
+                                                             const Tone::Display &display = {}, bool lean = false);
 
         // Decodes the file into a new pyramid and opens it. On disk it goes in the folder as
         // location() takes it. Progress goes from 0 to 1.
         // Small keeps a PNG's full resolution as places to begin inflating it again, a fraction of the
-        // room, but panning there has to decode whole bands of rows.
+        // room, but panning there has to decode whole bands of rows. Lean in memory reads the finest
+        // level again from the file of any format whose decoder streams, rather than keep it.
         [[nodiscard]] static std::shared_ptr<TileCache>
         build(const std::filesystem::path &file, const std::filesystem::path &folder, const Tone::Display &display,
               Store store, bool small, std::atomic<float> *progress, std::string *error = nullptr,
-              Decode::Abort *abort = nullptr);
+              Decode::Abort *abort = nullptr, bool lean = false);
 
         ~TileCache();
 
@@ -166,6 +183,9 @@ namespace tiv {
         // Lets go of every tile in memory but the pinned ones.
         void shrink() const;
 
+        // The tile is on the GPU, so a lean tile cache lets go of it unless pinned.
+        void uploaded(const Key &key) const;
+
         [[nodiscard]] std::size_t cached_bytes() const;
 
         // The compressed tiles held in memory, none for a pyramid on disk.
@@ -191,12 +211,12 @@ namespace tiv {
 
         [[nodiscard]] static std::shared_ptr<TileCache> open_at(const std::filesystem::path &path,
                                                                 const std::filesystem::path &file,
-                                                                const Tone::Display &display);
+                                                                const Tone::Display &display, bool lean);
         // The pyramid at the path, made for the file and shown on the display.
         bool load(const std::filesystem::path &path, const std::filesystem::path &file, const Tone::Display &display);
-        // A row of the finest level's tiles from the source, all kept. The band is scratch for the
-        // rows. Not under the lock.
-        void read_source(int row, bool pinned, Bitmap &band);
+        // A row of the level's tiles from the source, all kept. The band is scratch for the rows. Not
+        // under the lock.
+        void read_source(int index, int row, bool pinned, Bitmap &band);
         // Tells the source where what it kept is found.
         void attach_source();
         // Reads whole the levels of few enough tiles, so there is always something to draw.
@@ -204,11 +224,13 @@ namespace tiv {
         void start();
         void read_loop();
         // Under the lock, which it lets go of while it reads.
-        void read_source_row(std::unique_lock<std::mutex> &hold, int row, Bitmap &band);
+        void read_source_row(std::unique_lock<std::mutex> &hold, int index, int row, Bitmap &band);
         // Tells whoever listens that a tile arrived, outside the lock.
         void announce(std::unique_lock<std::mutex> &hold) const;
         // Under the lock.
         void keep(std::uint64_t id, std::shared_ptr<const Bitmap> bitmap, bool pinned) const;
+        // Bytes of tiles not pinned held at most.
+        [[nodiscard]] std::size_t budget() const;
         [[nodiscard]] static std::uint64_t id_of(const Key &key);
         [[nodiscard]] static Key key_of(std::uint64_t id);
 
@@ -224,6 +246,10 @@ namespace tiv {
         std::vector<std::vector<Span>> _spans;
         // Gives the finest level when set, which is then not stored.
         std::unique_ptr<Source> _source;
+        // Levels the source gives, the finest first, none stored.
+        int _sourced = 0;
+        // Pins only the coarsest level, drops tiles once uploaded and reads on one thread.
+        bool _lean = false;
 
         mutable std::mutex _guard;
         mutable std::condition_variable _wake;
