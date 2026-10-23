@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
@@ -205,6 +206,115 @@ namespace tiv {
 
             return i;
         }
+
+        // 32 pixels a step: each load's four pixels per lane are gathered into a dword a channel, the
+        // four loads are unpacked by dword then by qword, which leaves each channel's pixels in the
+        // order 0 to 3, 8 to 11, 16 to 19, 24 to 27 in the low lane and 4 to 7 onwards in the high
+        // one, and the permute puts them in order.
+        TIV_AVX2 std::size_t deinterleave_avx2(const std::uint8_t *rgba, const std::size_t pixels,
+                                               const bool greenApart, std::uint8_t *red, std::uint8_t *green,
+                                               std::uint8_t *blue, std::uint8_t *alpha) {
+            // clang-format off
+            const __m256i gather = _mm256_setr_epi8(0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15,
+                                                    0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15);
+            // clang-format on
+            const __m256i order = _mm256_setr_epi32(0, 4, 1, 5, 2, 6, 3, 7);
+            std::size_t x = 0;
+
+            for (; x + 32 <= pixels; x += 32) {
+                const auto *in = reinterpret_cast<const __m256i *>(rgba + (x * 4));
+                const __m256i v0 = _mm256_shuffle_epi8(_mm256_loadu_si256(in), gather);
+                const __m256i v1 = _mm256_shuffle_epi8(_mm256_loadu_si256(in + 1), gather);
+                const __m256i v2 = _mm256_shuffle_epi8(_mm256_loadu_si256(in + 2), gather);
+                const __m256i v3 = _mm256_shuffle_epi8(_mm256_loadu_si256(in + 3), gather);
+                const __m256i rg01 = _mm256_unpacklo_epi32(v0, v1);
+                const __m256i ba01 = _mm256_unpackhi_epi32(v0, v1);
+                const __m256i rg23 = _mm256_unpacklo_epi32(v2, v3);
+                const __m256i ba23 = _mm256_unpackhi_epi32(v2, v3);
+                const __m256i g = _mm256_permutevar8x32_epi32(_mm256_unpackhi_epi64(rg01, rg23), order);
+                const __m256i added = greenApart ? g : _mm256_setzero_si256();
+                const __m256i r =
+                        _mm256_sub_epi8(_mm256_permutevar8x32_epi32(_mm256_unpacklo_epi64(rg01, rg23), order), added);
+                const __m256i b =
+                        _mm256_sub_epi8(_mm256_permutevar8x32_epi32(_mm256_unpacklo_epi64(ba01, ba23), order), added);
+
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(red + x), r);
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(green + x), g);
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(blue + x), b);
+
+                if (alpha != nullptr) {
+                    _mm256_storeu_si256(reinterpret_cast<__m256i *>(alpha + x),
+                                        _mm256_permutevar8x32_epi32(_mm256_unpackhi_epi64(ba01, ba23), order));
+                }
+            }
+
+            return x;
+        }
+
+        // The 32 bytes moved one place right across the lanes, a zero coming in.
+        TIV_AVX2 __m256i shift_right_byte(const __m256i bytes) {
+            return _mm256_alignr_epi8(bytes, _mm256_permute2x128_si256(bytes, bytes, 0x08), 15);
+        }
+
+        TIV_AVX2 std::uint64_t total(const __m256i lanes) {
+            const __m128i halves = _mm_add_epi64(_mm256_castsi256_si128(lanes), _mm256_extracti128_si256(lanes, 1));
+
+            return static_cast<std::uint64_t>(_mm_cvtsi128_si64(halves))
+                   + static_cast<std::uint64_t>(_mm_extract_epi64(halves, 1));
+        }
+
+        TIV_AVX2 std::size_t magnitudes_avx2(const std::uint8_t *row, const std::size_t bytes, std::uint64_t *plain,
+                                             std::uint64_t *sloped) {
+            const __m256i zero = _mm256_setzero_si256();
+            __m256i flat = zero;
+            __m256i slanted = zero;
+            std::size_t i = 0;
+
+            for (; i + 32 <= bytes; i += 32) {
+                const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(row + i));
+                const __m256i before = i == 0 ? shift_right_byte(v)
+                                              : _mm256_loadu_si256(reinterpret_cast<const __m256i *>(row + i - 1));
+
+                flat = _mm256_add_epi64(flat, _mm256_sad_epu8(_mm256_abs_epi8(v), zero));
+                slanted = _mm256_add_epi64(slanted, _mm256_sad_epu8(_mm256_abs_epi8(_mm256_sub_epi8(v, before)), zero));
+            }
+
+            *plain += total(flat);
+            *sloped += total(slanted);
+
+            return i;
+        }
+
+        TIV_AVX2 std::size_t slope_avx2(std::uint8_t *row, const std::size_t bytes) {
+            std::size_t i = 0;
+            char carry = 0;
+
+            for (; i + 32 <= bytes; i += 32) {
+                const __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(row + i));
+                const __m256i before = _mm256_insert_epi8(shift_right_byte(v), carry, 0);
+
+                carry = static_cast<char>(_mm256_extract_epi8(v, 31));
+                _mm256_storeu_si256(reinterpret_cast<__m256i *>(row + i), _mm256_sub_epi8(v, before));
+            }
+
+            return i;
+        }
+
+        TIV_AVX2 std::size_t widen_add_avx2(const std::uint8_t *row, std::uint32_t *sums, const std::size_t bytes) {
+            std::size_t i = 0;
+
+            for (; i + 32 <= bytes; i += 32) {
+                for (std::size_t part = 0; part < 32; part += 8) {
+                    auto *at = reinterpret_cast<__m256i *>(sums + i + part);
+                    const __m256i wide =
+                            _mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i *>(row + i + part)));
+
+                    _mm256_storeu_si256(at, _mm256_add_epi32(_mm256_loadu_si256(at), wide));
+                }
+            }
+
+            return i;
+        }
 #endif
     }
 
@@ -287,6 +397,84 @@ namespace tiv {
 
         for (; i < bytes; ++i) {
             row[i] = static_cast<std::uint8_t>(row[i] + above[i]);
+        }
+    }
+
+    void Channels::deinterleave(const std::uint8_t *rgba, const std::size_t pixels, const bool greenApart,
+                                std::uint8_t *red, std::uint8_t *green, std::uint8_t *blue, std::uint8_t *alpha) {
+        std::size_t x = 0;
+
+#if defined(__x86_64__) || defined(_M_X64)
+        if (Simd::avx2()) {
+            x = deinterleave_avx2(rgba, pixels, greenApart, red, green, blue, alpha);
+        }
+#endif
+
+        for (; x < pixels; ++x) {
+            const std::uint8_t *in = rgba + (x * 4);
+            const std::uint8_t taken = greenApart ? in[1] : 0;
+
+            red[x] = static_cast<std::uint8_t>(in[0] - taken);
+            green[x] = in[1];
+            blue[x] = static_cast<std::uint8_t>(in[2] - taken);
+
+            if (alpha != nullptr) {
+                alpha[x] = in[3];
+            }
+        }
+    }
+
+    void Channels::magnitudes(const std::uint8_t *row, const std::size_t bytes, std::uint64_t *plain,
+                              std::uint64_t *sloped) {
+        std::size_t i = 0;
+
+#if defined(__x86_64__) || defined(_M_X64)
+        if (Simd::avx2()) {
+            i = magnitudes_avx2(row, bytes, plain, sloped);
+        }
+#endif
+
+        for (; i < bytes; ++i) {
+            const std::uint8_t before = i > 0 ? row[i - 1] : 0;
+
+            *plain += static_cast<std::uint64_t>(std::abs(static_cast<int>(static_cast<std::int8_t>(row[i]))));
+            *sloped += static_cast<std::uint64_t>(
+                    std::abs(static_cast<int>(static_cast<std::int8_t>(static_cast<std::uint8_t>(row[i] - before)))));
+        }
+    }
+
+    void Channels::slope(std::uint8_t *row, const std::size_t bytes) {
+        std::size_t head = 0;
+
+#if defined(__x86_64__) || defined(_M_X64)
+        if (Simd::avx2()) {
+            head = bytes - (bytes % 32);
+        }
+#endif
+
+        // The tail first, right to left, while every byte before is still as it was.
+        for (std::size_t x = bytes; x > std::max<std::size_t>(head, 1); --x) {
+            row[x - 1] = static_cast<std::uint8_t>(row[x - 1] - row[x - 2]);
+        }
+
+#if defined(__x86_64__) || defined(_M_X64)
+        if (head > 0) {
+            slope_avx2(row, head);
+        }
+#endif
+    }
+
+    void Channels::widen_add(const std::uint8_t *row, std::uint32_t *sums, const std::size_t bytes) {
+        std::size_t i = 0;
+
+#if defined(__x86_64__) || defined(_M_X64)
+        if (Simd::avx2()) {
+            i = widen_add_avx2(row, sums, bytes);
+        }
+#endif
+
+        for (; i < bytes; ++i) {
+            sums[i] += row[i];
         }
     }
 }

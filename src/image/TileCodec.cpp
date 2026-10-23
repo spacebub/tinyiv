@@ -10,7 +10,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <span>
 #include <vector>
@@ -42,10 +41,6 @@ namespace tiv::TileCodec {
 
         [[nodiscard]] bool green_apart(const int channels, const Bitmap::Encoding encoding) {
             return channels >= 3 && encoding == Bitmap::Encoding::Srgb;
-        }
-
-        [[nodiscard]] int magnitude(const std::uint8_t residual) {
-            return std::abs(static_cast<int>(static_cast<std::int8_t>(residual)));
         }
 
         // The colours of the tile and each pixel's index into them, or false past MAX_COLOURS.
@@ -98,27 +93,11 @@ namespace tiv::TileCodec {
             const std::size_t area = width * static_cast<std::size_t>(height);
 
             for (int y = 0; y < height; ++y) {
-                const std::uint8_t *row = rows + (pitch * static_cast<std::size_t>(y));
-                std::uint8_t *line = planes + (static_cast<std::size_t>(y) * width);
+                const std::size_t line = static_cast<std::size_t>(y) * width;
 
-                for (std::size_t c = 0; c < channels; ++c) {
-                    std::uint8_t *plane = line + (c * area);
-
-                    for (std::size_t x = 0; x < width; ++x) {
-                        plane[x] = row[(x * Bitmap::CHANNELS) + c];
-                    }
-                }
-            }
-
-            if (green) {
-                std::uint8_t *red = planes;
-                const std::uint8_t *middle = planes + area;
-                std::uint8_t *blue = planes + (2 * area);
-
-                for (std::size_t i = 0; i < area; ++i) {
-                    red[i] = static_cast<std::uint8_t>(red[i] - middle[i]);
-                    blue[i] = static_cast<std::uint8_t>(blue[i] - middle[i]);
-                }
+                Channels::deinterleave(rows + (pitch * static_cast<std::size_t>(y)), width, green, planes + line,
+                                       planes + area + line, planes + (2 * area) + line,
+                                       channels == Bitmap::CHANNELS ? planes + (3 * area) + line : nullptr);
             }
         }
 
@@ -127,22 +106,20 @@ namespace tiv::TileCodec {
         bool filter_row(const std::uint8_t *planes, const std::size_t width, const std::size_t area, const int y,
                         const std::size_t channels, std::uint8_t *residuals) {
             const std::size_t line = static_cast<std::size_t>(y) * width;
-            long up = 0;
-            long gradient = 0;
+            std::uint64_t up = 0;
+            std::uint64_t gradient = 0;
 
             for (std::size_t c = 0; c < channels; ++c) {
                 const std::uint8_t *plane = planes + (c * area) + line;
                 std::uint8_t *out = residuals + (c * area) + line;
-                std::uint8_t before = 0;
 
-                for (std::size_t x = 0; x < width; ++x) {
-                    const auto residual = static_cast<std::uint8_t>(plane[x] - (y > 0 ? plane[x - width] : 0));
-
-                    out[x] = residual;
-                    up += magnitude(residual);
-                    gradient += magnitude(static_cast<std::uint8_t>(residual - before));
-                    before = residual;
+                if (y > 0) {
+                    Channels::difference(plane, plane - width, out, width);
+                } else {
+                    std::memcpy(out, plane, width);
                 }
+
+                Channels::magnitudes(out, width, &up, &gradient);
             }
 
             if (gradient >= up) {
@@ -150,12 +127,7 @@ namespace tiv::TileCodec {
             }
 
             for (std::size_t c = 0; c < channels; ++c) {
-                std::uint8_t *out = residuals + (c * area) + line;
-
-                // Right to left, so each left neighbour is still the row above's residual.
-                for (std::size_t x = width - 1; x > 0; --x) {
-                    out[x] = static_cast<std::uint8_t>(out[x] - out[x - 1]);
-                }
+                Channels::slope(residuals + (c * area) + line, width);
             }
 
             return true;

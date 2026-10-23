@@ -39,7 +39,6 @@ namespace tiv {
         void advance();
 
         Bitmap *_target;
-        int _width;
         int _height;
         int _factor;
         int _y;
