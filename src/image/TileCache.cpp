@@ -2299,6 +2299,17 @@ namespace tiv {
     }
 
     void TileCache::keep(const std::uint64_t id, std::shared_ptr<const Bitmap> bitmap, const bool pinned) const {
+        // A row read again for one tile keeps every column, so the tile may already be here. Its old
+        // slot goes first, else its bytes count twice and its place in the order of use is left behind.
+        if (const auto held = _cache.find(id); held != _cache.end()) {
+            if (!held->second.pinned) {
+                _bytes -= held->second.bitmap->bytes();
+                _used.erase(held->second.used);
+            }
+
+            _cache.erase(held);
+        }
+
         Slot slot;
 
         slot.pinned = pinned;
