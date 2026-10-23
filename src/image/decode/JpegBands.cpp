@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <csetjmp>
 #include <cstddef>
 #include <cstdint>
@@ -21,9 +22,13 @@
 #include <utility>
 #include <vector>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 #include <jpeglib.h>
 
 #include "image/Bitmap.h"
+#include "image/Simd.h"
 #include "image/decode/Decode.h"
 #include "image/decode/JpegBands.h"
 #include "image/decode/JpegHandle.h"
@@ -54,6 +59,58 @@ namespace tiv::Decode {
         // Rows libjpeg hands back at once, which it keeps to the tallest sampling factor.
         constexpr int MAX_BATCH = 16;
         constexpr std::array<std::uint8_t, 2> END = {0xFF, 0xD9};
+
+#if defined(__x86_64__) || defined(_M_X64)
+        // 32 bytes a step, each 0xFF before last handed to visit in order until it says to stop.
+        template <typename Visit>
+        TIV_AVX2 void each_mark_avx2(const std::uint8_t *at, const std::uint8_t *last, const Visit &visit) {
+            const __m256i mark = _mm256_set1_epi8(static_cast<char>(MARK));
+
+            for (; at + 32 <= last; at += 32) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,portability-simd-intrinsics)
+                const __m256i block = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(at));
+                auto mask = static_cast<unsigned>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(block, mark)));
+
+                while (mask != 0) {
+                    if (!visit(at + std::countr_zero(mask))) {
+                        return;
+                    }
+
+                    mask &= mask - 1;
+                }
+            }
+
+            for (; at < last; ++at) {
+                if (*at == MARK && !visit(at)) {
+                    return;
+                }
+            }
+        }
+#endif
+
+        // Every 0xFF before last, in order, until visit says to stop. The byte after each is within
+        // the data, as last is the last byte of it.
+        template <typename Visit>
+        void each_mark(const std::uint8_t *at, const std::uint8_t *last, const Visit &visit) {
+#if defined(__x86_64__) || defined(_M_X64)
+            if (Simd::avx2()) {
+                each_mark_avx2(at, last, visit);
+
+                return;
+            }
+#endif
+
+            while (at < last) {
+                const auto *found =
+                        static_cast<const std::uint8_t *>(std::memchr(at, MARK, static_cast<std::size_t>(last - at)));
+
+                if (found == nullptr || !visit(found)) {
+                    return;
+                }
+
+                at = found + 1;
+            }
+        }
 
         [[nodiscard]] bool is_restart(const std::uint8_t marker) {
             return marker >= RST0 && marker <= RST7;
@@ -299,34 +356,26 @@ namespace tiv::Decode {
         held._starts.push_back(held._scan);
 
         std::uint64_t restarts = 0;
-        const std::uint8_t *at = data.data() + held._scan;
-        const std::uint8_t *last = data.data() + data.size() - 1;
+        bool other = false;
 
-        while (at < last) {
-            const auto *found =
-                    static_cast<const std::uint8_t *>(std::memchr(at, MARK, static_cast<std::size_t>(last - at)));
-
-            if (found == nullptr) {
-                break;
-            }
-
+        each_mark(data.data() + held._scan, data.data() + data.size() - 1, [&](const std::uint8_t *found) {
             const std::uint8_t next = found[1];
 
             // A stuffed zero is data, and a second 0xFF is fill before a marker.
             if (next == 0x00 || next == MARK) {
-                at = found + (next == 0x00 ? 2 : 1);
-
-                continue;
+                return true;
             }
 
             if (next == EOI) {
                 held._end = static_cast<std::uint64_t>(found - data.data());
 
-                break;
+                return false;
             }
 
             // Anything else is a second scan or a DNL, which this cannot follow.
             if (!is_restart(next)) {
+                other = true;
+
                 return false;
             }
 
@@ -336,10 +385,10 @@ namespace tiv::Decode {
                 held._starts.push_back(static_cast<std::uint64_t>(found + 2 - data.data()));
             }
 
-            at = found + 2;
-        }
+            return true;
+        });
 
-        if (held._end == 0 || restarts + 1 != held._intervals
+        if (other || held._end == 0 || restarts + 1 != held._intervals
             || held._starts.size() != static_cast<std::size_t>(held.steps())) {
             return false;
         }
