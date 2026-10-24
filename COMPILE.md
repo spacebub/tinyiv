@@ -23,6 +23,8 @@ Options:
 -DTIV_RELEASE=ON       no git revision beside the version
 -DTIV_BENCHMARKS=ON    the benchmark suite in bench/
 -DTIV_SANITIZE=ON      address and undefined sanitizers
+-DTIV_HARNESS=ON       tiv_harness in harness/, to drive the whole app headless
+-DTIV_SYMBOLS=ON       debug info and frame pointers in every build, for profilers
 ```
 
 `cmake --install build --prefix ~/.local` puts the binary in `bin`, and the desktop entry and

@@ -28,6 +28,8 @@ endif ()
 option(TIV_SANITIZE "Build with the address and undefined sanitizers" OFF)
 option(TIV_BENCHMARKS "Build the benchmark suite in bench/" OFF)
 option(TIV_RELEASE "Build as a release: no git revision beside the version" OFF)
+option(TIV_HARNESS "Build tiv_harness in harness/ to drive the whole app under profilers and sanitizers" OFF)
+option(TIV_SYMBOLS "Keep debug info and frame pointers in every configuration, for profilers" OFF)
 
 set(SANITIZER_FLAGS -fsanitize=address -fsanitize=undefined)
 
@@ -71,7 +73,12 @@ else ()
         list(APPEND TIV_COMPILE_FLAGS "$<$<CONFIG:DEBUG>:-Og>" "$<$<CONFIG:RELEASE>:-O2>")
     endif ()
 
-    add_link_options("$<$<CONFIG:RELEASE>:-Wl,--gc-sections;-Wl,--as-needed;-Wl,-O1;-s>")
+    if (TIV_SYMBOLS)
+        list(APPEND TIV_COMPILE_FLAGS "-g" "-fno-omit-frame-pointer" "-mno-omit-leaf-frame-pointer")
+        add_link_options("$<$<CONFIG:RELEASE>:-Wl,--gc-sections;-Wl,--as-needed;-Wl,-O1>")
+    else ()
+        add_link_options("$<$<CONFIG:RELEASE>:-Wl,--gc-sections;-Wl,--as-needed;-Wl,-O1;-s>")
+    endif ()
 endif ()
 
 # pkg-config resolves one configuration, and with no build type the vcpkg toolchain puts its
@@ -96,6 +103,7 @@ include(DownloadCache)
 include(Embed)
 include(Format)
 include(GitRevision)
+include(ReuseApp)
 
 # Built here on every system, as few have SDL 3 installed, and linked statically, so nothing of it
 # is installed.
@@ -126,4 +134,8 @@ add_subdirectory(src)
 
 if (TIV_BENCHMARKS)
     add_subdirectory(bench)
+endif ()
+
+if (TIV_HARNESS)
+    add_subdirectory(harness)
 endif ()

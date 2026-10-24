@@ -75,6 +75,9 @@ namespace tiv {
 
         [[nodiscard]] bool has_image() const { return !_current.sheets.empty(); }
 
+        // The tile cache on screen is still reading tiles the view asked for.
+        [[nodiscard]] bool reading() const { return _current.tileCache != nullptr && _current.tileCache->reading(); }
+
         // Visible tiles missing that could upload now, or warm ones still to come. A tile on
         // disk the tile cache is still reading waits for it, and the tile cache says when it has come.
         [[nodiscard]] bool pending(const Viewport &viewport) const;

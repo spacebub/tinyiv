@@ -55,6 +55,9 @@ namespace tiv {
         // Main thread. False when nothing new has arrived.
         bool take(Result *out);
 
+        // Nothing is asked for, rendering or waiting to be taken.
+        [[nodiscard]] bool idle() const;
+
     private:
         struct Request {
             std::uint64_t generation = 0;
@@ -70,7 +73,7 @@ namespace tiv {
 
         std::uint32_t _event;
 
-        std::mutex _guard;
+        mutable std::mutex _guard;
         std::condition_variable _wake;
         bool _running = true;
         std::optional<Request> _request;

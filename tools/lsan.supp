@@ -1,0 +1,2 @@
+# LeakSanitizer skips the leaks listed here. Each one sits in a library outside tinyiv, which
+# tinyiv cannot free. tools/harness.sh sanitize reads this file.

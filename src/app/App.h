@@ -50,6 +50,35 @@ namespace tiv {
         bool start(const std::filesystem::path &file, std::string *error = nullptr);
         void run();
 
+        // What a driver outside the loop sees between frames.
+        struct State {
+            std::filesystem::path file;
+            int index = 0;
+            int count = 0;
+            Folder::Order order = Folder::Order::AToZ;
+            Decode::Info info;
+            // The orientation in the file composed with any turn not saved.
+            int orientation = 1;
+            // Nothing is still to decode, read, upload, render again or draw.
+            bool settled = false;
+            bool failed = false;
+            bool streamed = false;
+            bool streaming = false;
+            bool linear = false;
+            bool animated = false;
+            bool playing = false;
+            std::size_t frame = 0;
+            double zoom = 0.0;
+            float progress = 0.0F;
+            bool help = false;
+            bool fullscreen = false;
+            bool bars = false;
+            std::string message;
+        };
+
+        // Main thread only.
+        [[nodiscard]] State state() const;
+
     private:
         struct Size {
             int width = 0;

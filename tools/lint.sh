@@ -17,7 +17,7 @@ import json, sys
 root, db = sys.argv[1], sys.argv[2]
 for entry in json.load(open(db)):
     path = entry["file"]
-    if not path.startswith(root + "/src/"):
+    if not path.startswith((root + "/src/", root + "/harness/")):
         continue
     if "/external/" in path:
         continue

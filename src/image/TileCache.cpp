@@ -2422,6 +2422,12 @@ namespace tiv {
         _ready = std::move(ready);
     }
 
+    bool TileCache::reading() const {
+        const std::scoped_lock hold(_guard);
+
+        return !_queue.empty() || !_reading.empty();
+    }
+
     void TileCache::shrink() const {
         const std::scoped_lock hold(_guard);
 

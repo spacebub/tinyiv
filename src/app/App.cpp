@@ -534,6 +534,37 @@ namespace tiv {
         }
     }
 
+    App::State App::state() const {
+        // Only a scalable image renders again once the view rests, so the rest matters for no other.
+        const bool resting = _settling && Decode::scalable(_info.kind);
+        const bool settled = _shown == _generation && !_loading && !_building && !resting && !_dirty && _repaints == 0
+                             && !_canvas->pending(_viewport) && !_canvas->reading() && _loader->idle()
+                             && _refiner->idle();
+
+        return {
+                .file = _folder.count() > 0 ? _folder.current() : std::filesystem::path(),
+                .index = _folder.index(),
+                .count = _folder.count(),
+                .order = _folder.order(),
+                .info = _info,
+                .orientation = orientation(),
+                .settled = settled,
+                .failed = !_failure.empty(),
+                .streamed = _streamed,
+                .streaming = _loader->streaming_all(),
+                .linear = _linear,
+                .animated = _playback.active(),
+                .playing = _playback.playing(),
+                .frame = _playback.frame(),
+                .zoom = _viewport.zoom(),
+                .progress = _loader->progress(),
+                .help = _help,
+                .fullscreen = _fullscreen,
+                .bars = bar_shown(),
+                .message = _message,
+        };
+    }
+
     void App::handle(const SDL_Event &event) {
         if (event.type == _loaderEvent) {
             deliver();

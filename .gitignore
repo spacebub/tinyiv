@@ -30,3 +30,6 @@ install_manifest.txt
 desktop.ini
 .DS_Store
 ._*
+
+# tiv_harness writes the corpus, configs, caches and runs here
+/harness-sandbox/

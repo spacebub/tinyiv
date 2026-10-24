@@ -181,6 +181,9 @@ namespace tiv {
         // Called on a reader thread each time a tile arrives.
         void on_ready(std::function<void()> ready) const;
 
+        // Tiles asked for that have not arrived yet.
+        [[nodiscard]] bool reading() const;
+
         // Lets go of every tile in memory but the pinned ones.
         void shrink() const;
 

@@ -84,6 +84,12 @@ namespace tiv {
         return true;
     }
 
+    bool Refiner::idle() const {
+        const std::scoped_lock hold(_guard);
+
+        return !_request.has_value() && _abort == nullptr && !_result.has_value();
+    }
+
     void Refiner::work() {
         std::unique_lock hold(_guard);
 
