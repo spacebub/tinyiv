@@ -71,12 +71,26 @@ namespace tiv::Decode {
             return kind == Format::Gif || kind == Format::WebP;
         }
 
-        std::string vips_format_name(const VImage &image) {
-            if (image.get_typeof(VIPS_META_LOADER) == 0) {
+        // The native vips format loads without saying which loader read it, so the file is asked.
+        // That answer is a type name, which the nickname turns into the form the metadata uses.
+        const char *loader_of(const VImage &image, const std::filesystem::path &file) {
+            if (image.get_typeof(VIPS_META_LOADER) != 0) {
+                return image.get_string(VIPS_META_LOADER);
+            }
+
+            const char *type = vips_foreign_find_load(file.string().c_str());
+
+            return type != nullptr ? vips_nickname_find(g_type_from_name(type)) : nullptr;
+        }
+
+        std::string vips_format_name(const VImage &image, const std::filesystem::path &file) {
+            const char *named = loader_of(image, file);
+
+            if (named == nullptr) {
                 return {};
             }
 
-            std::string_view loader = image.get_string(VIPS_META_LOADER);
+            std::string_view loader = named;
 
             if (const std::size_t cut = loader.find("load"); cut != std::string_view::npos) {
                 loader = loader.substr(0, cut);
@@ -191,13 +205,18 @@ namespace tiv::Decode {
         });
     }
 
-    std::string Vips::last_error() {
-        std::string held = vips_error_buffer();
+    std::string Vips::ErrorMark::taken(const std::string_view now) const {
+        std::string_view added = now.starts_with(_before) ? now.substr(_before.size()) : now;
 
-        vips_error_clear();
+        while (!added.empty() && added.back() == '\n') {
+            added.remove_suffix(1);
+        }
 
-        while (!held.empty() && held.back() == '\n') {
-            held.pop_back();
+        std::string held(added);
+
+        // Cleared only when no other thread has written since, so their text stays for them to take.
+        if (std::string_view(vips_error_buffer()) == now) {
+            vips_error_clear();
         }
 
         return held;
@@ -291,6 +310,8 @@ namespace tiv::Decode {
     bool Vips::probe(const std::filesystem::path &file, Info *info, std::string *error) {
         ensure();
 
+        const ErrorMark mark;
+
         try {
             const VImage image = VImage::new_from_file(file.string().c_str());
             const bool swapped = vips_image_get_orientation_swap(image.get_image()) != 0;
@@ -302,12 +323,12 @@ namespace tiv::Decode {
             info->hdr = info->hdr || floating(image);
 
             if (info->format.empty()) {
-                info->format = vips_format_name(image);
+                info->format = vips_format_name(image, file);
             }
 
             return true;
-        } catch (const vips::VError &) {
-            fail(error, file, last_error());
+        } catch (const vips::VError &thrown) {
+            fail(error, file, mark.since(thrown));
 
             return false;
         }
@@ -317,6 +338,8 @@ namespace tiv::Decode {
                     std::string *error, Abort *abort, const Via via, const Tone::Source source,
                     const Tone::Display &display) {
         ensure();
+
+        const ErrorMark mark;
 
         try {
             VImage image;
@@ -347,18 +370,18 @@ namespace tiv::Decode {
             }
 
             if (!write_rgba(prepare(image, source, display), out, abort)) {
-                fail(error, file, last_error());
+                fail(error, file, mark.since());
 
                 return false;
             }
 
             return true;
-        } catch (const vips::VError &) {
+        } catch (const vips::VError &thrown) {
             if (abort != nullptr) {
                 abort->disarm();
             }
 
-            fail(error, file, last_error());
+            fail(error, file, mark.since(thrown));
 
             return false;
         }
@@ -368,20 +391,22 @@ namespace tiv::Decode {
                            std::string *error, Abort *abort) {
         ensure();
 
+        const ErrorMark mark;
+
         try {
             if (!write_rgba(prepare(VImage::new_from_buffer(data.data(), data.size(), ""), {}), out, abort)) {
-                fail(error, file, last_error());
+                fail(error, file, mark.since());
 
                 return false;
             }
 
             return true;
-        } catch (const vips::VError &) {
+        } catch (const vips::VError &thrown) {
             if (abort != nullptr) {
                 abort->disarm();
             }
 
-            fail(error, file, last_error());
+            fail(error, file, mark.since(thrown));
 
             return false;
         }

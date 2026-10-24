@@ -590,6 +590,11 @@ namespace tiv {
             hold.lock();
             _freed = true;
         }
+
+        hold.unlock();
+        // SDL frees what it keeps for a thread only for threads it made, such as the strings SDL_getenv returns.
+        // https://wiki.libsdl.org/SDL3/SDL_CleanupTLS
+        SDL_CleanupTLS();
     }
 
     bool Loader::idle() const {

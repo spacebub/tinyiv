@@ -15,6 +15,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 
 #include <vips/vips8>
 
@@ -26,8 +27,24 @@ namespace tiv::Decode::Vips {
 
     void ensure();
 
-    // What libvips last reported, which is then cleared.
-    [[nodiscard]] std::string last_error();
+    // libvips keeps one error buffer for every thread. A mark taken before a call keeps what other
+    // threads left there out of the error text after it.
+    class ErrorMark {
+
+    public:
+        ErrorMark() : _before(vips_error_buffer()) {}
+
+        // What the call added since the mark, read from the buffer as the call left it.
+        [[nodiscard]] std::string since() const { return taken(vips_error_buffer()); }
+
+        // The same from the exception, which took the buffer as it was when the call failed.
+        [[nodiscard]] std::string since(const vips::VError &thrown) const { return taken(thrown.what()); }
+
+    private:
+        [[nodiscard]] std::string taken(std::string_view now) const;
+
+        std::string _before;
+    };
 
     void shutdown();
 

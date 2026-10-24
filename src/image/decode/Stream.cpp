@@ -28,6 +28,8 @@ namespace tiv::Decode {
                          std::string *error, Abort *abort, const Tone::Display &display, const int shrink) {
             Vips::ensure();
 
+            const Vips::ErrorMark mark;
+
             try {
                 // Sequential, so each band decodes as it is asked for and nothing above it stays.
                 vips::VOption *options = vips::VImage::option()->set("access", VIPS_ACCESS_SEQUENTIAL);
@@ -61,7 +63,7 @@ namespace tiv::Decode {
                     const std::size_t bytes = band.pitch() * static_cast<std::size_t>(count);
 
                     if (!Vips::write_rows(prepared, y, count, band.data(), abort)) {
-                        fail(error, file, Vips::last_error());
+                        fail(error, file, mark.since());
 
                         return false;
                     }
@@ -74,12 +76,12 @@ namespace tiv::Decode {
                 }
 
                 return true;
-            } catch (const vips::VError &) {
+            } catch (const vips::VError &thrown) {
                 if (abort != nullptr) {
                     abort->disarm();
                 }
 
-                fail(error, file, Vips::last_error());
+                fail(error, file, mark.since(thrown));
 
                 return false;
             }

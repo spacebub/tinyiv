@@ -139,6 +139,8 @@ namespace tiv {
                         const int width, const int height, Bitmap *out, std::string *error, Abort *abort) {
         Vips::ensure();
 
+        const Vips::ErrorMark mark;
+
         try {
             const VImage image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("scale", scale));
             const int left = std::clamp(x, 0, image.width() - 1);
@@ -162,18 +164,18 @@ namespace tiv {
             const VImage part = image.crop(left, top, partWidth, partHeight);
 
             if (!Vips::write_rgba(Vips::prepare(part, {}), out, abort)) {
-                fail(error, file, Vips::last_error());
+                fail(error, file, mark.since());
 
                 return false;
             }
 
             return true;
-        } catch (const vips::VError &) {
+        } catch (const vips::VError &thrown) {
             if (abort != nullptr) {
                 abort->disarm();
             }
 
-            fail(error, file, Vips::last_error());
+            fail(error, file, mark.since(thrown));
 
             return false;
         }

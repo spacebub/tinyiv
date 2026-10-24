@@ -85,7 +85,8 @@ namespace tiv::Decode {
         bool jxl_header(const std::span<const std::uint8_t> data, JxlBasicInfo *basic, Tone::Source *tone) {
             const JxlHandle handle;
 
-            if (handle.decoder == nullptr
+            // Kept as the load keeps it, else libjxl reports the orientation as already applied.
+            if (handle.decoder == nullptr || JxlDecoderSetKeepOrientation(handle.decoder, JXL_TRUE) != JXL_DEC_SUCCESS
                 || JxlDecoderSubscribeEvents(handle.decoder, event_mask(JXL_DEC_BASIC_INFO, JXL_DEC_COLOR_ENCODING))
                            != JXL_DEC_SUCCESS
                 || JxlDecoderSetInput(handle.decoder, data.data(), data.size()) != JXL_DEC_SUCCESS) {
@@ -181,6 +182,7 @@ namespace tiv::Decode {
             }
         };
 
+        // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
         void jxl_take(void *opaque, const std::size_t x, const std::size_t y, const std::size_t pixels,
         // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
                       const void *samples) {
@@ -458,6 +460,7 @@ namespace tiv::Decode {
             JxlParallelRunFunction run = nullptr;
         };
 
+        // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
         JxlParallelRetCode jxl_run(void *opaque, void *jpegxlOpaque, JxlParallelRunInit init,
         // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
                                    JxlParallelRunFunction run, const std::uint32_t start, const std::uint32_t end) {

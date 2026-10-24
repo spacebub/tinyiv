@@ -57,6 +57,8 @@ namespace tiv {
                              std::string *error, Abort *abort) {
         Vips::ensure();
 
+        const Vips::ErrorMark mark;
+
         try {
             // Sequential, so the frames stream through one by one and the strip never decodes whole up front.
             VImage strip = VImage::new_from_file(file.string().c_str(),
@@ -87,7 +89,7 @@ namespace tiv {
                 Frame next;
 
                 if (!Vips::write_rgba(Vips::prepare(page, source), &next.bitmap, abort)) {
-                    fail(error, file, Vips::last_error());
+                    fail(error, file, mark.since());
 
                     return false;
                 }
@@ -99,12 +101,12 @@ namespace tiv {
             *out = std::move(held);
 
             return true;
-        } catch (const vips::VError &) {
+        } catch (const vips::VError &thrown) {
             if (abort != nullptr) {
                 abort->disarm();
             }
 
-            fail(error, file, Vips::last_error());
+            fail(error, file, mark.since(thrown));
 
             return false;
         }
