@@ -411,13 +411,13 @@ namespace tiv::Decode {
         }
 
         void remember(const std::span<const std::uint8_t> made) {
-            std::uint8_t *ring = window.data();
-            const std::uint8_t *bytes = made.data();
+            const std::span<const std::uint8_t> last = made.last(std::min(made.size(), WINDOW));
+            const std::size_t skipped = made.size() - last.size();
+            const std::size_t at = (inflated + skipped) % WINDOW;
+            const std::size_t before = std::min(last.size(), WINDOW - at);
 
-            for (std::size_t i = 0; i < made.size(); ++i) {
-                ring[(inflated + i) % WINDOW] = bytes[i];
-            }
-
+            std::memcpy(window.data() + at, last.data(), before);
+            std::memcpy(window.data(), last.data() + before, last.size() - before);
             inflated += made.size();
         }
 
@@ -450,12 +450,11 @@ namespace tiv::Decode {
             // The window is kept in order, oldest first, as inflateSetDictionary takes it.
             state.resize(kept + png->_rowBytes);
 
-            const std::uint8_t *ring = window.data();
-            std::uint8_t *ordered = state.data();
+            const std::size_t oldest = (inflated - kept) % WINDOW;
+            const std::size_t before = std::min(kept, WINDOW - oldest);
 
-            for (std::size_t i = 0; i < kept; ++i) {
-                ordered[i] = ring[(inflated - kept + i) % WINDOW];
-            }
+            std::memcpy(state.data(), window.data() + oldest, before);
+            std::memcpy(state.data() + before, window.data(), kept - before);
 
             png->_checkpoints.push_back(point);
             mark = inflated + CHECKPOINT_BYTES;

@@ -39,6 +39,13 @@ namespace tiv::TileCodec {
             return (static_cast<std::size_t>(height) + 7) / 8;
         }
 
+        // Resizing down then up again would zero the regrown bytes, which every caller overwrites.
+        void grow(std::vector<std::uint8_t> &buffer, const std::size_t size) {
+            if (buffer.size() < size) {
+                buffer.resize(size);
+            }
+        }
+
         [[nodiscard]] bool green_apart(const int channels, const Bitmap::Encoding encoding) {
             return channels >= 3 && encoding == Bitmap::Encoding::Srgb;
         }
@@ -51,7 +58,7 @@ namespace tiv::TileCodec {
 
             slots.fill(-1);
             colours.clear();
-            indices.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+            grow(indices, static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
 
             std::uint8_t *index = indices.data();
 
@@ -163,7 +170,8 @@ namespace tiv::TileCodec {
 
         // Few colours can still be a smooth ramp the filters do better on, so both are tried.
         if (count_colours(rows, pitch, width, height, _colours, _indices)) {
-            const std::span<const std::uint8_t> indexed = palette();
+            const std::span<const std::uint8_t> indexed =
+                    palette(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
 
             if (!indexed.empty() && (filtered.empty() || indexed.size() < filtered.size())) {
                 return indexed;
@@ -180,12 +188,15 @@ namespace tiv::TileCodec {
         const std::size_t area = w * static_cast<std::size_t>(height);
         const auto count = static_cast<std::size_t>(channels);
         const std::size_t head = 1 + filter_bytes(height);
+        const std::size_t size = area * count;
+        const std::size_t room = ZSTD_compressBound(size);
 
-        _planes.resize(area * count);
-        _residuals.resize(area * count);
+        grow(_planes, size);
+        grow(_residuals, size);
         split(rows, pitch, w, height, count, green_apart(channels, encoding), _planes.data());
 
-        _packed.assign(head, 0);
+        grow(_packed, head + room);
+        std::fill_n(_packed.begin(), head, 0);
         _packed.at(0) = static_cast<std::uint8_t>(Mode::Planes);
 
         std::uint8_t *filters = _packed.data() + 1;
@@ -196,24 +207,23 @@ namespace tiv::TileCodec {
             }
         }
 
-        _packed.resize(head + ZSTD_compressBound(_residuals.size()));
-
-        const std::size_t made = ZSTD_compressCCtx(_context.get(), _packed.data() + head, _packed.size() - head,
-                                                   _residuals.data(), _residuals.size(), ZSTD_LEVEL);
+        const std::size_t made =
+                ZSTD_compressCCtx(_context.get(), _packed.data() + head, room, _residuals.data(), size, ZSTD_LEVEL);
 
         return ZSTD_isError(made) != 0 ? std::span<const std::uint8_t>() : std::span(_packed).first(head + made);
     }
 
-    std::span<const std::uint8_t> Encoder::palette() {
+    std::span<const std::uint8_t> Encoder::palette(const std::size_t area) {
         const std::size_t head = 2 + (_colours.size() * sizeof(std::uint32_t));
+        const std::size_t room = ZSTD_compressBound(area);
 
-        _other.resize(head + ZSTD_compressBound(_indices.size()));
+        grow(_other, head + room);
         _other.at(0) = static_cast<std::uint8_t>(Mode::Palette);
         _other.at(1) = static_cast<std::uint8_t>(_colours.size() - 1);
         std::memcpy(_other.data() + 2, _colours.data(), _colours.size() * sizeof(std::uint32_t));
 
-        const std::size_t made = ZSTD_compressCCtx(_context.get(), _other.data() + head, _other.size() - head,
-                                                   _indices.data(), _indices.size(), ZSTD_LEVEL);
+        const std::size_t made =
+                ZSTD_compressCCtx(_context.get(), _other.data() + head, room, _indices.data(), area, ZSTD_LEVEL);
 
         return ZSTD_isError(made) != 0 ? std::span<const std::uint8_t>() : std::span(_other).first(head + made);
     }
@@ -248,7 +258,7 @@ namespace tiv::TileCodec {
         }
 
         std::memcpy(palette.data(), packed.data() + 2, colours * sizeof(std::uint32_t));
-        _planes.resize(area);
+        grow(_planes, area);
 
         if (ZSTD_decompressDCtx(_context.get(), _planes.data(), area, packed.data() + head, packed.size() - head)
             != area) {
@@ -275,13 +285,13 @@ namespace tiv::TileCodec {
         const std::size_t area = w * static_cast<std::size_t>(height);
         const auto count = static_cast<std::size_t>(channels);
         const std::size_t head = 1 + filter_bytes(height);
+        const std::size_t size = area * count;
 
-        _planes.resize(area * count);
+        grow(_planes, size);
 
         if (packed.size() < head
-            || ZSTD_decompressDCtx(_context.get(), _planes.data(), _planes.size(), packed.data() + head,
-                                   packed.size() - head)
-                       != _planes.size()) {
+            || ZSTD_decompressDCtx(_context.get(), _planes.data(), size, packed.data() + head, packed.size() - head)
+                       != size) {
             return false;
         }
 

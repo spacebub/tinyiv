@@ -52,8 +52,8 @@ namespace tiv::TileCodec {
     private:
         std::span<const std::uint8_t> planes(const std::uint8_t *rows, std::size_t pitch, int width, int height,
                                              int channels, Bitmap::Encoding encoding);
-        // The colours and indices count_colours() left.
-        std::span<const std::uint8_t> palette();
+        // Packs the colours and the indices that count_colours() left for a tile of area pixels.
+        std::span<const std::uint8_t> palette(std::size_t area);
 
         std::unique_ptr<ZSTD_CCtx_s, ContextFree> _context;
         std::vector<std::uint8_t> _planes;
