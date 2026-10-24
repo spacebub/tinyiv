@@ -291,7 +291,8 @@ namespace tiv::TileCodec {
 
         for (int y = 0; y < height; ++y) {
             const std::size_t line = static_cast<std::size_t>(y) * w;
-            const bool gradient = ((filters[y / 8] >> (static_cast<unsigned>(y) % 8U)) & 1U) != 0;
+            const bool gradient =
+                    ((static_cast<unsigned>(filters[y / 8]) >> (static_cast<unsigned>(y) % 8U)) & 1U) != 0;
 
             for (std::size_t c = 0; c < count; ++c) {
                 std::uint8_t *row = planes + (c * area) + line;

@@ -140,7 +140,7 @@ namespace tiv::Decode {
     using Take = std::function<bool(int y, int rows, std::span<const std::uint8_t> pixels)>;
 
     bool stream(const std::filesystem::path &file, int rows, const Begin &begin, const Take &take,
-                std::string *error = nullptr, Abort *abort = nullptr, const Tone::Display &display = {},
+                std::string *error = nullptr, Abort *abort = nullptr, const Tone::Display &display = Tone::Display(),
                 int shrink = 1);
 
     // About the most memory stream() holds for the file in bands of the rows given, for the

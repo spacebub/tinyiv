@@ -69,7 +69,7 @@ namespace tiv::Decode {
         }
 
         // The encoding the pixels come out in. An ICC profile alone is taken for SDR.
-        Tone::Source jxl_tone(JxlDecoder *decoder) {
+        Tone::Source jxl_tone(const JxlDecoder *decoder) {
             JxlColorEncoding encoding;
 
             if (JxlDecoderGetColorAsEncodedProfile(decoder, JXL_COLOR_PROFILE_TARGET_DATA, &encoding)
@@ -182,6 +182,7 @@ namespace tiv::Decode {
         };
 
         void jxl_take(void *opaque, const std::size_t x, const std::size_t y, const std::size_t pixels,
+        // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
                       const void *samples) {
             static_cast<const JxlOutput *>(opaque)->take(x, y, pixels, samples);
         }
@@ -214,7 +215,7 @@ namespace tiv::Decode {
         }
 
         // The bitmap sized for the image, false for an animation.
-        bool jxl_canvas(JxlDecoder *decoder, Bitmap *held) {
+        bool jxl_canvas(const JxlDecoder *decoder, Bitmap *held) {
             JxlBasicInfo info;
 
             if (JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS || info.have_animation != 0) {
@@ -458,6 +459,7 @@ namespace tiv::Decode {
         };
 
         JxlParallelRetCode jxl_run(void *opaque, void *jpegxlOpaque, JxlParallelRunInit init,
+        // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
                                    JxlParallelRunFunction run, const std::uint32_t start, const std::uint32_t end) {
             const auto *runner = static_cast<const JxlStoppable *>(opaque);
 
@@ -495,8 +497,9 @@ namespace tiv::Decode {
 
         // Tells begin what is coming, and points the output at bands that go on to take. An
         // image with nothing to map is copied as it comes.
-        bool jxl_start(JxlDecoder *decoder, const std::span<const std::uint8_t> data, const Tone::Display &display,
-                       const JxlStreamTo &to, std::optional<JxlOutput> &output, std::optional<JxlBands> &bands) {
+        bool jxl_start(const JxlDecoder *decoder, const std::span<const std::uint8_t> data,
+                       const Tone::Display &display, const JxlStreamTo &to, std::optional<JxlOutput> &output,
+                       std::optional<JxlBands> &bands) {
             JxlBasicInfo info;
 
             if (JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS) {
@@ -525,7 +528,7 @@ namespace tiv::Decode {
             return true;
         }
 
-        bool jxl_animated(JxlDecoder *decoder) {
+        bool jxl_animated(const JxlDecoder *decoder) {
             JxlBasicInfo info;
 
             return JxlDecoderGetBasicInfo(decoder, &info) != JXL_DEC_SUCCESS || info.have_animation != 0;

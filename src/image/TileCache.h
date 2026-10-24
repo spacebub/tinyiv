@@ -142,7 +142,8 @@ namespace tiv {
         // Lean holds as few tiles in memory as the view allows, with one reader.
         [[nodiscard]] static std::shared_ptr<TileCache> open(const std::filesystem::path &file,
                                                              const std::filesystem::path &folder = {},
-                                                             const Tone::Display &display = {}, bool lean = false);
+                                                             const Tone::Display &display = Tone::Display(),
+                                                             bool lean = false);
 
         // Decodes the file into a new pyramid and opens it. On disk it goes in the folder as
         // location() takes it. Progress goes from 0 to 1.

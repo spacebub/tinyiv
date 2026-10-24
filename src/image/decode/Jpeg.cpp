@@ -235,7 +235,7 @@ namespace tiv::Decode {
             }
 
             const GainMap::Applier applier(gain.metadata, &map, base->width(), base->height(), weight);
-            const Tone::Mapper mapper({}, display);
+            const Tone::Mapper mapper(Tone::Source(), display);
 
             parallel_rows(
                     base->height(),

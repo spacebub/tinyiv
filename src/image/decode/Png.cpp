@@ -91,7 +91,7 @@ namespace tiv::Decode {
 
         // Reads the header and sets the transforms that make every PNG come out RGBA8, or
         // RGBA of 16 bits in native order when wide, for the tone mapper.
-        bool png_open(PngHandle &handle, PngReader &reader, const bool wide) {
+        bool png_open(const PngHandle &handle, PngReader &reader, const bool wide) {
             if (handle.png == nullptr || handle.info == nullptr) {
                 return false;
             }
@@ -291,7 +291,7 @@ namespace tiv::Decode {
         };
 
         // Wide rows only for images that are not interlaced, whose passes build on the rows before.
-        bool png_read(PngHandle &handle, Bitmap &target, const Tone::Mapper *mapper, const Abort *abort) {
+        bool png_read(const PngHandle &handle, Bitmap &target, const Tone::Mapper *mapper, const Abort *abort) {
             PngRows rows(mapper, target.width());
 
             // NOLINTNEXTLINE(cert-err52-cpp,modernize-avoid-setjmp-longjmp): libpng reports errors by longjmp only.
@@ -326,7 +326,7 @@ namespace tiv::Decode {
 
         // Rows stream through a box filter into the target, so an image of any size costs its
         // shrunk size plus two rows. Only for images that are not interlaced.
-        bool png_read_shrunk(PngHandle &handle, Bitmap &target, const int factor, const Tone::Mapper *mapper,
+        bool png_read_shrunk(const PngHandle &handle, Bitmap &target, const int factor, const Tone::Mapper *mapper,
                              const Abort *abort) {
             const auto width = static_cast<int>(png_get_image_width(handle.png, handle.info));
             const auto height = static_cast<int>(png_get_image_height(handle.png, handle.info));
@@ -417,7 +417,7 @@ namespace tiv::Decode {
     Direct Png::load(const std::filesystem::path &file, const std::span<const std::uint8_t> data, const int boxWidth,
                      const int boxHeight, Bitmap *out, std::string *error, const Abort *abort, const Fit fit,
                      const Tone::Display &display) {
-        PngHandle handle;
+        const PngHandle handle;
         PngReader reader{.data = data, .at = 0};
         const Tone::Source source = tone(data);
 

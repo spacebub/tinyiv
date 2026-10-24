@@ -68,7 +68,7 @@ namespace tiv::Tone {
         // For an SDR display the pixels come out RGBA8 sRGB, for an HDR one PQ as Bitmap
         // lays it out. Light beyond the display's headroom rolls off into it, or without the
         // roll off clips, as it should once a gain map has brought it down.
-        explicit Mapper(Source source, Display display = {}, bool rolledOff = true);
+        explicit Mapper(Source source, Display display = Display(), bool rolledOff = true);
 
         // To RGBA in linear light of the source's primaries, SDR white at 1. Samples span
         // their full range, and 8 bit ones are SDR.

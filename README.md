@@ -1,21 +1,21 @@
 # tinyiv
 
-A small, very fast, GPU rendered image viewer. It decodes on background threads, keeps the
-image on the GPU as tiles of a mipmap pyramid and prefetches the images around the current one,
-so stepping through a folder is instant and gigapixel files pan smoothly. One window, one
-folder, one image, with no editing and no extra features.
+A small, very fast, GPU rendered image viewer. It decodes on background threads and prefetches
+the images around the current one, so stepping through a folder is instant. Images live on the
+GPU as tiles of a mipmap pyramid, so gigapixel files pan smoothly. One window, one folder, one
+image, with no editing and no extra features.
 
 Images too large for memory are streamed. The first time one opens, tinyiv builds a pyramid of
-tiles and caches it on disk, so it shows at full resolution whatever its size, and opens
-instantly the next time. JPEGs with restart markers, most TIFFs and HEIF or AVIF grids are read
-straight from the file at full size, so only their smaller levels are cached. With `cache_mode = small`, huge PNGs
-work the same way.
+tiles and caches it on disk. The image then shows at full resolution at any size and opens
+instantly the next time. Some files are read straight at full size: JPEGs with restart markers,
+most TIFFs, and HEIF or AVIF grids. Only their smaller levels are cached. With
+`cache_mode = small`, huge PNGs work the same way.
 
 Every format libvips can read is supported. JPEG, PNG, WebP, JPEG XL, TIFF, BMP, ICO and ICNS
-are decoded directly, with a quick DCT scaled preview for large JPEGs. ICO and ICNS show their
+are decoded directly. Large JPEGs get a quick DCT scaled preview first. ICO and ICNS show their
 largest icon. SVG and PDF are rendered again at the current zoom once the view settles, so they
-stay sharp. Animated GIF and WebP loop, with a bar along the bottom to pause and seek. A file
-that can't be read says so in place of the image.
+stay sharp. Animated GIF and WebP loop, with a bar along the bottom to pause and seek. When a
+file can't be read, tinyiv says so in place of the image.
 
 HDR images are shown in HDR on HDR displays and tone mapped everywhere else.
 
@@ -47,34 +47,35 @@ Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 | Ctrl+H                  | Show, hide the keybinds       |
 | Esc  Q  Ctrl+D          | Quit                          |
 
-Drop a file on the window to open its folder. Started without a file, tinyiv waits for one.
+Drop a file on the window to open its folder. Without a file, tinyiv starts empty and waits for
+one.
 
-Rotating and flipping only change how the image is drawn. Ctrl+S saves the result to the
-file's orientation tag for JPEG, PNG, WebP and TIFF without touching the pixel data, so
-rotating back and saving again gives back the identical file.
+Rotating and flipping only change how the image is drawn. For JPEG, PNG, WebP and TIFF, Ctrl+S
+writes the result to the orientation tag in the file. The pixel data stays untouched, so
+rotating back and saving again restores the identical file.
 
 ## Configuration
 
-Settings are kept in `tinyiv.conf`, in `$XDG_CONFIG_HOME/tinyiv` (usually `~/.config/tinyiv`)
-on Linux and next to `tinyiv.exe` on Windows. tinyiv creates the file on first start and adds
-any setting it is missing with its default value.
+Settings are kept in `tinyiv.conf`. On Linux it lives in `$XDG_CONFIG_HOME/tinyiv`, usually
+`~/.config/tinyiv`. On Windows it sits next to `tinyiv.exe`. tinyiv creates the file on first
+start and later adds any missing setting with its default value.
 
-| Setting           | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-|-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cache`           | Where tile caches are kept. Empty keeps each cache in a `tinyiv-cache` folder next to its image. A relative path starts from the image's folder, and `~` means your home folder.                                                                                                                                                                                                                                                                   |
-| `cache_mode`      | `fast` or `small`. Fast caches every tile of a huge PNG, so panning is instant. Small caches only the points decoding can resume from, which takes about a third of the space, but panning at full size waits a few tens of milliseconds for each band of rows. Only new caches follow it: a cache made before is used as it is, in either mode.                                                                                                   |
-| `streaming_mode`  | `on` or `off`. Whether streaming mode is on when tinyiv starts. S switches it while tinyiv runs, and images too large for memory always stream.                                                                                                                                                                                                                                                                                                    |
-| `persist_streams` | `on` or `off`. Whether streamed images that fit in memory keep their tiles on disk too. Off caches only images too large for memory, on caches every streamed image so it opens at once the next time.                                                                                                                                                                                                                                             |
-| `memory_mode`     | `speed` or `footprint`. Speed decodes the images around the one on screen ahead, so stepping through a folder is instant. Footprint holds only what the image on screen shows: every image streams, tiles leave memory once drawn, and PNGs, TIFFs and JPEGs that are not progressive are read again from their file at full size rather than kept. Nothing is written to disk unless streaming mode is on. Each step and zoom waits for decoding. |
-| `sort`            | `a-z`, `z-a`, `newest`, `oldest` or `size`. The order of the images in a folder. Newest and oldest go by when each file was last modified, and size puts the smallest first. O steps through them while tinyiv runs without changing the file.                                                                                                                                                                                                     |
+| Setting           | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                         |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `cache`           | Where tile caches are kept. Empty keeps each cache in a `tinyiv-cache` folder next to the image. A relative path starts from the folder of the image, and `~` means your home folder.                                                                                                                                                                                                                                           |
+| `cache_mode`      | `fast` or `small`. Fast caches every tile of a huge PNG, so panning is instant. Small caches only the points where decoding can resume. It takes about a third of the space, but panning at full size waits a few tens of milliseconds for each band of rows. The mode applies to new caches only. Existing caches keep working in either mode. Shift+R rebuilds the cache of the image on screen in the current mode.          |
+| `streaming_mode`  | `on` or `off`. Whether streaming mode is on when tinyiv starts. S switches it while tinyiv runs. Images too large for memory always stream.                                                                                                                                                                                                                                                                                     |
+| `persist_streams` | `on` or `off`. Whether streamed images that fit in memory also keep their tiles on disk. Off caches only images too large for memory. On caches every streamed image, so it opens at once the next time.                                                                                                                                                                                                                        |
+| `memory_mode`     | `speed` or `footprint`. Speed decodes the images around the current one ahead of time, so stepping through a folder is instant. Footprint keeps only what is on screen. Every image streams, and tiles leave memory once drawn. PNGs, TIFFs and non-progressive JPEGs are read again from the file at full size instead of kept. Nothing is written to disk unless streaming mode is on. Each step and zoom waits for decoding. |
+| `sort`            | `a-z`, `z-a`, `newest`, `oldest` or `size`. The order of the images in a folder. Newest and oldest go by the last modified time. Size puts the smallest first. O switches the order while tinyiv runs and leaves the file unchanged.                                                                                                                                                                                            |
 
 If the cache folder can't be written, tinyiv falls back to your user cache folder.
 
-A streamed image uses the cache that is already there, whatever the settings, the cache mode or
-the system it was made with, so a cache made on Linux opens on Windows and the other way around.
-tinyiv looks for it in the `cache` folder, the `tinyiv-cache` folder next to the image and your
-user cache folder. Shift+R makes the cache of the streamed image on screen again with the current
-settings.
+A streamed image uses any cache that already exists. The settings, the cache mode and the
+system that made the cache do not matter, so a cache made on Linux opens on Windows and the
+other way around. tinyiv looks for the cache in three places: the `cache` folder, the
+`tinyiv-cache` folder next to the image and your user cache folder. Shift+R rebuilds the cache
+of the streamed image on screen with the current settings.
 
 ## License
 

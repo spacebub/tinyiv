@@ -95,7 +95,7 @@ namespace tiv {
             }
 
             const Request request = std::move(*_request);
-            auto abort = std::make_shared<Decode::Abort>();
+            const auto abort = std::make_shared<Decode::Abort>();
 
             _request.reset();
             _abort = abort;

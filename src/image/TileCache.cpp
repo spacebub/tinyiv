@@ -1093,9 +1093,10 @@ namespace tiv {
                     return _reader.read(offset, scratch.data(), scratch.size()) ? std::span<const std::uint8_t>(scratch)
                                                                                 : std::span<const std::uint8_t>();
                 };
-                const int factor = 1 << level;
+                const auto shift = static_cast<unsigned>(level);
+                const int factor = static_cast<int>(1U << shift);
 
-                return _bands.decode(fetch, top * factor, count * factor, EIGHTHS >> level, out, read_threads(),
+                return _bands.decode(fetch, top * factor, count * factor, EIGHTHS >> shift, out, read_threads(),
                                      nullptr);
             }
 
@@ -1455,7 +1456,7 @@ namespace tiv {
 
                             return true;
                         },
-                        nullptr, nullptr, _display, 1 << level);
+                        nullptr, nullptr, _display, static_cast<int>(1U << static_cast<unsigned>(level)));
 
                 return got;
             }
@@ -1588,8 +1589,8 @@ namespace tiv {
 
         // The finest level read band by band from the source, and only the levels below it made.
         bool run_source_pass(const std::filesystem::path &file, TileCache::Source &source, std::atomic<float> *progress,
-                             std::string *error, Decode::Abort *abort, const std::function<Sink *(const Pass &)> &ready,
-                             Pass *made) {
+                             std::string *error, const Decode::Abort *abort,
+                             const std::function<Sink *(const Pass &)> &ready, Pass *made) {
             const int height = source.height();
 
             made->levels = level_sizes(source.width(), height);

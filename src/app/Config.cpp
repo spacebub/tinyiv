@@ -102,31 +102,37 @@ namespace tiv {
 
         // Scanned in order for each line, which stays nanoseconds at any count a person edits by hand.
         constexpr std::array SETTINGS{
-                Setting{.key = "cache",
-                        .text = "# Folder for the tile caches of images too large to fit in memory. Leave it empty\n"
-                                "# to keep each cache in a tinyiv-cache folder next to its image. A relative path\n"
-                                "# starts from the image's folder, and ~ means your home folder.\n"
+                Setting{
+                        .key = "cache",
+                        .text = "# Folder for the tile caches. Leave it empty to keep each cache in a\n"
+                                "# tinyiv-cache folder next to the image. A relative path starts from the folder\n"
+                                "# of the image, and ~ means your home folder.\n"
                                 "cache =\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {
                                     config.cache = expanded(value);
 
                                     return true;
-                                }},
-                Setting{.key = "cache_mode",
+                                },
+                },
+                Setting{
+                        .key = "cache_mode",
                         .text = "# How huge PNGs are cached, fast or small. Fast stores every tile, so panning is\n"
-                                "# instant. Small stores only the points decoding can resume from, which takes\n"
+                                "# instant. Small stores only the points where decoding can resume. It takes\n"
                                 "# about a third of the space, but panning at full size waits a few tens of\n"
-                                "# milliseconds for each band of rows. A cache made before is used as it is, in\n"
-                                "# either mode. Shift+R rebuilds the cache of the image on screen in this mode.\n"
+                                "# milliseconds for each band of rows. The mode applies to new caches only.\n"
+                                "# Existing caches keep working in either mode. Shift+R rebuilds the cache of\n"
+                                "# the image on screen in this mode.\n"
                                 "cache_mode = fast\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {
                                     config.small = value == "small";
 
                                     return value == "small" || value == "fast";
-                                }},
-                Setting{.key = "streaming_mode",
+                                },
+                },
+                Setting{
+                        .key = "streaming_mode",
                         .text = "# Whether streaming mode is on when tinyiv starts, on or off. S switches it while\n"
                                 "# tinyiv runs. Images too large for memory always stream.\n"
                                 "streaming_mode = off\n",
@@ -135,36 +141,42 @@ namespace tiv {
                                     config.streaming = value == "on";
 
                                     return value == "on" || value == "off";
-                                }},
-                Setting{.key = "persist_streams",
-                        .text = "# Whether every streamed image keeps its tiles on disk, on or off. Off keeps the\n"
-                                "# tiles of an image that fits in memory in memory, so only images too large for\n"
-                                "# memory are cached. On caches them all, so they open at once the next time.\n"
+                                },
+                },
+                Setting{
+                        .key = "persist_streams",
+                        .text = "# Whether streamed images that fit in memory also keep their tiles on disk, on\n"
+                                "# or off. Off caches only images too large for memory. On caches every streamed\n"
+                                "# image, so it opens at once the next time.\n"
                                 "persist_streams = off\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {
                                     config.persist = value == "on";
 
                                     return value == "on" || value == "off";
-                                }},
-                Setting{.key = "memory_mode",
+                                },
+                },
+                Setting{
+                        .key = "memory_mode",
                         .text = "# How tinyiv uses memory: speed or footprint. Speed decodes the images around\n"
-                                "# the one on screen ahead, so stepping through a folder is instant. Footprint\n"
-                                "# holds only what the image on screen shows: images stream, tiles leave memory\n"
-                                "# once drawn, and PNGs, TIFFs and JPEGs that are not progressive are read again\n"
-                                "# from their file at full size rather than kept. Nothing is written to disk\n"
-                                "# unless streaming mode is on. Each step and zoom waits for decoding.\n"
+                                "# the current one ahead of time, so stepping through a folder is instant.\n"
+                                "# Footprint keeps only what is on screen. Every image streams, and tiles leave\n"
+                                "# memory once drawn. PNGs, TIFFs and non-progressive JPEGs are read again from\n"
+                                "# the file at full size instead of kept. Nothing is written to disk unless\n"
+                                "# streaming mode is on. Each step and zoom waits for decoding.\n"
                                 "memory_mode = speed\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {
                                     config.footprint = value == "footprint";
 
                                     return value == "speed" || value == "footprint";
-                                }},
-                Setting{.key = "sort",
+                                },
+                },
+                Setting{
+                        .key = "sort",
                         .text = "# The order of the images in a folder: a-z, z-a, newest, oldest or size. Newest\n"
-                                "# and oldest go by when each file was last modified, and size puts the smallest\n"
-                                "# first. O switches it while tinyiv runs, without changing this file.\n"
+                                "# and oldest go by the last modified time. Size puts the smallest first. O\n"
+                                "# switches the order while tinyiv runs and leaves this file unchanged.\n"
                                 "sort = a-z\n",
                         .apply =
                                 [](Config &config, const std::string_view value) {
@@ -177,7 +189,8 @@ namespace tiv {
                                     config.order = found->order;
 
                                     return true;
-                                }},
+                                },
+                },
         };
 
         const Setting *setting_for(const std::string_view key) {

@@ -141,7 +141,10 @@ namespace tiv {
                 OrderText{.order = Folder::Order::Newest, .tag = "NEWEST", .text = "Sorted by date, newest first"},
                 OrderText{.order = Folder::Order::Oldest, .tag = "OLDEST", .text = "Sorted by date, oldest first"},
                 OrderText{
-                        .order = Folder::Order::Smallest, .tag = "SMALLEST", .text = "Sorted by size, smallest first"},
+                        .order = Folder::Order::Smallest,
+                        .tag = "SMALLEST",
+                        .text = "Sorted by size, smallest first",
+                },
         };
 
         const OrderText &order_text(const Folder::Order order) {

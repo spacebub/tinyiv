@@ -184,7 +184,7 @@ namespace tiv {
             return TABLE;
         }
 
-        using Matrix = Tone::Matrix;
+        using Tone::Matrix;
 
         Matrix multiply(const Matrix &a, const Matrix &b) {
             Matrix out{};

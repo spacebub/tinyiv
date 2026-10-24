@@ -200,10 +200,11 @@ namespace tiv::Decode {
 
             // A deflate block ends here and another follows.
             [[nodiscard]] bool between_blocks() const {
-                constexpr int BLOCK_END = 128;
-                constexpr int LAST_BLOCK = 64;
+                constexpr unsigned BLOCK_END = 128;
+                constexpr unsigned LAST_BLOCK = 64;
+                const auto type = static_cast<unsigned>(stream.data_type);
 
-                return (stream.data_type & BLOCK_END) != 0 && (stream.data_type & LAST_BLOCK) == 0;
+                return (type & BLOCK_END) != 0 && (type & LAST_BLOCK) == 0;
             }
         };
 
@@ -319,15 +320,13 @@ namespace tiv::Decode {
 
         // libpng's png_set_scale_16, which tinyiv's PNG decoder asks for: the nearest of 255 steps.
         [[nodiscard]] std::uint8_t scale16(const std::uint8_t high, const std::uint8_t low) {
-            int value = high;
+            const unsigned value = (static_cast<unsigned>(high) << 8U) | low;
 
-            value += ((static_cast<int>(low) - value + 128) * 65535) >> 24;
-
-            return static_cast<std::uint8_t>(value);
+            return static_cast<std::uint8_t>(((value * 255U) + 32895U) >> 16U);
         }
 
         [[nodiscard]] std::uint16_t word(const std::uint8_t *at) {
-            return static_cast<std::uint16_t>((at[0] << 8U) | at[1]);
+            return static_cast<std::uint16_t>((static_cast<unsigned>(at[0]) << 8U) | at[1]);
         }
     }
 
@@ -442,7 +441,7 @@ namespace tiv::Decode {
             const Checkpoint point{
                     .file = pieceAt + used,
                     .left = pieceLeft - static_cast<std::uint32_t>(used),
-                    .bits = static_cast<std::uint8_t>(inflater.stream.data_type & 7),
+                    .bits = static_cast<std::uint8_t>(static_cast<unsigned>(inflater.stream.data_type) & 7U),
                     .prime = used > 0 ? piece[used - 1] : lastByte,
                     .out = inflated,
                     .first = static_cast<std::uint32_t>((inflated + line - 1) / line),
