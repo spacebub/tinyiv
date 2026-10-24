@@ -1,10 +1,26 @@
 # Changelog
 
-## Unreleased
+## 1.3.2 - 2026-10-24
+
+### Changed
+
+- Tile caches build with less wasted work, and huge PNGs in small mode build faster
+
+### Fixed
+
+- Rotated JPEG XL images no longer show sideways
+- Error messages no longer get mixed up or blank when several images fail to open at once
+- Native vips files show their format
+
+## 1.3.1 - 2026-10-23
 
 ### Added
 
 - `memory_mode` setting. `footprint` keeps only what the image on screen shows in memory, reading large PNGs, TIFFs and non-progressive JPEGs again from their file instead of holding them
+
+### Changed
+
+- Tile caches build faster
 
 ## 1.3.0 - 2026-09-30
 
