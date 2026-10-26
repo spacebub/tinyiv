@@ -188,6 +188,9 @@ namespace tiv {
         SDL_GPUDevice *create_device() {
             const SDL_PropertiesID properties = SDL_CreateProperties();
 
+            // Debug mode asserts when the window grows before the backbuffer does, as on going fullscreen,
+            // and the assertion prompt blocks the loop.
+            SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, false);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN, true);
             SDL_SetBooleanProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN, true);
