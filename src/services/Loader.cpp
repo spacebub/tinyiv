@@ -170,7 +170,9 @@ namespace tiv {
     }
 
     Loader::Loader(const std::uint32_t eventType, const std::size_t cacheBytes, const int workers, const bool footprint)
-        : _event(eventType), _budget(cacheBytes), _footprint(footprint) {
+        : _event(eventType), _budget(cacheBytes), _fixedBudget(cacheBytes > 0), _footprint(footprint) {
+        size_budget();
+
         int count = workers > 0 ? workers : default_workers();
 
         // Only the current file decodes, and one aborted frees its memory before the next starts.
@@ -305,11 +307,23 @@ namespace tiv {
                 }
             }
 
+            size_budget();
             abort_strays();
             trim();
         }
 
         _wake.notify_all();
+    }
+
+    void Loader::size_budget() {
+        if (_fixedBudget) {
+            return;
+        }
+
+        // What is held here would be free again if let go, so the measure stays put as the cache fills.
+        const std::uint64_t room = Memory::available() + _bytes;
+
+        _budget = std::max(static_cast<std::size_t>(room / CACHE_SHARE), MIN_CACHE_BYTES);
     }
 
     bool Loader::take(Result *out) {
@@ -654,6 +668,8 @@ namespace tiv {
             return false;
         }
 
+        size_budget();
+
         if (job.file != _request.current && _bytes + _inflight + estimate > _budget) {
             trim();
 
@@ -732,18 +748,20 @@ namespace tiv {
 
         int screenWidth = 0;
         int screenHeight = 0;
+        std::size_t budget = 0;
 
         {
             const std::scoped_lock hold(_guard);
 
             screenWidth = _screenWidth;
             screenHeight = _screenHeight;
+            budget = _budget;
             entry.display = display_for(entry.info);
         }
 
         const bool scalable = Decode::scalable(entry.info.kind);
         bool over = entry.info.pixels() > max_pixels();
-        const Plan planned = plan(entry.info, job.whole, over, _budget, screenWidth, screenHeight);
+        const Plan planned = plan(entry.info, job.whole, over, budget, screenWidth, screenHeight);
         bool whole = planned.whole;
 
         if (!admit(job, planned.estimate)) {

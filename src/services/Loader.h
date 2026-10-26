@@ -86,14 +86,18 @@ namespace tiv {
         // The smallest level is the screen divided by this.
         static constexpr int THUMB_DIVISOR = 4;
 
-        static constexpr std::size_t DEFAULT_CACHE_BYTES = std::size_t{2048} * 1024 * 1024;
+        // Sized by the system: the cache holds this share of what the system could hand out if
+        // the cache were empty, measured again at every show() and decode, so it grows on a roomy
+        // machine and gives way when something else is hungry. Never below the floor.
+        static constexpr std::size_t CACHE_SHARE = 3;
+        static constexpr std::size_t MIN_CACHE_BYTES = std::size_t{512} * 1024 * 1024;
         static constexpr int MAX_WORKERS = 4;
 
-        // Zero workers means as many as the machine warrants, or one in footprint mode. Footprint mode
-        // streams every still image and holds as little of it in memory as the view allows, writing
-        // nothing to disk outside streaming mode. Show it no files ahead or behind.
-        explicit Loader(std::uint32_t eventType, std::size_t cacheBytes = DEFAULT_CACHE_BYTES, int workers = 0,
-                        bool footprint = false);
+        // Zero cache bytes means the share of free memory above, followed as it changes, and any
+        // other number holds. Zero workers means as many as the machine warrants, or one in footprint
+        // mode. Footprint mode streams every still image and holds as little of it in memory as the
+        // view allows, writing nothing to disk outside streaming mode. Show it no files ahead or behind.
+        explicit Loader(std::uint32_t eventType, std::size_t cacheBytes = 0, int workers = 0, bool footprint = false);
         ~Loader();
 
         Loader(const Loader &) = delete;
@@ -210,6 +214,8 @@ namespace tiv {
         [[nodiscard]] Tone::Display display_for(const Decode::Info &info) const;
 
         void work();
+        // Under the lock. Measures the budget from the system's free memory unless it is fixed.
+        void size_budget();
         bool pick(Job *out, bool *later);
         [[nodiscard]] bool wants_job(const std::filesystem::path &file, bool *whole, bool *frames, bool *later) const;
         void decode(Job &job);
@@ -254,6 +260,7 @@ namespace tiv {
         Tone::Display _display;
 
         bool _running = true;
+        bool _fixedBudget = false;
         // Set when a prefetch could not be admitted, cleared when memory or the request changes.
         bool _starved = false;
         // Memory was freed since it was last given back.

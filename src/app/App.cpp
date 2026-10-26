@@ -287,7 +287,7 @@ namespace tiv {
         _loaderEvent = SDL_RegisterEvents(3);
         _refinerEvent = _loaderEvent + 1;
         _tileCacheEvent = _loaderEvent + 2;
-        _loader = std::make_unique<Loader>(_loaderEvent, Loader::DEFAULT_CACHE_BYTES, 0, _footprint);
+        _loader = std::make_unique<Loader>(_loaderEvent, 0, 0, _footprint);
 
         _loader->set_tiles(config.cache, config.small, config.persist);
         _loader->stream_all(config.streaming);
