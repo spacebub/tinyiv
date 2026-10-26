@@ -18,6 +18,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "app/Config.h"
 #include "app/Input.h"
 #include "gallery/Folder.h"
 #include "image/Tone.h"
@@ -91,6 +92,7 @@ namespace tiv {
         bool make_renderer(bool linear);
         void follow_output(const Loader::Result &result);
         void set_fullscreen(bool on);
+        void follow_awake() const;
         [[nodiscard]] bool bar_shown() const;
         // Of the top and of the bottom bar alike, zero while they are hidden.
         [[nodiscard]] int bar_height() const;
@@ -222,6 +224,7 @@ namespace tiv {
         Ask _asked;
 
         bool _fullscreen = false;
+        Config::KeepAwake _awake = Config::KeepAwake::Fullscreen;
         // Whether the bars show, kept apart for windowed and fullscreen: I switches the one in use.
         bool _barWindowed = true;
         bool _barFullscreen = false;

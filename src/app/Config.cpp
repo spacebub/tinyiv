@@ -80,6 +80,17 @@ namespace tiv {
                 OrderName{.name = "size", .order = Folder::Order::Smallest},
         };
 
+        struct AwakeName {
+            std::string_view name;
+            Config::KeepAwake awake;
+        };
+
+        constexpr std::array AWAKE_NAMES{
+                AwakeName{.name = "always", .awake = Config::KeepAwake::Always},
+                AwakeName{.name = "fullscreen", .awake = Config::KeepAwake::Fullscreen},
+                AwakeName{.name = "never", .awake = Config::KeepAwake::Never},
+        };
+
         std::filesystem::path expanded(const std::string_view text) {
             if (text == "~") {
                 return home();
@@ -187,6 +198,23 @@ namespace tiv {
                                     }
 
                                     config.order = found->order;
+
+                                    return true;
+                                },
+                },
+                Setting{
+                        .key = "prevent_sleep",
+                        .text = "# When tinyiv prevents sleep: always, fullscreen or never.\n"
+                                "prevent_sleep = fullscreen\n",
+                        .apply =
+                                [](Config &config, const std::string_view value) {
+                                    const auto *const found = std::ranges::find(AWAKE_NAMES, value, &AwakeName::name);
+
+                                    if (found == AWAKE_NAMES.end()) {
+                                        return false;
+                                    }
+
+                                    config.awake = found->awake;
 
                                     return true;
                                 },

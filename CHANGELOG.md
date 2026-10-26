@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `prevent_sleep` setting: `always`, `fullscreen` or `never`. Windowed tinyiv no longer prevents sleep unless set to `always`
+
 ## 1.3.3 - 2026-10-26
 
 ### Changed

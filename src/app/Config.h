@@ -10,6 +10,7 @@
 #define TIV_APP_CONFIG_H
 
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -19,6 +20,12 @@
 namespace tiv {
     // The user's settings, one key = value a line, # starting a comment.
     struct Config {
+        enum class KeepAwake : std::uint8_t {
+            Always,
+            Fullscreen,
+            Never,
+        };
+
         // Where tile caches go. Empty keeps each beside its image, and a relative path starts from
         // the image's folder.
         std::filesystem::path cache;
@@ -38,6 +45,9 @@ namespace tiv {
 
         // How a folder's images are ordered from the start, before O is ever pressed.
         Folder::Order order = Folder::Order::AToZ;
+
+        // When sleep is prevented.
+        KeepAwake awake = KeepAwake::Fullscreen;
 
         // $XDG_CONFIG_HOME/tinyiv/tinyiv.conf, or tinyiv.conf beside the executable on Windows.
         [[nodiscard]] static std::filesystem::path location();

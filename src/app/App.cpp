@@ -280,6 +280,7 @@ namespace tiv {
             Memory::lean();
         }
 
+        _awake = config.awake;
         _folder.sort(config.order);
 
         if (!file.empty() && !_folder.open(file, Decode::suffixes(), error)) {
@@ -332,6 +333,8 @@ namespace tiv {
 
             return false;
         }
+
+        follow_awake();
 
         SDL_Rect usable{.x = 0, .y = 0, .w = 1280, .h = 800};
 
@@ -433,7 +436,16 @@ namespace tiv {
         _fullscreen = on;
 
         SDL_SetWindowFullscreen(_window, on);
+        follow_awake();
         layout();
+    }
+
+    void App::follow_awake() const {
+        if (_awake == Config::KeepAwake::Always || (_awake == Config::KeepAwake::Fullscreen && _fullscreen)) {
+            SDL_DisableScreenSaver();
+        } else {
+            SDL_EnableScreenSaver();
+        }
     }
 
     bool App::bar_shown() const {
