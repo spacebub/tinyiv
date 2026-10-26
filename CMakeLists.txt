@@ -109,7 +109,7 @@ include(ReuseApp)
 # is installed.
 include(FetchContent)
 
-set(TIV_SDL_VERSION release-3.4.16)
+set(TIV_SDL_VERSION release-3.4.18)
 
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)

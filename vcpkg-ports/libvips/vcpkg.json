@@ -1,7 +1,7 @@
 {
   "$comment": "The upstream port at the tinyiv baseline, plus features for the meson options it has none for. The portfile turns off every option not named as a feature, which takes out the built-in GIF, PPM, Analyze and Radiance loaders and the PDF, JPEG XL, HEIF, OpenEXR, JPEG 2000 and highway support.",
   "name": "libvips",
-  "version": "8.18.5",
+  "version": "8.18.7",
   "description": "libvips is a demand-driven, horizontally threaded image processing library.",
   "homepage": "https://github.com/libvips/libvips",
   "license": "LGPL-2.1-or-later",
