@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.3 - 2026-10-26
+
+### Changed
+
+- The images kept ready around the one on screen take a share of the memory the system has free, instead of a fixed amount, so they give way when another program needs it
+- JPEG XL images decode with far less wasted CPU, and the one on screen comes up sooner
+- Dependencies updated, libvips to 8.18.7
+
+### Fixed
+
+- Going fullscreen no longer freezes tinyiv on an assertion from the GPU debug layer
+- Quitting, or switching streaming mode, no longer waits for the JPEG XL images being decoded ahead to finish
+
 ## 1.3.2 - 2026-10-24
 
 ### Changed
