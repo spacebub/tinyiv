@@ -6,6 +6,7 @@
  * Authors:
  *	spacebub <spacebubs@proton.me>
  */
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -21,6 +22,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -42,14 +44,28 @@ namespace tiv::Decode {
             return static_cast<int>((static_cast<unsigned>(events) | ...));
         }
 
+        // libjxl's workers spin while they wait, so a pool the size of the machine costs several times the
+        // CPU of a small one for the same wall time, and several decodes run at once.
+        std::size_t jxl_threads() {
+            return static_cast<std::size_t>(
+                    std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, MAX_THREADS));
+        }
+
         struct JxlHandle {
             JxlDecoder *decoder = JxlDecoderCreate(nullptr);
-            void *runner = JxlThreadParallelRunnerCreate(nullptr, JxlThreadParallelRunnerDefaultNumWorkerThreads());
+            void *runner = nullptr;
 
-            JxlHandle() = default;
+            explicit JxlHandle(const bool threaded) {
+                if (threaded) {
+                    runner = JxlThreadParallelRunnerCreate(nullptr, jxl_threads());
+                }
+            }
 
             ~JxlHandle() {
-                JxlThreadParallelRunnerDestroy(runner);
+                if (runner != nullptr) {
+                    JxlThreadParallelRunnerDestroy(runner);
+                }
+
                 JxlDecoderDestroy(decoder);
             }
 
@@ -83,7 +99,7 @@ namespace tiv::Decode {
 
         // Up to the colour encoding: the size and whether it is HDR.
         bool jxl_header(const std::span<const std::uint8_t> data, JxlBasicInfo *basic, Tone::Source *tone) {
-            const JxlHandle handle;
+            const JxlHandle handle(false);
 
             // Kept as the load keeps it, else libjxl reports the orientation as already applied.
             if (handle.decoder == nullptr || JxlDecoderSetKeepOrientation(handle.decoder, JXL_TRUE) != JXL_DEC_SUCCESS
@@ -240,17 +256,62 @@ namespace tiv::Decode {
             };
         }
 
+        // libjxl's pool, which stops handing out work once the decode should end, so an abort
+        // lands within a group rather than after the whole frame.
+        struct JxlStoppable {
+            void *pool = nullptr;
+            std::function<bool()> stopped;
+        };
+
+        struct JxlTask {
+            const JxlStoppable *runner = nullptr;
+            void *opaque = nullptr;
+            JxlParallelRunInit init = nullptr;
+            JxlParallelRunFunction run = nullptr;
+        };
+
+        // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
+        JxlParallelRetCode jxl_run(void *opaque, void *jpegxlOpaque, JxlParallelRunInit init,
+        // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
+                                   JxlParallelRunFunction run, const std::uint32_t start, const std::uint32_t end) {
+            const auto *runner = static_cast<const JxlStoppable *>(opaque);
+
+            if (runner->stopped()) {
+                return JXL_PARALLEL_RET_RUNNER_ERROR;
+            }
+
+            JxlTask task{.runner = runner, .opaque = jpegxlOpaque, .init = init, .run = run};
+
+            const JxlParallelRetCode code = JxlThreadParallelRunner(
+                    runner->pool, &task,
+                    [](void *held, const std::size_t threads) {
+                        const auto *given = static_cast<const JxlTask *>(held);
+
+                        return given->init(given->opaque, threads);
+                    },
+                    [](void *held, const std::uint32_t value, const std::size_t thread) {
+                        const auto *given = static_cast<const JxlTask *>(held);
+
+                        if (!given->runner->stopped()) {
+                            given->run(given->opaque, value, thread);
+                        }
+                    },
+                    start, end);
+
+            return runner->stopped() ? JXL_PARALLEL_RET_RUNNER_ERROR : code;
+        }
+
         // Without a setup the samples come out as stored, which a gain map wants. libjxl runs
         // with its own thread pool, which libvips does not use.
         Direct jxl_decode(const std::span<const std::uint8_t> data, Bitmap *out, const Abort *abort,
                           const JxlSetup &setup) {
-            const JxlHandle handle;
+            const JxlHandle handle(true);
+            JxlStoppable runner{.pool = handle.runner, .stopped = [abort] { return aborted(abort); }};
             const int events = setup ? event_mask(JXL_DEC_BASIC_INFO, JXL_DEC_FULL_IMAGE, JXL_DEC_COLOR_ENCODING)
                                      : event_mask(JXL_DEC_BASIC_INFO, JXL_DEC_FULL_IMAGE);
 
             if (handle.decoder == nullptr || handle.runner == nullptr
-                || JxlDecoderSetParallelRunner(handle.decoder, JxlThreadParallelRunner, handle.runner)
-                           != JXL_DEC_SUCCESS
+                || JxlDecoderSetParallelRunner(handle.decoder, jxl_run, &runner) != JXL_DEC_SUCCESS
                 || JxlDecoderSetKeepOrientation(handle.decoder, JXL_TRUE) != JXL_DEC_SUCCESS
                 || JxlDecoderSubscribeEvents(handle.decoder, events) != JXL_DEC_SUCCESS
                 || JxlDecoderSetInput(handle.decoder, data.data(), data.size()) != JXL_DEC_SUCCESS) {
@@ -446,51 +507,6 @@ namespace tiv::Decode {
             std::atomic<bool> _failed = false;
         };
 
-        // libjxl's pool, which stops handing out work once the decode should end, so an abort
-        // lands within a group rather than after the whole frame.
-        struct JxlStoppable {
-            void *pool = nullptr;
-            std::function<bool()> stopped;
-        };
-
-        struct JxlTask {
-            const JxlStoppable *runner = nullptr;
-            void *opaque = nullptr;
-            JxlParallelRunInit init = nullptr;
-            JxlParallelRunFunction run = nullptr;
-        };
-
-        // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
-        JxlParallelRetCode jxl_run(void *opaque, void *jpegxlOpaque, JxlParallelRunInit init,
-        // NOLINTNEXTLINE(misc-const-correctness): libjxl fixes the callback signature.
-                                   JxlParallelRunFunction run, const std::uint32_t start, const std::uint32_t end) {
-            const auto *runner = static_cast<const JxlStoppable *>(opaque);
-
-            if (runner->stopped()) {
-                return JXL_PARALLEL_RET_RUNNER_ERROR;
-            }
-
-            JxlTask task{.runner = runner, .opaque = jpegxlOpaque, .init = init, .run = run};
-
-            const JxlParallelRetCode code = JxlThreadParallelRunner(
-                    runner->pool, &task,
-                    [](void *held, const std::size_t threads) {
-                        const auto *given = static_cast<const JxlTask *>(held);
-
-                        return given->init(given->opaque, threads);
-                    },
-                    [](void *held, const std::uint32_t value, const std::size_t thread) {
-                        const auto *given = static_cast<const JxlTask *>(held);
-
-                        if (!given->runner->stopped()) {
-                            given->run(given->opaque, value, thread);
-                        }
-                    },
-                    start, end);
-
-            return runner->stopped() ? JXL_PARALLEL_RET_RUNNER_ERROR : code;
-        }
-
         struct JxlStreamTo {
             int rows = 0;
             const Begin *begin = nullptr;
@@ -606,7 +622,7 @@ namespace tiv::Decode {
 
     Direct Jxl::stream(const std::span<const std::uint8_t> data, const int rows, const Begin &begin, const Take &take,
                        const Abort *abort, const Tone::Display &display) {
-        const JxlHandle handle;
+        const JxlHandle handle(true);
         std::optional<JxlBands> bands;
         JxlStoppable runner{
                 .pool = handle.runner,

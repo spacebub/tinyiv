@@ -756,7 +756,8 @@ namespace tiv {
             try {
                 Bitmap decoded;
 
-                if (!Decode::load(job.file, at.width, at.height, &decoded, &entry.error, &abort, how, entry.display)) {
+                if (!Decode::load(job.file, at.width, at.height, &decoded, &entry.error, &abort, how, entry.display)
+                    || abort.requested()) {
                     return false;
                 }
 
