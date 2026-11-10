@@ -30,6 +30,14 @@ Options:
 `cmake --install build --prefix ~/.local` puts the binary in `bin`, and the desktop entry and
 the icons under `share`.
 
+### AppImage
+
+`tools/appimage.sh` builds a release in a Debian 13 container and packs it as
+`build-appimage/tinyiv-VERSION-x86_64.AppImage`. It needs Docker and takes the default compile
+flags, so the CPU must be x86-64-v3. The AppImage bundles the codec libraries and runs on
+systems with glibc 2.38 or newer. Fontconfig, FreeType, HarfBuzz and the X11 libraries come from
+the desktop.
+
 ## Windows
 
 The libraries come from [vcpkg](https://github.com/microsoft/vcpkg), which CMake drives
