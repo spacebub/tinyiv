@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Dependencies updated, SDL to 3.4.20
+
 ## 1.3.4 - 2026-10-27
 
 ### Added

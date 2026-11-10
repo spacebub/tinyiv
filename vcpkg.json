@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A tiny, fast image viewer",
   "license": "GPL-3.0-or-later",
-  "builtin-baseline": "3037cbe976a6872e56e8b07152e19a8344360491",
+  "builtin-baseline": "c9e1e778edf92d0d3a8a11ad9b547fcaa86380e3",
   "dependencies": [
     {
       "$comment": "Linked for decoding grid tiles. Its default x265 encoder is turned off here, which vcpkg keeps unless the top level manifest says otherwise.",
