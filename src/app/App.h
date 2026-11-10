@@ -185,6 +185,7 @@ namespace tiv {
         Decode::Info _info;
         // Turns and flips on top of the orientation the file says, until saved.
         int _turn = 1;
+        float _hdrWhite = 100.0F;
         // Replaces the image details in the bottom bar until the next image or turn.
         std::string _message;
         bool _help = false;

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- `hdr_white` setting: how bright the white of an HDR image shows, in nits. It defaults to 100, which leaves more room for highlights
+
 ### Changed
 
 - Dependencies updated, SDL to 3.4.20

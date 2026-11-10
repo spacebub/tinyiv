@@ -8,10 +8,12 @@
  */
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -90,6 +92,9 @@ namespace tiv {
                 AwakeName{.name = "fullscreen", .awake = Config::KeepAwake::Fullscreen},
                 AwakeName{.name = "never", .awake = Config::KeepAwake::Never},
         };
+
+        constexpr int MIN_HDR_WHITE = 50;
+        constexpr int MAX_HDR_WHITE = 1000;
 
         std::filesystem::path expanded(const std::string_view text) {
             if (text == "~") {
@@ -215,6 +220,29 @@ namespace tiv {
                                     }
 
                                     config.awake = found->awake;
+
+                                    return true;
+                                },
+                },
+                Setting{
+                        .key = "hdr_white",
+                        .text = "# How bright the white of an HDR image shows on an HDR display, in nits, from\n"
+                                "# 50 to 1000. Lower leaves more room for highlights, higher makes the whole\n"
+                                "# image brighter.\n"
+                                "hdr_white = 100\n",
+                        .apply =
+                                [](Config &config, const std::string_view value) {
+                                    int nits = 0;
+                                    const char *const last = std::to_address(value.end());
+                                    const auto [end, failure] =
+                                            std::from_chars(std::to_address(value.begin()), last, nits);
+
+                                    if (failure != std::errc{} || end != last || nits < MIN_HDR_WHITE
+                                        || nits > MAX_HDR_WHITE) {
+                                        return false;
+                                    }
+
+                                    config.hdrWhite = nits;
 
                                     return true;
                                 },

@@ -49,6 +49,10 @@ namespace tiv {
         // When sleep is prevented.
         KeepAwake awake = KeepAwake::Fullscreen;
 
+        // How bright the white of an HDR image shows on an HDR display, in nits. Highlights use the
+        // headroom above it, up to the peak the display reports.
+        int hdrWhite = 100;
+
         // $XDG_CONFIG_HOME/tinyiv/tinyiv.conf, or tinyiv.conf beside the executable on Windows.
         [[nodiscard]] static std::filesystem::path location();
 

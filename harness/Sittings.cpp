@@ -185,7 +185,7 @@ namespace harness {
 
             for (const std::string_view key :
                  {"cache =", "cache_mode =", "streaming_mode =", "persist_streams =", "memory_mode =", "sort =",
-                  "prevent_sleep ="}) {
+                  "prevent_sleep =", "hdr_white ="}) {
                 driver.check(made.contains(key), std::format("the config made on first start lacks {}", key));
             }
 

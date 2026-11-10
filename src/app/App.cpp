@@ -69,6 +69,9 @@ namespace tiv {
         // A scalable image renders this share of the view beyond each edge, so a short pan stays sharp.
         constexpr double REFINE_MARGIN = 0.25;
         constexpr SDL_Color BACKGROUND{.r = 0, .g = 0, .b = 0, .a = 255};
+        // Keeps white at or below the knee of the roll off, which starts at 80% of the headroom.
+        constexpr float MIN_HDR_HEADROOM = 1.25F;
+        constexpr float HEADROOM_STEPS = 100.0F;
 
         // Keys are two spaces apart, the words of one key a single space.
         constexpr std::array<StatusBar::Row, 19> HELP = {
@@ -233,6 +236,25 @@ namespace tiv {
             return renderer;
         }
 
+        // SDL gives SDR white in scRGB units, where 1.0 is 80 nits.
+        float sdr_white_nits(SDL_Window *window) {
+            constexpr float SCRGB_UNIT_NITS = 80.0F;
+
+            return SDL_GetFloatProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 1.0F)
+                   * SCRGB_UNIT_NITS;
+        }
+
+        // SDL gives the peak as headroom above SDR white.
+        float peak_nits(SDL_Window *window) {
+            return SDL_GetFloatProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0F)
+                   * sdr_white_nits(window);
+        }
+
+        // An hdr_white at the peak or past it would leave no headroom, and HDR images would show as SDR.
+        float shown_white(SDL_Window *window, const float wanted) {
+            return std::min(wanted, peak_nits(window) / MIN_HDR_HEADROOM);
+        }
+
         // Zero is mailbox on the gpu renderer, see ChoosePresentMode in SDL_render_gpu.c, so each refresh
         // shows the newest frame. Under FIFO a drag that starts from idle queues frames ahead of the display
         // and stutters until it fills.
@@ -281,6 +303,7 @@ namespace tiv {
         }
 
         _awake = config.awake;
+        _hdrWhite = static_cast<float>(config.hdrWhite);
         _folder.sort(config.order);
 
         if (!file.empty() && !_folder.open(file, Decode::suffixes(), error)) {
@@ -1096,13 +1119,16 @@ namespace tiv {
         _dirty = true;
     }
 
-    // HDR images decode for the headroom the window has now, and show again once they have.
+    // HDR images decode for the headroom the window has above hdr_white, and show again once decoded.
+    // SDL measures that headroom from the SDR white of the display instead.
     void App::update_display() {
         const SDL_PropertiesID properties = SDL_GetWindowProperties(_window);
         const bool hdr =
                 _device != nullptr && SDL_GetBooleanProperty(properties, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
+        // Rounded as cache names round it, so a change in the last bit of SDR white reloads nothing.
         const float headroom =
-                hdr ? std::max(SDL_GetFloatProperty(properties, SDL_PROP_WINDOW_HDR_HEADROOM_FLOAT, 1.0F), 1.0F) : 1.0F;
+                hdr ? std::round(peak_nits(_window) / shown_white(_window, _hdrWhite) * HEADROOM_STEPS) / HEADROOM_STEPS
+                    : 1.0F;
 
         if (headroom == _display.headroom) {
             return;
@@ -1240,6 +1266,8 @@ namespace tiv {
 
         const float scale = SDL_GetWindowDisplayScale(_window);
 
+        // Linear output puts white at the SDR white of the display, which hdr_white overrides.
+        SDL_SetRenderColorScale(_renderer, _linear ? shown_white(_window, _hdrWhite) / sdr_white_nits(_window) : 1.0F);
         SDL_SetRenderDrawBlendMode(_renderer, SDL_BLENDMODE_NONE);
         SDL_SetRenderDrawColor(_renderer, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, BACKGROUND.a);
         SDL_RenderClear(_renderer);
