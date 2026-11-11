@@ -37,8 +37,6 @@ struct UiVertex {
 struct Push {
     float width = 0.0F;
     float height = 0.0F;
-    float scale = 1.0F;
-    float unused = 0.0F;
 };
 
 class Pipelines {

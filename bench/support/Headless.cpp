@@ -9,7 +9,6 @@
 #include <memory>
 #include <print>
 #include <string>
-#include <string_view>
 #include <utility>
 
 #include <SDL3/SDL.h>
@@ -17,8 +16,6 @@
 #include "support/Headless.h"
 
 #include "render/Painter.h"
-#include "render/SdlPainter.h"
-#include "render/gpu/Swapchain.h"
 #include "render/gpu/VulkanPainter.h"
 
 namespace bench {
@@ -28,8 +25,7 @@ constexpr int HEIGHT = 2160;
 
 struct Session {
     SDL_Window *window = nullptr;
-    SDL_Renderer *renderer = nullptr;
-    std::unique_ptr<tiv::Painter> painter;
+    std::unique_ptr<tiv::gpu::VulkanPainter> painter;
     bool tried = false;
 };
 
@@ -40,13 +36,7 @@ Session &session() {
 }
 }
 
-bool Headless::own() {
-    const char *renderer = SDL_getenv("TIV_RENDERER");
-
-    return renderer != nullptr && std::string_view(renderer) == "own";
-}
-
-tiv::Painter *Headless::painter() {
+tiv::gpu::VulkanPainter *Headless::painter() {
     Session &held = session();
 
     if (held.tried) {
@@ -59,41 +49,26 @@ tiv::Painter *Headless::painter() {
         return nullptr;
     }
 
-    // Both draw to a hidden window and present, so both pay for the swapchain.
-    held.window = SDL_CreateWindow("tiv_bench", WIDTH, HEIGHT, SDL_WINDOW_HIDDEN | (own() ? SDL_WINDOW_VULKAN : 0));
-
-    if (held.window != nullptr && own()) {
-        std::string error;
-
-        held.painter = tiv::gpu::VulkanPainter::create(held.window, &error);
-
-        if (held.painter == nullptr) {
-            std::println(stderr, "{}", error);
-        }
-
-        return held.painter.get();
-    }
+    // The window is hidden but still presents, so the benchmarks pay for the swapchain as the app does.
+    held.window = SDL_CreateWindow("tiv_bench", WIDTH, HEIGHT, SDL_WINDOW_HIDDEN | SDL_WINDOW_VULKAN);
 
     if (held.window == nullptr) {
         return nullptr;
     }
 
-    held.renderer = SDL_CreateRenderer(held.window, "gpu");
+    std::string error;
 
-    if (held.renderer == nullptr) {
-        held.renderer = SDL_CreateRenderer(held.window, nullptr);
-    }
+    held.painter = tiv::gpu::VulkanPainter::create(held.window, &error);
 
-    if (held.renderer != nullptr) {
-        SDL_SetRenderVSync(held.renderer, 0);
-        held.painter = std::make_unique<tiv::SdlPainter>(held.renderer);
+    if (held.painter == nullptr) {
+        std::println(stderr, "{}", error);
     }
 
     return held.painter.get();
 }
 
 void Headless::present() {
-    tiv::Painter *drawn = painter();
+    tiv::gpu::VulkanPainter *drawn = painter();
 
     if (drawn != nullptr && drawn->begin_frame({})) {
         drawn->end_frame();
@@ -104,11 +79,6 @@ void Headless::shutdown() {
     Session &held = session();
 
     held.painter = nullptr;
-
-    if (held.renderer != nullptr) {
-        SDL_DestroyRenderer(held.renderer);
-        held.renderer = nullptr;
-    }
 
     if (held.window != nullptr) {
         SDL_DestroyWindow(held.window);

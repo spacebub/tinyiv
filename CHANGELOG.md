@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- tinyiv draws through Vulkan directly. Images open sooner, pan faster and take less video memory
+- A Vulkan 1.2 driver is required. A Linux machine without one can use lavapipe from Mesa
+- Stepping between an SDR and an HDR image no longer drops the images kept ready, so the next step still draws at once
+
+### Fixed
+
+- HDR on Wayland shows black as black and highlights at the full peak of the display. Before, blacks were grey or the whole image was dim
+- On Wayland, HDR white shows at exactly the brightness `hdr_white` sets
+
 ## 1.3.6 - 2026-11-11
 
 ### Changed

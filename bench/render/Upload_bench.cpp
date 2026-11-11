@@ -44,7 +44,7 @@ std::shared_ptr<const tiv::Bitmap> grey(const int width, const int height) {
 
 // Makes, fills and drops a batch of square tiles.
 void Upload_static(benchmark::State &state, const int size) {
-    tiv::Painter *painter = Headless::painter();
+    tiv::gpu::VulkanPainter *painter = Headless::painter();
 
     if (painter == nullptr) {
         state.SkipWithMessage("no renderer");
@@ -88,7 +88,7 @@ void Upload_static(benchmark::State &state, const int size) {
 
 // The tiles a 4k view meets on a 128 MP image, and nothing else.
 void Tiles_visible(benchmark::State &state) {
-    tiv::Painter *painter = Headless::painter();
+    tiv::gpu::VulkanPainter *painter = Headless::painter();
 
     if (painter == nullptr) {
         state.SkipWithMessage("no renderer");
@@ -115,8 +115,7 @@ void Tiles_visible(benchmark::State &state) {
                                     benchmark::Counter(static_cast<double>(uploaded) / (1024.0 * 1024.0)));
 }
 
-// All the VRAM the process holds, swapchain included. SDL reserves large blocks early, so a canvas
-// adds little to the total it reports.
+// All the VRAM the process holds, swapchain included.
 void report_vram(benchmark::State &state) {
     state.counters.insert_or_assign("vram_total_mb",
                                     benchmark::Counter(static_cast<double>(Memory::vram()) / (1024.0 * 1024.0)));
@@ -131,7 +130,7 @@ void frame(tiv::Painter &painter, tiv::Canvas &canvas, const tiv::Viewport &view
 
 // A frame of draw calls at fit, with every tile resident.
 void Canvas_draw(benchmark::State &state) {
-    tiv::Painter *painter = Headless::painter();
+    tiv::gpu::VulkanPainter *painter = Headless::painter();
 
     if (painter == nullptr) {
         state.SkipWithMessage("no renderer");
@@ -160,16 +159,14 @@ void Canvas_draw(benchmark::State &state) {
     state.counters.insert_or_assign("vram_mb",
                                     benchmark::Counter(static_cast<double>(canvas.vram()) / (1024.0 * 1024.0)));
 
-    if (const auto *vulkan = dynamic_cast<const tiv::gpu::VulkanPainter *>(painter); vulkan != nullptr) {
-        state.counters.insert_or_assign(
-                "pool_mb", benchmark::Counter(static_cast<double>(vulkan->resident_bytes()) / (1024.0 * 1024.0)));
-    }
+    state.counters.insert_or_assign(
+            "pool_mb", benchmark::Counter(static_cast<double>(painter->resident_bytes()) / (1024.0 * 1024.0)));
 }
 
 // Pans a 1:1 view across an image far larger than the VRAM budget. Each frame uploads within the
 // budget of the app, so old tiles go as new ones come.
 void Tiles_pan_at_budget(benchmark::State &state) {
-    tiv::Painter *painter = Headless::painter();
+    tiv::gpu::VulkanPainter *painter = Headless::painter();
 
     if (painter == nullptr) {
         state.SkipWithMessage("no renderer");
@@ -215,7 +212,7 @@ void Tiles_pan_at_budget(benchmark::State &state) {
 
 // Time until a fresh 7000 by 4000 image shows whole and sharp at fit, a frame at a time.
 void Frame_first(benchmark::State &state) {
-    tiv::Painter *painter = Headless::painter();
+    tiv::gpu::VulkanPainter *painter = Headless::painter();
 
     if (painter == nullptr) {
         state.SkipWithMessage("no renderer");
@@ -255,10 +252,10 @@ void Frame_first(benchmark::State &state) {
             "frames", benchmark::Counter(static_cast<double>(frames) / static_cast<double>(state.iterations())));
 }
 
-// An SDR image, then an HDR one, then the SDR one again, uploads only. The app on the SDL renderer also
-// remakes the renderer at each switch, which this leaves out.
+// An SDR image, then an HDR one, then the SDR one again, uploads only. The app also remakes the swapchain
+// at each switch, which this leaves out.
 void Output_switch(benchmark::State &state) {
-    tiv::Painter *painter = Headless::painter();
+    tiv::gpu::VulkanPainter *painter = Headless::painter();
 
     if (painter == nullptr) {
         state.SkipWithMessage("no renderer");

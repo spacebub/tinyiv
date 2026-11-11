@@ -99,7 +99,8 @@ progress and the animation frame all stand still for longer than `--patience`.
 
 The harness sets `HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` inside the sandbox, so runs never
 read or write the real config and caches. SDL uses the offscreen video driver unless
-`SDL_VIDEO_DRIVER` says otherwise. Each sitting gets an empty folder under `work/`. The harness
+`SDL_VIDEO_DRIVER` says otherwise. Its window still draws through Vulkan, so the harness needs a
+Vulkan driver with `VK_EXT_headless_surface`, which Mesa has. Each sitting gets an empty folder under `work/`. The harness
 empties a folder left by an earlier run only when the folder carries the `.tiv-harness` mark.
 The corpus lives in `corpus/small` and `corpus/full` and is written once. A stamp file tells the
 harness when the generator changed and the corpus has to be written again.

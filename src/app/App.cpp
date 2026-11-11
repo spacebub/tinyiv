@@ -465,9 +465,7 @@ void App::frame() {
     Painter *painter = _window.painter();
 
     if (painter == nullptr) {
-        if (_window.lost()) {
-            std::println(stderr, "tinyiv: drawing stopped, the GPU failed or was lost");
-        }
+        std::println(stderr, "tinyiv: drawing stopped, the GPU failed or was lost");
 
         _running = false;
 
@@ -477,8 +475,6 @@ void App::frame() {
     if (!painter->begin_frame(BACKGROUND)) {
         return;
     }
-
-    painter->set_brightness(_window.color_scale());
 
     const int bar = bar_height();
 

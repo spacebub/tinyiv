@@ -17,9 +17,11 @@ largest icon. SVG and PDF are rendered again at the current zoom once the view s
 stay sharp. Animated GIF and WebP loop, with a bar along the bottom to pause and seek. When a
 file can't be read, tinyiv says so in place of the image.
 
-HDR images are shown in HDR on HDR displays and tone mapped everywhere else.
+HDR images are shown in HDR on HDR displays and tone mapped everywhere else. On Wayland, HDR needs
+a compositor that supports the colour management protocol.
 
-Runs on x86-64-v3 CPUs (AVX2, BMI2), such as Intel Haswell or AMD Excavator and newer.
+Runs on x86-64-v3 CPUs (AVX2, BMI2), such as Intel Haswell or AMD Excavator and newer. Drawing
+needs a Vulkan 1.2 driver. A Linux machine without one can use lavapipe from Mesa.
 Building on Linux and Windows is described in [COMPILE.md](COMPILE.md).
 
 ## Keybinds

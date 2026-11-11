@@ -50,7 +50,6 @@ public:
     bool begin_frame(Colour clear) override;
     void end_frame() override;
     void set_view(const Rect *view) override;
-    void set_brightness(float scale) override;
     void tile(Tile tile, const Rect &source, const Rect &target, int orientation) override;
     void fill(const Rect &rect, Colour colour) override;
     void triangles(std::span<const Point> points, Colour colour) override;
@@ -94,7 +93,6 @@ private:
         std::uint32_t first = 0;
         std::uint32_t count = 0;
         VkRect2D scissor{};
-        float brightness = 1.0F;
     };
 
     struct Slot {
@@ -169,7 +167,6 @@ private:
     float _originX = 0.0F;
     float _originY = 0.0F;
     VkRect2D _scissor{};
-    float _brightness = 1.0F;
 };
 }
 

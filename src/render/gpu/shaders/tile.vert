@@ -2,7 +2,6 @@
 
 layout(push_constant) uniform Push {
     vec2 screen;
-    float scale;
 } push;
 
 layout(location = 0) in vec4 target;

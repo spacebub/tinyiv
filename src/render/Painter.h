@@ -52,8 +52,6 @@ public:
     // Later draws are offset by the rect and clipped to it. Null resets.
     virtual void set_view(const Rect *view) = 0;
 
-    virtual void set_brightness(float scale) = 0;
-
     virtual void tile(Tile tile, const Rect &source, const Rect &target, int orientation) = 0;
 
     virtual void fill(const Rect &rect, Colour colour) = 0;

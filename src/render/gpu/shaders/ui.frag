@@ -3,11 +3,6 @@
 // Fills sample a white block in the atlas.
 layout(set = 0, binding = 0) uniform sampler2D atlas;
 
-layout(push_constant) uniform Push {
-    vec2 screen;
-    float scale;
-} push;
-
 layout(location = 0) in vec2 texel;
 layout(location = 1) in vec4 shade;
 
@@ -21,6 +16,6 @@ void main() {
     const vec2 at = floor(start) + 0.5 + offset;
     const vec4 lit = textureGrad(atlas, at / size, dFdx(texel / size), dFdy(texel / size));
 
-    // Unlit texels are transparent black, so a glyph edge darkens as it fades. SDL 3.4 drew text this way.
-    colour = vec4(shade.rgb * lit.rgb * push.scale, shade.a * lit.a);
+    // Unlit texels are transparent black, so a glyph edge darkens as it fades and reads sharp.
+    colour = vec4(shade.rgb * lit.rgb, shade.a * lit.a);
 }

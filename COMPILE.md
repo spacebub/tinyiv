@@ -1,15 +1,20 @@
 # Compiling tinyiv
 
-Needs a C++23 compiler, CMake 3.25, Git, libvips with its C++ API, libjpeg, libpng, libwebp,
-libjxl, libtiff, libheif, zlib and zstd. SDL 3 is fetched and built with tinyiv on every system,
-and linked in statically. The benchmarks in `bench/` build on Linux only. See [bench/README.md](bench/README.md).
+Needs a C++23 compiler, CMake 3.25, Git, the Vulkan headers, libvips with its C++ API, libjpeg,
+libpng, libwebp, libjxl, libtiff, libheif, zlib and zstd. SDL 3 is fetched and built with tinyiv
+on every system, and linked in statically. No Vulkan library is linked: SDL loads the one the
+system has at run time. The benchmarks in `bench/` build on Linux only. See [bench/README.md](bench/README.md).
 
 ## Linux
 
 Install the libraries and pkg-config from the distribution. SDL also needs the development files
-it builds its windowing from, since it leaves out any it finds missing: wayland, wayland-protocols,
-libxkbcommon and libdecor for Wayland, and libx11, libxext, libxcursor, libxfixes, libxi and
-libxrandr for X11. On Arch they are packages of those names. Then:
+it builds its windowing from: wayland, wayland-protocols, EGL, libxkbcommon and libdecor for
+Wayland, and libx11, libxext, libxcursor, libxfixes, libxi, libxrandr and libxss for X11. The
+configure stops when SDL finds no Wayland, as HDR needs it.
+
+tinyiv links libwayland-client too. It generates the colour management protocol with
+wayland-scanner from wayland-protocols 1.41 or later. On Arch the packages carry those names, EGL
+comes with `libglvnd`, and the Vulkan headers are `vulkan-headers`. Then:
 
 ```
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -25,7 +30,12 @@ Options:
 -DTIV_SANITIZE=ON      address and undefined sanitizers
 -DTIV_HARNESS=ON       tiv_harness in harness/, to drive the whole app headless
 -DTIV_SYMBOLS=ON       debug info and frame pointers in every build, for profilers
+-DTIV_TESTS=ON         tiv_tests in tests/, which checks what the renderer draws
 ```
+
+The shaders are checked in as SPIR-V headers beside their GLSL in `src/render/gpu/shaders`, so a
+build needs no shader compiler. After a change to the GLSL, `tools/shaders.sh` writes them again.
+It needs glslangValidator.
 
 `cmake --install build --prefix ~/.local` puts the binary in `bin`, and the desktop entry and
 the icons under `share`.
@@ -35,8 +45,8 @@ the icons under `share`.
 `tools/appimage.sh` builds a release in a Debian 13 container and packs it as
 `build-appimage/tinyiv-VERSION-x86_64.AppImage`. It needs Docker and takes the default compile
 flags, so the CPU must be x86-64-v3. The AppImage bundles the codec libraries and runs on
-systems with glibc 2.38 or newer. Fontconfig, FreeType, HarfBuzz and the X11 libraries come from
-the desktop.
+systems with glibc 2.38 or newer. Fontconfig, FreeType, HarfBuzz, the X11 libraries and the
+Vulkan loader come from the desktop.
 
 ## Windows
 

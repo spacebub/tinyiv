@@ -4,7 +4,7 @@ add_executable(tiv_tests
 
         image/Tone_test.cpp
 
-        render/Compare_test.cpp
+        render/Canvas_test.cpp
         render/Painter_test.cpp)
 
 tiv_reuse_app(tiv_tests)

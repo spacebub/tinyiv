@@ -91,8 +91,6 @@ add_executable(tinyiv
         render/Painter.h
         render/PlayBar.cpp
         render/PlayBar.h
-        render/SdlPainter.cpp
-        render/SdlPainter.h
         render/StatusBar.cpp
         render/StatusBar.h
         render/Tiles.cpp

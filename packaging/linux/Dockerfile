@@ -8,9 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libvips-dev libjpeg-dev libpng-dev libwebp-dev libjxl-dev libtiff-dev libheif-dev \
         zlib1g-dev libzstd-dev \
         libwayland-dev wayland-protocols libxkbcommon-dev libdecor-0-dev \
-        libx11-dev libxext-dev libxcursor-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev libxtst-dev \
-        libudev-dev libdbus-1-dev \
-        libegl-dev libgl-dev libvulkan-dev libdrm-dev libgbm-dev \
+        libx11-dev libxext-dev libxcursor-dev libxfixes-dev libxi-dev libxrandr-dev libxss-dev \
+        libdbus-1-dev libegl-dev libvulkan-dev \
     && rm -rf /var/lib/apt/lists/*
 
 ENV CC=gcc-14 CXX=g++-14

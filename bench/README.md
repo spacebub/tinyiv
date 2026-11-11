@@ -11,8 +11,7 @@ cd build-bench && ./bin/tiv_bench
 ```
 
 - `Release` only. A `Debug` build measures `-Og`.
-- The render benchmarks need a display for their hidden window. `TIV_RENDERER=own` runs them on the
-  Vulkan renderer instead, drawing offscreen.
+- The render benchmarks need a display for their hidden window and a Vulkan driver.
 - Delete a corpus file to have it written again.
 
 Useful flags:

@@ -16,7 +16,7 @@
 
 namespace harness::Sandbox {
 // HOME, XDG_CONFIG_HOME and XDG_CACHE_HOME go under the root, so runs never touch the real
-// config or caches. SDL draws offscreen unless SDL_VIDEO_DRIVER says otherwise. Each corpus
+// config or caches. SDL uses the offscreen video driver unless SDL_VIDEO_DRIVER says otherwise. Each corpus
 // size gets a separate folder, so switching sizes writes nothing again.
 void enter(const std::filesystem::path &root, std::string_view corpus);
 

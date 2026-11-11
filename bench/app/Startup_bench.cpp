@@ -45,24 +45,13 @@ void Startup_window(benchmark::State &state) {
         return;
     }
 
-    const bool own = Headless::own();
-
     for ([[maybe_unused]] const auto step : state) {
-        SDL_Window *window =
-                SDL_CreateWindow("tiv_bench", 1280, 800, SDL_WINDOW_HIDDEN | (own ? SDL_WINDOW_VULKAN : 0));
+        SDL_Window *window = SDL_CreateWindow("tiv_bench", 1280, 800, SDL_WINDOW_HIDDEN | SDL_WINDOW_VULKAN);
+        std::string error;
+        std::unique_ptr<tiv::gpu::VulkanPainter> painter = tiv::gpu::VulkanPainter::create(window, &error);
 
-        if (own) {
-            std::string error;
-            std::unique_ptr<tiv::gpu::VulkanPainter> painter = tiv::gpu::VulkanPainter::create(window, &error);
-
-            benchmark::DoNotOptimize(painter);
-        } else {
-            SDL_Renderer *renderer = SDL_CreateRenderer(window, "gpu");
-
-            benchmark::DoNotOptimize(renderer);
-            SDL_DestroyRenderer(renderer);
-        }
-
+        benchmark::DoNotOptimize(painter);
+        painter = nullptr;
         SDL_DestroyWindow(window);
     }
 }

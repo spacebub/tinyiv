@@ -46,8 +46,7 @@ inline constexpr float PQ_REFERENCE_NITS = 203.0F;
 // an SDR display.
 struct Display {
     float headroom = 1.0F;
-    // The Vulkan renderer passes PQ through untouched, so white is set in the encoding. The SDL renderer
-    // scales it when drawing.
+    // The renderer passes PQ through untouched, so white is set in the encoding.
     float whiteNits = PQ_REFERENCE_NITS;
 
     [[nodiscard]] bool hdr() const { return headroom > 1.0F; }

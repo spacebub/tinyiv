@@ -34,7 +34,7 @@ void check(bool passed, std::string_view what, std::source_location where = std:
 void skip(std::string_view why);
 
 void register_painter();
-void register_compare();
+void register_canvas();
 void register_tone();
 
 }

@@ -2,11 +2,6 @@
 
 layout(set = 0, binding = 0) uniform sampler2DArray tiles;
 
-layout(push_constant) uniform Push {
-    vec2 screen;
-    float scale;
-} push;
-
 layout(location = 0) in vec2 texel;
 layout(location = 1) flat in vec4 limit;
 layout(location = 2) flat in float slice;
@@ -22,5 +17,5 @@ void main() {
     const vec2 at = clamp(floor(start) + 0.5 + offset, limit.xy + 0.5, limit.zw - 0.5);
     const vec4 sampled = textureGrad(tiles, vec3(at / size, slice), dFdx(texel / size), dFdy(texel / size));
 
-    colour = vec4(sampled.rgb * push.scale, sampled.a);
+    colour = sampled;
 }

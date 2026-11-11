@@ -799,17 +799,13 @@ void VulkanPainter::set_view(const Rect *view) {
     };
 }
 
-void VulkanPainter::set_brightness(const float scale) {
-    _brightness = scale;
-}
-
 void VulkanPainter::add(const Kind kind, const std::uint32_t slab, const std::uint32_t count) {
     const auto first = static_cast<std::uint32_t>(kind == Kind::Tiles ? _tileData.size() : _uiData.size()) - count;
 
     if (!_batches.empty()) {
         Batch &last = _batches.back();
 
-        if (last.kind == kind && last.slab == slab && last.first + last.count == first && last.brightness == _brightness
+        if (last.kind == kind && last.slab == slab && last.first + last.count == first
             && last.scissor.offset.x == _scissor.offset.x && last.scissor.offset.y == _scissor.offset.y
             && last.scissor.extent.width == _scissor.extent.width
             && last.scissor.extent.height == _scissor.extent.height) {
@@ -825,7 +821,6 @@ void VulkanPainter::add(const Kind kind, const std::uint32_t slab, const std::ui
             .first = first,
             .count = count,
             .scissor = _scissor,
-            .brightness = _brightness,
     });
 }
 
@@ -979,7 +974,8 @@ void VulkanPainter::record(VkCommandBuffer commands, const Slot &slot, const Pip
     std::optional<Kind> boundKind;
     VkDescriptorSet boundSet = VK_NULL_HANDLE;
     const VkDeviceSize zero = 0;
-    bool pushed = false;
+
+    vk.CmdPushConstants(commands, _pipelines->layout(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(Push), &_push);
 
     for (const Batch &batch : _batches) {
         if (batch.scissor.extent.width == 0 || batch.scissor.extent.height == 0) {
@@ -1001,17 +997,6 @@ void VulkanPainter::record(VkCommandBuffer commands, const Slot &slot, const Pip
             vk.CmdBindDescriptorSets(
                     commands, VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelines->layout(), 0, 1, &set, 0, nullptr);
             boundSet = set;
-        }
-
-        if (!pushed || batch.brightness != _push.scale) {
-            pushed = true;
-            _push.scale = batch.brightness;
-            vk.CmdPushConstants(commands,
-                                _pipelines->layout(),
-                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                                0,
-                                sizeof(Push),
-                                &_push);
         }
 
         vk.CmdSetScissor(commands, 0, 1, &batch.scissor);

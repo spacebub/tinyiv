@@ -443,22 +443,6 @@ void views() {
             "view");
 }
 
-void brightness() {
-    VulkanPainter &painter = *sdr();
-    const Frame frame = draw(painter, CLEAR, [](Painter &p) {
-        p.set_brightness(0.5F);
-        p.fill({.width = 4, .height = 4}, {.r = 255, .g = 255, .b = 255});
-        p.set_brightness(1.0F);
-    });
-
-    compare(
-            frame,
-            {.width = 4, .height = 4},
-            1,
-            [](int, int) { return Rgba{.r = 128, .g = 128, .b = 128}; },
-            "brightness");
-}
-
 // Far more bytes than the staging ring holds, so it wraps and waits several times over.
 void ring_wraps() {
     VulkanPainter &painter = *sdr();
@@ -670,7 +654,6 @@ void register_painter() {
     add("painter/text_edges", [] { guarded(text_edges); });
     add("painter/blends", [] { guarded(blends); });
     add("painter/views", [] { guarded(views); });
-    add("painter/brightness", [] { guarded(brightness); });
     add("painter/ring_wraps", [] { guarded(ring_wraps); });
     add("painter/cells_stay_apart", [] { guarded(cells_stay_apart); });
     add("painter/reuses_layers", [] { guarded(reuses_layers); });

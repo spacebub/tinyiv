@@ -75,7 +75,7 @@ int main(const int argc, char **argv) {
     }
 
     test::register_painter();
-    test::register_compare();
+    test::register_canvas();
     test::register_tone();
 
     int ran = 0;

@@ -49,7 +49,7 @@ Pipelines::Pipelines(Device &device) : _device(&device) {
             .pBindings = &binding,
     };
     const VkPushConstantRange push{
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
             .size = sizeof(Push),
     };
     const VkSamplerCreateInfo sampler{

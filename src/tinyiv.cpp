@@ -14,6 +14,8 @@
 #include <string>
 #include <tuple>
 
+#include <SDL3/SDL.h>
+
 #include "app/App.h"
 #include "image/decode/Decode.h"
 
@@ -35,6 +37,8 @@ int run(const std::span<char *> args) {
             app.run();
         } else {
             std::println(stderr, "tinyiv: {}", error);
+            // Started from the desktop, nothing shows stderr.
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "tinyiv", error.c_str(), nullptr);
             status = 1;
         }
     }

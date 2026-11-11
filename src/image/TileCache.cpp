@@ -156,7 +156,7 @@ std::u8string utf8(const std::string_view text) {
     return {text.begin(), text.end()};
 }
 
-// The default white adds no tag, so the name matches what the SDL renderer gives.
+// The default white adds no tag, so caches written without one still match.
 std::u8string pq_tag(const Tone::Display &display) {
     if (!display.hdr()) {
         return {};

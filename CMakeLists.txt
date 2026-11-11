@@ -117,9 +117,20 @@ set(TIV_SDL_VERSION release-3.4.20)
 set(SDL_SHARED OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC ON CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
-# tinyiv only opens a window, so none of their headers are needed to build.
-foreach (subsystem IN ITEMS AUDIO CAMERA HAPTIC HIDAPI JOYSTICK SENSOR)
+# tinyiv opens a window and draws through Vulkan, so it uses none of these subsystems.
+foreach (subsystem IN ITEMS AUDIO CAMERA DIALOG GPU HAPTIC HIDAPI JOYSTICK POWER RENDER SENSOR TRAY)
     set(SDL_${subsystem} OFF CACHE BOOL "" FORCE)
+endforeach ()
+
+# Unused: dummy and console video, OpenGL, IBus, text shaping in X11 message boxes, PipeWire, udev and
+# io_uring.
+foreach (feature IN ITEMS DUMMYVIDEO FRIBIDI IBUS KMSDRM LIBTHAI LIBUDEV LIBURING OPENGL OPENGLES PIPEWIRE)
+    set(SDL_${feature} OFF CACHE BOOL "" FORCE)
+endforeach ()
+
+# X11 extensions for message boxes, shaped windows, faked input and OpenGL frame sync.
+foreach (extension IN ITEMS XDBE XSHAPE XSYNC XTEST)
+    set(SDL_X11_${extension} OFF CACHE BOOL "" FORCE)
 endforeach ()
 
 tiv_cache_source(SDL3 https://github.com/libsdl-org/SDL.git ${TIV_SDL_VERSION})
@@ -132,6 +143,16 @@ FetchContent_Declare(SDL3
         SYSTEM)
 
 FetchContent_MakeAvailable(SDL3)
+
+# SDL leaves Wayland out without a word when a development file is missing, and HDR needs Wayland.
+if (UNIX AND NOT APPLE)
+    get_directory_property(TIV_SDL_WAYLAND DIRECTORY "${sdl3_SOURCE_DIR}" DEFINITION HAVE_WAYLAND)
+
+    if (NOT TIV_SDL_WAYLAND)
+        message(FATAL_ERROR "SDL found no Wayland. It needs the development files of wayland, "
+                "wayland-protocols, EGL and libxkbcommon.")
+    endif ()
+endif ()
 
 add_subdirectory(src)
 
