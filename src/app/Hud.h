@@ -18,6 +18,7 @@
 
 #include "app/Picture.h"
 #include "gallery/Folder.h"
+#include "render/Painter.h"
 #include "view/Playback.h"
 #include "view/Viewport.h"
 
@@ -43,7 +44,7 @@ struct Frame {
     const Picture *picture = nullptr;
 };
 
-void draw(SDL_Renderer *renderer, const Frame &frame);
+void draw(Painter &painter, const Frame &frame);
 
 // Along the bottom of the view, over the image.
 [[nodiscard]] Rect play_bar(const Viewport &viewport, float scale, int bar);

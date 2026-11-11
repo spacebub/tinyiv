@@ -28,6 +28,7 @@ option(TIV_SANITIZE "Build with the address and undefined sanitizers" OFF)
 option(TIV_BENCHMARKS "Build the benchmark suite in bench/" OFF)
 option(TIV_RELEASE "Build as a release: no git revision beside the version" OFF)
 option(TIV_HARNESS "Build tiv_harness in harness/ to drive the whole app under profilers and sanitizers" OFF)
+option(TIV_TESTS "Build tiv_tests in tests/, which checks what the renderer draws" OFF)
 option(TIV_SYMBOLS "Keep debug info and frame pointers in every configuration, for profilers" OFF)
 
 set(SANITIZER_FLAGS -fsanitize=address -fsanitize=undefined)
@@ -97,6 +98,8 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
 pkg_check_modules(CODECS REQUIRED IMPORTED_TARGET libwebp libjxl libjxl_threads libjpeg libpng libtiff-4 libheif libzstd zlib)
 
+find_path(TIV_VULKAN_INCLUDE vulkan/vulkan.h REQUIRED DOC "Vulkan headers, for the renderer")
+
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 include(DownloadCache)
 include(Embed)
@@ -137,4 +140,8 @@ endif ()
 
 if (TIV_HARNESS)
     add_subdirectory(harness)
+endif ()
+
+if (TIV_TESTS)
+    add_subdirectory(tests)
 endif ()

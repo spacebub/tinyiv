@@ -86,12 +86,33 @@ add_executable(tinyiv
 
         render/Canvas.cpp
         render/Canvas.h
+        render/Font.cpp
+        render/Font.h
+        render/Painter.h
         render/PlayBar.cpp
         render/PlayBar.h
+        render/SdlPainter.cpp
+        render/SdlPainter.h
         render/StatusBar.cpp
         render/StatusBar.h
         render/Tiles.cpp
         render/Tiles.h
+
+        render/gpu/Api.h
+        render/gpu/Buffer.cpp
+        render/gpu/Buffer.h
+        render/gpu/Device.cpp
+        render/gpu/Device.h
+        render/gpu/Pipelines.cpp
+        render/gpu/Pipelines.h
+        render/gpu/Staging.cpp
+        render/gpu/Staging.h
+        render/gpu/Swapchain.cpp
+        render/gpu/Swapchain.h
+        render/gpu/TilePool.cpp
+        render/gpu/TilePool.h
+        render/gpu/VulkanPainter.cpp
+        render/gpu/VulkanPainter.h
 
         services/Loader.cpp
         services/Loader.h
@@ -107,6 +128,7 @@ add_executable(tinyiv
 
 target_include_directories(tinyiv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(tinyiv PRIVATE ${TIV_COMPILE_FLAGS})
+tiv_vulkan(tinyiv)
 # The libvips 7 compatibility macros rename plain identifiers such as error_exit, which libjpeg uses.
 target_compile_definitions(tinyiv PRIVATE VIPS_DISABLE_COMPAT)
 target_compile_definitions(tinyiv PRIVATE TIV_VERSION="${PROJECT_VERSION}")

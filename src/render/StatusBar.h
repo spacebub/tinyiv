@@ -14,8 +14,7 @@
 #include <string>
 #include <string_view>
 
-#include <SDL3/SDL.h>
-
+#include "render/Painter.h"
 #include "view/Viewport.h"
 
 namespace tiv::StatusBar {
@@ -29,7 +28,7 @@ constexpr int LOADING_TICK_MS = 100;
 // The left text is cut to what fits beside the right one. The middle one is cut to what fits between
 // them, and stays centred for as long as it clears both. While loading, a highlight sweeps along the
 // top edge and a spinner follows the right text.
-void draw(SDL_Renderer *renderer,
+void draw(Painter &painter,
           const Rect &bar,
           float scale,
           const std::string &left,
@@ -39,10 +38,10 @@ void draw(SDL_Renderer *renderer,
 
 // A small dark box with one line of text, its bottom left corner at (x, y), with a
 // spinner after the text while loading.
-void badge(SDL_Renderer *renderer, double x, double y, float scale, const std::string &given, bool loading);
+void badge(Painter &painter, double x, double y, float scale, const std::string &given, bool loading);
 
 // The badge, centred in the area, for a message in place of the image.
-void notice(SDL_Renderer *renderer, const Rect &area, float scale, const std::string &text);
+void notice(Painter &painter, const Rect &area, float scale, const std::string &text);
 
 struct Row {
     std::string_view left;
@@ -50,7 +49,7 @@ struct Row {
 };
 
 // A dark box of two columns centred in the area, sized to what it holds.
-void table(SDL_Renderer *renderer, const Rect &area, float scale, std::span<const Row> rows);
+void table(Painter &painter, const Rect &area, float scale, std::span<const Row> rows);
 
 // Where table() puts its box.
 [[nodiscard]] Rect table_box(const Rect &area, float scale, std::span<const Row> rows);

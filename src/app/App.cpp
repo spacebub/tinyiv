@@ -28,6 +28,7 @@
 #include "image/Orient.h"
 #include "image/decode/Decode.h"
 #include "render/Canvas.h"
+#include "render/Painter.h"
 #include "render/PlayBar.h"
 #include "render/StatusBar.h"
 #include "services/Loader.h"
@@ -38,7 +39,7 @@
 
 namespace tiv {
 namespace {
-constexpr SDL_Color BACKGROUND{.r = 0, .g = 0, .b = 0, .a = 255};
+constexpr Colour BACKGROUND{.r = 0, .g = 0, .b = 0, .a = 255};
 
 bool is_window_event(const SDL_Event &event) {
     return event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST;
@@ -137,7 +138,7 @@ void App::toggle_bar() {
 void App::deliver() {
     _picture.deliver();
 
-    if (_window.renderer() == nullptr) {
+    if (_window.painter() == nullptr) {
         _running = false;
     }
 }
@@ -457,28 +458,43 @@ void App::update_display() {
     }
 }
 
-
 void App::frame() {
     const Window::Size size = _window.pixels();
     const float scale = _window.scale();
-    SDL_Renderer *renderer = _window.renderer();
+    Painter *painter = _window.painter();
 
-    SDL_SetRenderColorScale(renderer, _window.color_scale());
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-    SDL_SetRenderDrawColor(renderer, BACKGROUND.r, BACKGROUND.g, BACKGROUND.b, BACKGROUND.a);
-    SDL_RenderClear(renderer);
+    if (painter == nullptr) {
+        if (_window.lost()) {
+            std::println(stderr, "tinyiv: drawing stopped, the GPU failed or was lost");
+        }
+
+        _running = false;
+
+        return;
+    }
+
+    if (!painter->begin_frame(BACKGROUND)) {
+        return;
+    }
+
+    painter->set_brightness(_window.color_scale());
 
     const int bar = bar_height();
 
     if (_viewport.has_image()) {
-        const SDL_Rect below{.x = 0, .y = bar, .w = size.width, .h = size.height - (2 * bar)};
+        const Rect below{
+                .x = 0.0,
+                .y = static_cast<double>(bar),
+                .width = static_cast<double>(size.width),
+                .height = static_cast<double>(size.height - (2 * bar)),
+        };
 
-        SDL_SetRenderViewport(renderer, &below);
+        painter->set_view(&below);
         _window.canvas().draw(_viewport);
-        SDL_SetRenderViewport(renderer, nullptr);
+        painter->set_view(nullptr);
     }
 
-    Hud::draw(renderer,
+    Hud::draw(*painter,
               {
                       .width = size.width,
                       .height = size.height,
@@ -495,7 +511,7 @@ void App::frame() {
                       .picture = &_picture,
               });
 
-    SDL_RenderPresent(renderer);
+    painter->end_frame();
 }
 
 void App::wait_for_event() {
@@ -566,5 +582,4 @@ int App::wait_ms() const {
 Rect App::play_bar() const {
     return Hud::play_bar(_viewport, _window.scale(), bar_height());
 }
-
 }

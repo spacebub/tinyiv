@@ -7,6 +7,7 @@
  *	spacebub <spacebubs@proton.me>
  */
 #include <filesystem>
+#include <memory>
 #include <string>
 
 #include <SDL3/SDL.h>
@@ -18,11 +19,12 @@
 
 #include "gallery/Folder.h"
 #include "image/decode/Decode.h"
+#include "render/gpu/VulkanPainter.h"
 
 namespace bench {
 namespace {
 void Startup_folder(benchmark::State &state, const std::filesystem::path &file) {
-    for ([[maybe_unused]] auto step : state) {
+    for ([[maybe_unused]] const auto step : state) {
         tiv::Folder folder;
 
         if (!folder.open(file, tiv::Decode::suffixes())) {
@@ -37,18 +39,30 @@ void Startup_folder(benchmark::State &state, const std::filesystem::path &file) 
 
 // SDL stays initialised, so only the window and renderer are measured.
 void Startup_window(benchmark::State &state) {
-    if (Headless::renderer() == nullptr) {
+    if (Headless::painter() == nullptr) {
         state.SkipWithMessage("no renderer");
 
         return;
     }
 
-    for ([[maybe_unused]] auto step : state) {
-        SDL_Window *window = SDL_CreateWindow("tiv_bench", 1280, 800, SDL_WINDOW_HIDDEN);
-        SDL_Renderer *renderer = SDL_CreateRenderer(window, SDL_GetRendererName(Headless::renderer()));
+    const bool own = Headless::own();
 
-        benchmark::DoNotOptimize(renderer);
-        SDL_DestroyRenderer(renderer);
+    for ([[maybe_unused]] const auto step : state) {
+        SDL_Window *window =
+                SDL_CreateWindow("tiv_bench", 1280, 800, SDL_WINDOW_HIDDEN | (own ? SDL_WINDOW_VULKAN : 0));
+
+        if (own) {
+            std::string error;
+            std::unique_ptr<tiv::gpu::VulkanPainter> painter = tiv::gpu::VulkanPainter::create(window, &error);
+
+            benchmark::DoNotOptimize(painter);
+        } else {
+            SDL_Renderer *renderer = SDL_CreateRenderer(window, "gpu");
+
+            benchmark::DoNotOptimize(renderer);
+            SDL_DestroyRenderer(renderer);
+        }
+
         SDL_DestroyWindow(window);
     }
 }

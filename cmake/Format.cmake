@@ -10,7 +10,11 @@ file(GLOB_RECURSE TIV_FORMAT_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/bench/*.h"
         "${CMAKE_SOURCE_DIR}/bench/*.cpp"
         "${CMAKE_SOURCE_DIR}/harness/*.h"
-        "${CMAKE_SOURCE_DIR}/harness/*.cpp")
+        "${CMAKE_SOURCE_DIR}/harness/*.cpp"
+        "${CMAKE_SOURCE_DIR}/tests/*.h"
+        "${CMAKE_SOURCE_DIR}/tests/*.cpp")
+# tools/shaders.sh writes these.
+list(FILTER TIV_FORMAT_SOURCES EXCLUDE REGEX "/shaders/[^/]+\\.(vert|frag)\\.h$")
 
 add_custom_target(format
         COMMAND ${TIV_CLANG_FORMAT} -i ${TIV_FORMAT_SOURCES}

@@ -12,12 +12,19 @@
 
 #include <SDL3/SDL.h>
 
+#include "render/Painter.h"
+
 namespace bench::Headless {
 
-// Made on first use, on a hidden window with the driver the app uses. Null when none can be made.
-[[nodiscard]] SDL_Renderer *renderer();
+// TIV_RENDERER=own draws through Vulkan, else through the SDL renderer the app uses.
+[[nodiscard]] bool own();
 
-[[nodiscard]] int max_texture();
+// Made on first use. Both backends draw on a hidden window. Null when none can be made.
+[[nodiscard]] tiv::Painter *painter();
+
+// Draws an empty frame, which submits the uploads waiting.
+void present();
+
 
 void shutdown();
 

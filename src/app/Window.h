@@ -19,6 +19,9 @@
 #include "app/Config.h"
 #include "image/Tone.h"
 #include "render/Canvas.h"
+#include "render/Painter.h"
+#include "render/SdlPainter.h"
+#include "render/gpu/VulkanPainter.h"
 #include "services/Loader.h"
 
 namespace tiv {
@@ -50,21 +53,27 @@ public:
     [[nodiscard]] float scale() const;
     [[nodiscard]] float density() const;
     [[nodiscard]] float color_scale() const;
-    [[nodiscard]] SDL_Renderer *renderer() const { return _renderer; }
+    // Null once drawing has failed for good.
+    [[nodiscard]] Painter *painter() const;
     [[nodiscard]] Canvas &canvas() const { return *_canvas; }
     [[nodiscard]] const Tone::Display &display() const { return _display; }
     [[nodiscard]] bool linear() const { return _linear; }
     [[nodiscard]] bool fullscreen() const { return _fullscreen; }
-    [[nodiscard]] bool vsync() const { return _vsync; }
+    [[nodiscard]] bool vsync() const;
+    [[nodiscard]] bool lost() const { return _vulkan != nullptr && _vulkan->lost(); }
     [[nodiscard]] float refresh_rate() const { return _refreshRate; }
 
 private:
     void follow_awake() const;
+    [[nodiscard]] bool make_vulkan(std::string *error);
 
     SDL_Window *_window = nullptr;
     SDL_Renderer *_renderer = nullptr;
     // Shared by each renderer the window has, null where the gpu renderer is not available.
     SDL_GPUDevice *_device = nullptr;
+    // Set by TIV_RENDERER=own while both renderers exist.
+    std::unique_ptr<gpu::VulkanPainter> _vulkan;
+    std::unique_ptr<SdlPainter> _sdl;
     std::unique_ptr<Canvas> _canvas;
     Tone::Display _display;
     float _hdrWhite = 100.0F;

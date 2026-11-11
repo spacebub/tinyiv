@@ -11,7 +11,8 @@ cd build-bench && ./bin/tiv_bench
 ```
 
 - `Release` only. A `Debug` build measures `-Og`.
-- The render benchmarks need a display for their hidden window.
+- The render benchmarks need a display for their hidden window. `TIV_RENDERER=own` runs them on the
+  Vulkan renderer instead, drawing offscreen.
 - Delete a corpus file to have it written again.
 
 Useful flags:
@@ -38,6 +39,9 @@ python3 ../.download-cache/benchmark-v1.10.0/tools/compare.py benchmarks before.
 | `JpegBands_band`      | A tile row decoded from its restart marker, one thread and many |
 | `Upload_static`       | Texture upload throughput                                       |
 | `Tiles_visible_4k`    | The tiles one screen of a 128 MP image needs                    |
+| `Tiles_pan_at_budget` | A 1:1 pan across a huge image with VRAM far below its size      |
+| `Frame_first`         | Time until a fresh image shows whole and sharp at fit           |
+| `Output_switch`       | An SDR image, an HDR one, then the SDR one again                |
 | `Canvas_draw`         | One frame of draw calls                                         |
 | `Loader_open`         | Cold start, request to first result                             |
 | `Loader_step_cached`  | A step between two decoded images, which should take microseconds |

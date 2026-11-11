@@ -16,10 +16,9 @@
 #include <span>
 #include <vector>
 
-#include <SDL3/SDL.h>
-
 #include "image/Pyramid.h"
 #include "image/TileCache.h"
+#include "render/Painter.h"
 #include "render/Tiles.h"
 #include "view/Viewport.h"
 
@@ -34,7 +33,7 @@ public:
     static constexpr std::size_t LEAN_VRAM_BUDGET = std::size_t{64} * 1024 * 1024;
 
     // Lean asks for and uploads only the tiles the view meets, nothing around them or below.
-    Canvas(SDL_Renderer *renderer, int maxTexture, std::size_t vramBudget = DEFAULT_VRAM_BUDGET, bool lean = false);
+    explicit Canvas(Painter &painter, std::size_t vramBudget = DEFAULT_VRAM_BUDGET, bool lean = false);
 
     // The image to draw. Width and height are those of the image as stored, and the pyramid
     // may be smaller. The orientation is how it is shown. Levels the same size as before, of
@@ -156,8 +155,7 @@ private:
     std::size_t upload_warm(std::size_t budget);
     void evict();
 
-    SDL_Renderer *_renderer;
-    int _maxTexture;
+    Painter *_painter;
     std::size_t _budget;
     bool _lean;
     Held _current;

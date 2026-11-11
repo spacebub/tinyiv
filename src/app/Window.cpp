@@ -169,6 +169,8 @@ int vsync_setting(SDL_Renderer *renderer, SDL_Window *window) {
 
 Window::~Window() {
     _canvas = nullptr;
+    _sdl = nullptr;
+    _vulkan = nullptr;
 
     if (_renderer != nullptr) {
         SDL_DestroyRenderer(_renderer);
@@ -210,10 +212,13 @@ bool Window::open(const Config &config, std::string *error) {
 
     SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable);
 
+    const char *renderer = SDL_getenv("TIV_RENDERER");
+    const bool own = renderer != nullptr && std::string_view(renderer) == "own";
+
     _window = SDL_CreateWindow("tinyiv",
                                scaled(usable.w, WINDOW_SHARE),
                                scaled(usable.h, WINDOW_SHARE),
-                               SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+                               SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (own ? SDL_WINDOW_VULKAN : 0));
 
     if (_window == nullptr) {
         *error = SDL_GetError();
@@ -228,6 +233,10 @@ bool Window::open(const Config &config, std::string *error) {
     set_icon(_window);
 #endif
 
+    if (own) {
+        return make_vulkan(error);
+    }
+
     // Kept to share between renderers, as an HDR display makes a second one.
     _device = create_device();
 
@@ -240,10 +249,36 @@ bool Window::open(const Config &config, std::string *error) {
     return true;
 }
 
+bool Window::make_vulkan(std::string *error) {
+    _vulkan = gpu::VulkanPainter::create(_window, error);
+
+    if (_vulkan == nullptr) {
+        return false;
+    }
+
+    _canvas = std::make_unique<Canvas>(*_vulkan, Canvas::DEFAULT_VRAM_BUDGET, _lean);
+
+    return true;
+}
+
+// The present mode can change whenever the swapchain is made again.
+bool Window::vsync() const {
+    return _vulkan != nullptr ? _vulkan->waits_for_display() : _vsync;
+}
+
+Painter *Window::painter() const {
+    if (_vulkan != nullptr) {
+        return _vulkan->lost() ? nullptr : _vulkan.get();
+    }
+
+    return _sdl.get();
+}
+
 // Linear output is what carries HDR. The window has one renderer, so another output means
 // another renderer, and the canvas with its textures goes with the old one.
 bool Window::make_renderer(const bool linear) {
     _canvas = nullptr;
+    _sdl = nullptr;
 
     if (_renderer != nullptr) {
         SDL_DestroyRenderer(_renderer);
@@ -267,9 +302,8 @@ bool Window::make_renderer(const bool linear) {
     SDL_SetRenderVSync(_renderer, vsync);
     _vsync = vsync != 0;
 
-    const auto maxTexture = static_cast<int>(SDL_GetNumberProperty(
-            SDL_GetRendererProperties(_renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, Tiles::SIZE));
-    _canvas = std::make_unique<Canvas>(_renderer, maxTexture, Canvas::DEFAULT_VRAM_BUDGET, _lean);
+    _sdl = std::make_unique<SdlPainter>(_renderer);
+    _canvas = std::make_unique<Canvas>(*_sdl, Canvas::DEFAULT_VRAM_BUDGET, _lean);
 
     return true;
 }
@@ -286,7 +320,7 @@ void Window::follow_output(const Loader::Result &result) {
 
     const bool linear = pq && _display.hdr();
 
-    if (linear == _linear) {
+    if (linear == _linear || _vulkan != nullptr) {
         return;
     }
 
@@ -367,6 +401,6 @@ float Window::density() const {
 
 // Linear output puts white at the SDR white of the display, which hdr_white overrides.
 float Window::color_scale() const {
-    return _linear ? shown_white(_window, _hdrWhite) / sdr_white_nits(_window) : 1.0F;
+    return _linear && _renderer != nullptr ? shown_white(_window, _hdrWhite) / sdr_white_nits(_window) : 1.0F;
 }
 }

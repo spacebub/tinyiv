@@ -12,8 +12,7 @@
 
 #include <cstdint>
 
-#include <SDL3/SDL.h>
-
+#include "render/Painter.h"
 #include "view/Viewport.h"
 
 namespace tiv::PlayBar {
@@ -28,7 +27,7 @@ enum class Part : std::uint8_t {
 [[nodiscard]] int height(float scale);
 
 // A translucent strip: a play or pause mark on the left, then a track filled up to the progress.
-void draw(SDL_Renderer *renderer, const Rect &bar, float scale, bool playing, double progress);
+void draw(Painter &painter, const Rect &bar, float scale, bool playing, double progress);
 
 // What lies under the point, in pixels.
 [[nodiscard]] Part hit(const Rect &bar, float scale, double x, double y);

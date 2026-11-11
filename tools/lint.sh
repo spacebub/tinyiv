@@ -38,4 +38,9 @@ if printf '%s\n' "$REPORT" | grep -qE '\[[a-z0-9-]+,?[a-z0-9-]*\]$'; then
     exit 1
 fi
 
+if command -v glslangValidator >/dev/null; then
+    echo "== shaders =="
+    "$ROOT/tools/shaders.sh" --check || exit 1
+fi
+
 exit 0

@@ -18,8 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include <SDL3/SDL.h>
-
 #include "image/Orient.h"
 #include "image/Pyramid.h"
 #include "render/Canvas.h"
@@ -108,11 +106,8 @@ std::array<Rect, 4> around(const Rect &outer, const Rect &inner) {
 }
 }
 
-Canvas::Canvas(SDL_Renderer *renderer, const int maxTexture, const std::size_t vramBudget, const bool lean)
-    : _renderer(renderer),
-      _maxTexture(maxTexture),
-      _budget(lean ? std::min(vramBudget, LEAN_VRAM_BUDGET) : vramBudget),
-      _lean(lean) {
+Canvas::Canvas(Painter &painter, const std::size_t vramBudget, const bool lean)
+    : _painter(&painter), _budget(lean ? std::min(vramBudget, LEAN_VRAM_BUDGET) : vramBudget), _lean(lean) {
 }
 
 Canvas::Held Canvas::build(std::shared_ptr<const Pyramid> pyramid,
@@ -147,7 +142,7 @@ Canvas::Held Canvas::build(std::shared_ptr<const Pyramid> pyramid,
         }
 
         if (sheet.tiles == nullptr) {
-            sheet.tiles = std::make_unique<Tiles>(_renderer, _maxTexture, level);
+            sheet.tiles = std::make_unique<Tiles>(*_painter, level);
         }
 
         held.sheets.push_back(std::move(sheet));
@@ -183,7 +178,7 @@ Canvas::Held Canvas::build(std::shared_ptr<const TileCache> tileCache,
         Sheet sheet;
 
         sheet.scale = static_cast<double>(levels[index].width) / held.width;
-        sheet.tiles = std::make_unique<Tiles>(_renderer, held.tileCache, static_cast<int>(index));
+        sheet.tiles = std::make_unique<Tiles>(*_painter, held.tileCache, static_cast<int>(index));
         held.sheets.push_back(std::move(sheet));
     }
 
@@ -369,7 +364,7 @@ void Canvas::refine(std::shared_ptr<const Bitmap> bitmap, const double scale, co
             .image = _current.image,
             .scale = scale,
             .area = area,
-            .tiles = std::make_unique<Tiles>(_renderer, _maxTexture, std::move(bitmap)),
+            .tiles = std::make_unique<Tiles>(*_painter, std::move(bitmap)),
     };
 
     // Whole, so it never has holes to fall back from.

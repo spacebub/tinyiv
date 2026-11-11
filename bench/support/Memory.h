@@ -21,6 +21,10 @@ namespace bench::Memory {
 [[nodiscard]] std::size_t peak();
 void reset_peak();
 
+// Bytes of VRAM the GPU driver holds for this process, from the DRM fdinfo. Zero where the kernel
+// does not report it.
+[[nodiscard]] std::size_t vram();
+
 // Adds peak_rss_mb, the most resident since reset_peak(). Also adds rss_added_mb, how far that
 // peak went above what was resident at the reset.
 void report_peak(benchmark::State &state);

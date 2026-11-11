@@ -17,10 +17,9 @@
 #include <utility>
 #include <vector>
 
-#include <SDL3/SDL.h>
-
 #include "image/Bitmap.h"
 #include "image/TileCache.h"
+#include "render/Painter.h"
 #include "view/Viewport.h"
 
 namespace tiv {
@@ -34,10 +33,10 @@ public:
     // Called for the parts of a drawn area that have no texture yet, with where they land on screen.
     using Missing = std::function<void(const Rect &)>;
 
-    Tiles(SDL_Renderer *renderer, int maxTexture, std::shared_ptr<const Bitmap> bitmap);
+    Tiles(Painter &painter, std::shared_ptr<const Bitmap> bitmap);
 
     // A level of a pyramid on disk. Tiles upload once the tile cache has them in memory.
-    Tiles(SDL_Renderer *renderer, std::shared_ptr<const TileCache> tileCache, int level);
+    Tiles(Painter &painter, std::shared_ptr<const TileCache> tileCache, int level);
     ~Tiles();
 
     Tiles(const Tiles &) = delete;
@@ -84,10 +83,17 @@ public:
     std::size_t evict_all();
 
 private:
+    struct Area {
+        int x = 0;
+        int y = 0;
+        int w = 0;
+        int h = 0;
+    };
+
     struct Tile {
-        SDL_Texture *texture = nullptr;
-        // What the tile shows, in bitmap pixels.
-        SDL_Rect area{};
+        Painter::Tile handle = Painter::NO_TILE;
+        // In bitmap pixels.
+        Area area;
         std::uint64_t used = 0;
     };
 
@@ -113,7 +119,7 @@ private:
     [[nodiscard]] std::vector<std::pair<int, int>> wanting(const Rect &area) const;
     void release(Tile &tile);
 
-    SDL_Renderer *_renderer;
+    Painter *_painter;
     int _width;
     int _height;
     int _size;

@@ -110,7 +110,6 @@ std::string name(const Frame &frame) {
     return frame.folder->current().filename().string() + (frame.picture->turned() ? " *" : "");
 }
 
-// The place in the folder and the image name.
 std::string title(const Frame &frame) {
     const std::string where = position(frame);
 
@@ -201,7 +200,7 @@ std::string details(const Frame &frame) {
 }
 }
 
-void draw(SDL_Renderer *renderer, const Frame &frame) {
+void draw(Painter &painter, const Frame &frame) {
     const int width = frame.width;
     const int height = frame.height;
     const float scale = frame.scale;
@@ -215,19 +214,19 @@ void draw(SDL_Renderer *renderer, const Frame &frame) {
 
     if (!frame.viewport->has_image()) {
         if (!frame.picture->failure().empty()) {
-            StatusBar::notice(renderer, view, scale, frame.picture->failure());
+            StatusBar::notice(painter, view, scale, frame.picture->failure());
         } else if (frame.picture->building()) {
             const std::string notice =
                     std::format("Making tiles{}: {:.0f}%", where_tiles_go(frame), frame.progress * 100.0F);
 
-            StatusBar::notice(renderer, view, scale, notice);
+            StatusBar::notice(painter, view, scale, notice);
         } else if (frame.folder->count() == 0) {
-            StatusBar::notice(renderer, view, scale, "Drop an image here to open it");
+            StatusBar::notice(painter, view, scale, "Drop an image here to open it");
         }
     }
 
     if (frame.playback->active()) {
-        PlayBar::draw(renderer,
+        PlayBar::draw(painter,
                       play_bar(*frame.viewport, scale, bar),
                       scale,
                       frame.playback->playing(),
@@ -236,7 +235,7 @@ void draw(SDL_Renderer *renderer, const Frame &frame) {
 
     if (frame.help) {
         StatusBar::table(
-                renderer,
+                painter,
                 {.x = 0.0, .y = 0.0, .width = static_cast<double>(width), .height = static_cast<double>(height)},
                 scale,
                 HELP);
@@ -245,14 +244,14 @@ void draw(SDL_Renderer *renderer, const Frame &frame) {
     if (frame.bars) {
         const std::string order = frame.folder->count() > 0 ? std::string(order_text(frame.folder->order()).tag) : "";
 
-        StatusBar::draw(renderer,
+        StatusBar::draw(painter,
                         {.x = 0.0, .y = 0.0, .width = static_cast<double>(width), .height = static_cast<double>(bar)},
                         scale,
                         position(frame),
                         name(frame),
                         order,
                         false);
-        StatusBar::draw(renderer,
+        StatusBar::draw(painter,
                         {
                                 .x = 0.0,
                                 .y = static_cast<double>(height - bar),
@@ -267,10 +266,10 @@ void draw(SDL_Renderer *renderer, const Frame &frame) {
     } else if (flashing(frame.picture->switched_at())) {
         // No bar to carry the mode, so switching it says so for a moment.
         StatusBar::badge(
-                renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, frame.picture->flash(), false);
+                painter, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, frame.picture->flash(), false);
     } else if (frame.picture->loading()) {
         // Where the bar would be, for as long as something is still on its way.
-        StatusBar::badge(renderer, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, title(frame), true);
+        StatusBar::badge(painter, BADGE_MARGIN * scale, height - (BADGE_MARGIN * scale), scale, title(frame), true);
     }
 }
 

@@ -383,7 +383,6 @@ void Picture::turn(const int by) {
     *_dirty = true;
 }
 
-
 void Picture::toggle_stream() {
     const bool on = !_loader->streaming_all();
 
