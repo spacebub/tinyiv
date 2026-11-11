@@ -20,43 +20,43 @@
 #include "image/decode/Decode.h"
 
 namespace bench {
-    namespace {
-        void Startup_folder(benchmark::State &state, const std::filesystem::path &file) {
-            for ([[maybe_unused]] auto step : state) {
-                tiv::Folder folder;
+namespace {
+void Startup_folder(benchmark::State &state, const std::filesystem::path &file) {
+    for ([[maybe_unused]] auto step : state) {
+        tiv::Folder folder;
 
-                if (!folder.open(file, tiv::Decode::suffixes())) {
-                    state.SkipWithError("cannot open");
+        if (!folder.open(file, tiv::Decode::suffixes())) {
+            state.SkipWithError("cannot open");
 
-                    break;
-                }
-
-                benchmark::DoNotOptimize(folder.count());
-            }
+            break;
         }
 
-        // SDL stays initialised, so only the window and renderer are measured.
-        void Startup_window(benchmark::State &state) {
-            if (Headless::renderer() == nullptr) {
-                state.SkipWithMessage("no renderer");
+        benchmark::DoNotOptimize(folder.count());
+    }
+}
 
-                return;
-            }
+// SDL stays initialised, so only the window and renderer are measured.
+void Startup_window(benchmark::State &state) {
+    if (Headless::renderer() == nullptr) {
+        state.SkipWithMessage("no renderer");
 
-            for ([[maybe_unused]] auto step : state) {
-                SDL_Window *window = SDL_CreateWindow("tiv_bench", 1280, 800, SDL_WINDOW_HIDDEN);
-                SDL_Renderer *renderer = SDL_CreateRenderer(window, SDL_GetRendererName(Headless::renderer()));
-
-                benchmark::DoNotOptimize(renderer);
-                SDL_DestroyRenderer(renderer);
-                SDL_DestroyWindow(window);
-            }
-        }
+        return;
     }
 
-    void register_startup() {
-        benchmark::RegisterBenchmark("Startup_folder", Startup_folder, Corpus::file("small.jpg"))
-                ->Unit(benchmark::kMicrosecond);
-        benchmark::RegisterBenchmark("Startup_window", Startup_window)->Unit(benchmark::kMillisecond)->UseRealTime();
+    for ([[maybe_unused]] auto step : state) {
+        SDL_Window *window = SDL_CreateWindow("tiv_bench", 1280, 800, SDL_WINDOW_HIDDEN);
+        SDL_Renderer *renderer = SDL_CreateRenderer(window, SDL_GetRendererName(Headless::renderer()));
+
+        benchmark::DoNotOptimize(renderer);
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
     }
+}
+}
+
+void register_startup() {
+    benchmark::RegisterBenchmark("Startup_folder", Startup_folder, Corpus::file("small.jpg"))
+            ->Unit(benchmark::kMicrosecond);
+    benchmark::RegisterBenchmark("Startup_window", Startup_window)->Unit(benchmark::kMillisecond)->UseRealTime();
+}
 }

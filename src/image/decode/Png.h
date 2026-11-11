@@ -22,13 +22,20 @@
 
 namespace tiv::Decode::Png {
 
-    // https://www.w3.org/TR/png-3/#cICP-chunk
-    [[nodiscard]] Tone::Source tone(std::span<const std::uint8_t> data);
+// https://www.w3.org/TR/png-3/#cICP-chunk
+[[nodiscard]] Tone::Source tone(std::span<const std::uint8_t> data);
 
-    bool probe(std::span<const std::uint8_t> data, Info *info);
+bool probe(std::span<const std::uint8_t> data, Info *info);
 
-    Direct load(const std::filesystem::path &file, std::span<const std::uint8_t> data, int boxWidth, int boxHeight,
-                Bitmap *out, std::string *error, const Abort *abort, Fit fit, const Tone::Display &display = {});
+Direct load(const std::filesystem::path &file,
+            std::span<const std::uint8_t> data,
+            int boxWidth,
+            int boxHeight,
+            Bitmap *out,
+            std::string *error,
+            const Abort *abort,
+            Fit fit,
+            const Tone::Display &display = {});
 
 }
 

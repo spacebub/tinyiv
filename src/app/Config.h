@@ -18,48 +18,48 @@
 #include "gallery/Folder.h"
 
 namespace tiv {
-    // User settings. The file holds one key = value a line, and # starts a comment.
-    struct Config {
-        enum class KeepAwake : std::uint8_t {
-            Always,
-            Fullscreen,
-            Never,
-        };
-
-        // Where tile caches go. Empty keeps each beside its image, and a relative path starts from
-        // the image's folder.
-        std::filesystem::path cache;
-
-        // A huge PNG keeps only the points decoding can resume from, not every tile. That takes about a
-        // third of the space, but panning at full size waits for bands of rows.
-        bool small = false;
-
-        // Streaming mode is on from the start, before S is ever pressed.
-        bool streaming = false;
-
-        // Streamed images that fit in memory keep their tiles on disk too, as the huge ones do.
-        bool persist = false;
-
-        // Holds only what the image on screen shows, as little of it as the view allows.
-        bool footprint = false;
-
-        // How a folder's images are ordered from the start, before O is ever pressed.
-        Folder::Order order = Folder::Order::AToZ;
-
-        // When sleep is prevented.
-        KeepAwake awake = KeepAwake::Fullscreen;
-
-        // How bright the white of an HDR image shows on an HDR display, in nits. Highlights use the
-        // headroom above it, up to the peak the display reports.
-        int hdrWhite = 100;
-
-        // $XDG_CONFIG_HOME/tinyiv/tinyiv.conf, or tinyiv.conf beside the executable on Windows.
-        [[nodiscard]] static std::filesystem::path location();
-
-        // Reads the file, then adds every setting it lacks with its default, making the file first
-        // when there is none. Lines it cannot take are skipped and described in warnings.
-        [[nodiscard]] static Config load(const std::filesystem::path &file, std::vector<std::string> *warnings);
+// User settings. The file holds one key = value a line, and # starts a comment.
+struct Config {
+    enum class KeepAwake : std::uint8_t {
+        Always,
+        Fullscreen,
+        Never,
     };
+
+    // Where tile caches go. Empty keeps each beside its image, and a relative path starts from
+    // the image's folder.
+    std::filesystem::path cache;
+
+    // A huge PNG keeps only the points decoding can resume from, not every tile. That takes about a
+    // third of the space, but panning at full size waits for bands of rows.
+    bool small = false;
+
+    // Streaming mode is on from the start, before S is ever pressed.
+    bool streaming = false;
+
+    // Streamed images that fit in memory keep their tiles on disk too, as the huge ones do.
+    bool persist = false;
+
+    // Holds only what the image on screen shows, as little of it as the view allows.
+    bool footprint = false;
+
+    // How a folder's images are ordered from the start, before O is ever pressed.
+    Folder::Order order = Folder::Order::AToZ;
+
+    // When sleep is prevented.
+    KeepAwake awake = KeepAwake::Fullscreen;
+
+    // How bright the white of an HDR image shows on an HDR display, in nits. Highlights use the
+    // headroom above it, up to the peak the display reports.
+    int hdrWhite = 100;
+
+    // $XDG_CONFIG_HOME/tinyiv/tinyiv.conf, or tinyiv.conf beside the executable on Windows.
+    [[nodiscard]] static std::filesystem::path location();
+
+    // Reads the file, then adds every setting it lacks with its default, making the file first
+    // when there is none. Lines it cannot take are skipped and described in warnings.
+    [[nodiscard]] static Config load(const std::filesystem::path &file, std::vector<std::string> *warnings);
+};
 }
 
 

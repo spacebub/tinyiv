@@ -8,7 +8,9 @@ file(GLOB_RECURSE TIV_FORMAT_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_SOURCE_DIR}/src/*.h"
         "${CMAKE_SOURCE_DIR}/src/*.cpp"
         "${CMAKE_SOURCE_DIR}/bench/*.h"
-        "${CMAKE_SOURCE_DIR}/bench/*.cpp")
+        "${CMAKE_SOURCE_DIR}/bench/*.cpp"
+        "${CMAKE_SOURCE_DIR}/harness/*.h"
+        "${CMAKE_SOURCE_DIR}/harness/*.cpp")
 
 add_custom_target(format
         COMMAND ${TIV_CLANG_FORMAT} -i ${TIV_FORMAT_SOURCES}

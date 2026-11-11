@@ -13,78 +13,78 @@
 #include "render/Tiles.h"
 
 namespace bench {
-    namespace {
-        struct Session {
-            SDL_Window *window = nullptr;
-            SDL_Renderer *renderer = nullptr;
-            bool tried = false;
-        };
+namespace {
+struct Session {
+    SDL_Window *window = nullptr;
+    SDL_Renderer *renderer = nullptr;
+    bool tried = false;
+};
 
-        Session &session() {
-            static Session held;
+Session &session() {
+    static Session held;
 
-            return held;
-        }
-    }
+    return held;
+}
+}
 
-    SDL_Renderer *Headless::renderer() {
-        Session &held = session();
+SDL_Renderer *Headless::renderer() {
+    Session &held = session();
 
-        if (held.tried) {
-            return held.renderer;
-        }
-
-        held.tried = true;
-
-        if (!SDL_Init(SDL_INIT_VIDEO)) {
-            return nullptr;
-        }
-
-        held.window = SDL_CreateWindow("tiv_bench", 640, 480, SDL_WINDOW_HIDDEN);
-
-        if (held.window == nullptr) {
-            return nullptr;
-        }
-
-        held.renderer = SDL_CreateRenderer(held.window, "gpu");
-
-        if (held.renderer == nullptr) {
-            held.renderer = SDL_CreateRenderer(held.window, nullptr);
-        }
-
-        if (held.renderer != nullptr) {
-            SDL_SetRenderVSync(held.renderer, 0);
-        }
-
+    if (held.tried) {
         return held.renderer;
     }
 
-    int Headless::max_texture() {
-        SDL_Renderer *r = renderer();
+    held.tried = true;
 
-        if (r == nullptr) {
-            return tiv::Tiles::SIZE;
-        }
-
-        return static_cast<int>(SDL_GetNumberProperty(SDL_GetRendererProperties(r),
-                                                      SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, tiv::Tiles::SIZE));
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        return nullptr;
     }
 
-    void Headless::shutdown() {
-        Session &held = session();
+    held.window = SDL_CreateWindow("tiv_bench", 640, 480, SDL_WINDOW_HIDDEN);
 
-        if (held.renderer != nullptr) {
-            SDL_DestroyRenderer(held.renderer);
-            held.renderer = nullptr;
-        }
-
-        if (held.window != nullptr) {
-            SDL_DestroyWindow(held.window);
-            held.window = nullptr;
-        }
-
-        if (held.tried) {
-            SDL_Quit();
-        }
+    if (held.window == nullptr) {
+        return nullptr;
     }
+
+    held.renderer = SDL_CreateRenderer(held.window, "gpu");
+
+    if (held.renderer == nullptr) {
+        held.renderer = SDL_CreateRenderer(held.window, nullptr);
+    }
+
+    if (held.renderer != nullptr) {
+        SDL_SetRenderVSync(held.renderer, 0);
+    }
+
+    return held.renderer;
+}
+
+int Headless::max_texture() {
+    SDL_Renderer *r = renderer();
+
+    if (r == nullptr) {
+        return tiv::Tiles::SIZE;
+    }
+
+    return static_cast<int>(SDL_GetNumberProperty(
+            SDL_GetRendererProperties(r), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, tiv::Tiles::SIZE));
+}
+
+void Headless::shutdown() {
+    Session &held = session();
+
+    if (held.renderer != nullptr) {
+        SDL_DestroyRenderer(held.renderer);
+        held.renderer = nullptr;
+    }
+
+    if (held.window != nullptr) {
+        SDL_DestroyWindow(held.window);
+        held.window = nullptr;
+    }
+
+    if (held.tried) {
+        SDL_Quit();
+    }
+}
 }

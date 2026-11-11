@@ -21,94 +21,97 @@
 #include "image/decode/Vips.h"
 
 namespace tiv {
-    namespace {
-        using vips::VImage;
+namespace {
+using vips::VImage;
 
-        // Browsers play frame delays this short at the default, and animations are made for browsers.
-        constexpr int SHORTEST_DELAY = 10;
-        constexpr int DEFAULT_DELAY = 100;
+// Browsers play frame delays this short at the default, and animations are made for browsers.
+constexpr int SHORTEST_DELAY = 10;
+constexpr int DEFAULT_DELAY = 100;
 
-        // The smallest integer shrink that brings every frame together within the bytes.
-        int frame_shrink(const int width, const int height, const int frames, const std::size_t maxBytes) {
-            const auto bytes = [&](const int factor) {
-                return static_cast<std::size_t>((width + factor - 1) / factor)
-                       * static_cast<std::size_t>((height + factor - 1) / factor) * Bitmap::CHANNELS
-                       * static_cast<std::size_t>(frames);
-            };
+// The smallest integer shrink that brings every frame together within the bytes.
+int frame_shrink(const int width, const int height, const int frames, const std::size_t maxBytes) {
+    const auto bytes = [&](const int factor) {
+        return static_cast<std::size_t>((width + factor - 1) / factor)
+               * static_cast<std::size_t>((height + factor - 1) / factor) * Bitmap::CHANNELS
+               * static_cast<std::size_t>(frames);
+    };
 
-            int factor = 1;
+    int factor = 1;
 
-            while (bytes(factor) > maxBytes && factor < std::max(width, height)) {
-                ++factor;
-            }
-
-            return factor;
-        }
-
-        int frame_delay(const std::vector<int> &delays, const int frame) {
-            const auto at = static_cast<std::size_t>(frame);
-            const int delay = at < delays.size() ? delays.at(at) : 0;
-
-            return delay <= SHORTEST_DELAY ? DEFAULT_DELAY : delay;
-        }
+    while (bytes(factor) > maxBytes && factor < std::max(width, height)) {
+        ++factor;
     }
 
-    bool Decode::load_frames(const std::filesystem::path &file, const std::size_t maxBytes, std::vector<Frame> *out,
-                             std::string *error, Abort *abort) {
-        Vips::ensure();
+    return factor;
+}
 
-        const Vips::ErrorMark mark;
+int frame_delay(const std::vector<int> &delays, const int frame) {
+    const auto at = static_cast<std::size_t>(frame);
+    const int delay = at < delays.size() ? delays.at(at) : 0;
 
-        try {
-            // Sequential, so the frames stream through one by one and the strip never decodes whole up front.
-            VImage strip = VImage::new_from_file(file.string().c_str(),
-                                                 VImage::option()->set("n", -1)->set("access", VIPS_ACCESS_SEQUENTIAL));
-            const int height = vips_image_get_page_height(strip.get_image());
-            const int frames = strip.height() / height;
-            const std::vector<int> delays =
-                    strip.get_typeof("delay") != 0 ? strip.get_array_int("delay") : std::vector<int>{};
-            const int factor = frame_shrink(strip.width(), height, frames, maxBytes);
-            const Tone::Source source = Vips::container_tone(file);
-            std::vector<Frame> held;
+    return delay <= SHORTEST_DELAY ? DEFAULT_DELAY : delay;
+}
+}
 
-            held.reserve(static_cast<std::size_t>(frames));
+bool Decode::load_frames(const std::filesystem::path &file,
+                         const std::size_t maxBytes,
+                         std::vector<Frame> *out,
+                         std::string *error,
+                         Abort *abort) {
+    Vips::ensure();
 
-            for (int frame = 0; frame < frames; ++frame) {
-                if (aborted(abort)) {
-                    fail(error, file, "aborted");
+    const Vips::ErrorMark mark;
 
-                    return false;
-                }
+    try {
+        // Sequential, so the frames stream through one by one and the strip never decodes whole up front.
+        VImage strip = VImage::new_from_file(file.string().c_str(),
+                                             VImage::option()->set("n", -1)->set("access", VIPS_ACCESS_SEQUENTIAL));
+        const int height = vips_image_get_page_height(strip.get_image());
+        const int frames = strip.height() / height;
+        const std::vector<int> delays =
+                strip.get_typeof("delay") != 0 ? strip.get_array_int("delay") : std::vector<int>{};
+        const int factor = frame_shrink(strip.width(), height, frames, maxBytes);
+        const Tone::Source source = Vips::container_tone(file);
+        std::vector<Frame> held;
 
-                VImage page = strip.crop(0, frame * height, strip.width(), height);
+        held.reserve(static_cast<std::size_t>(frames));
 
-                if (factor > 1) {
-                    page = page.shrink(factor, factor);
-                }
+        for (int frame = 0; frame < frames; ++frame) {
+            if (aborted(abort)) {
+                fail(error, file, "aborted");
 
-                Frame next;
-
-                if (!Vips::write_rgba(Vips::prepare(page, source), &next.bitmap, abort)) {
-                    fail(error, file, mark.since());
-
-                    return false;
-                }
-
-                next.delay = frame_delay(delays, frame);
-                held.push_back(std::move(next));
+                return false;
             }
 
-            *out = std::move(held);
+            VImage page = strip.crop(0, frame * height, strip.width(), height);
 
-            return true;
-        } catch (const vips::VError &thrown) {
-            if (abort != nullptr) {
-                abort->disarm();
+            if (factor > 1) {
+                page = page.shrink(factor, factor);
             }
 
-            fail(error, file, mark.since(thrown));
+            Frame next;
 
-            return false;
+            if (!Vips::write_rgba(Vips::prepare(page, source), &next.bitmap, abort)) {
+                fail(error, file, mark.since());
+
+                return false;
+            }
+
+            next.delay = frame_delay(delays, frame);
+            held.push_back(std::move(next));
         }
+
+        *out = std::move(held);
+
+        return true;
+    } catch (const vips::VError &thrown) {
+        if (abort != nullptr) {
+            abort->disarm();
+        }
+
+        fail(error, file, mark.since(thrown));
+
+        return false;
     }
+}
 }

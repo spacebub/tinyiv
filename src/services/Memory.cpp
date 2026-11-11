@@ -27,49 +27,49 @@
 #include "services/Memory.h"
 
 namespace tiv {
-    void Memory::give_back() {
+void Memory::give_back() {
 #ifdef __GLIBC__
-        malloc_trim(0);
+    malloc_trim(0);
 #endif
-    }
+}
 
-    void Memory::lean() {
+void Memory::lean() {
 #ifdef __GLIBC__
-        // The glibc default, held there. Otherwise it rises to the largest block freed, and tiles and
-        // bands below it stay in the heap once freed.
-        constexpr int MMAP_THRESHOLD = 128 * 1024;
+    // The glibc default, held there. Otherwise it rises to the largest block freed, and tiles and
+    // bands below it stay in the heap once freed.
+    constexpr int MMAP_THRESHOLD = 128 * 1024;
 
-        // NOLINTNEXTLINE(concurrency-mt-unsafe): called before any thread starts.
-        mallopt(M_MMAP_THRESHOLD, MMAP_THRESHOLD);
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): called before any thread starts.
+    mallopt(M_MMAP_THRESHOLD, MMAP_THRESHOLD);
 #endif
-    }
+}
 
-    std::uint64_t Memory::available() {
-        constexpr std::uint64_t MIB = std::uint64_t{1024} * 1024;
+std::uint64_t Memory::available() {
+    constexpr std::uint64_t MIB = std::uint64_t{1024} * 1024;
 #ifdef _WIN32
-        MEMORYSTATUSEX status{};
+    MEMORYSTATUSEX status{};
 
-        status.dwLength = sizeof status;
+    status.dwLength = sizeof status;
 
-        if (GlobalMemoryStatusEx(&status) != 0) {
-            return status.ullAvailPhys;
-        }
+    if (GlobalMemoryStatusEx(&status) != 0) {
+        return status.ullAvailPhys;
+    }
 #else
 #ifdef __linux__
-        // In kB: https://docs.kernel.org/filesystems/proc.html#meminfo
-        std::ifstream meminfo("/proc/meminfo");
-        std::string name;
-        std::uint64_t amount = 0;
-        std::string unit;
+    // In kB: https://docs.kernel.org/filesystems/proc.html#meminfo
+    std::ifstream meminfo("/proc/meminfo");
+    std::string name;
+    std::uint64_t amount = 0;
+    std::string unit;
 
-        while (meminfo >> name >> amount >> unit) {
-            if (name == "MemAvailable:") {
-                return amount * 1024;
-            }
+    while (meminfo >> name >> amount >> unit) {
+        if (name == "MemAvailable:") {
+            return amount * 1024;
         }
+    }
 #endif
 #endif
 
-        return static_cast<std::uint64_t>(SDL_GetSystemRAM()) * MIB;
-    }
+    return static_cast<std::uint64_t>(SDL_GetSystemRAM()) * MIB;
+}
 }

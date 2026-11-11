@@ -26,366 +26,363 @@
 #include "gallery/Folder.h"
 
 namespace tiv {
-    namespace {
-        constexpr std::string_view BLANKS = " \t";
+namespace {
+constexpr std::string_view BLANKS = " \t";
 
-        std::filesystem::path from_utf8(const std::string_view text) {
-            return std::u8string(text.begin(), text.end());
-        }
+std::filesystem::path from_utf8(const std::string_view text) {
+    return std::u8string(text.begin(), text.end());
+}
 
-        std::filesystem::path environment(const char *name) {
-            const char *value = SDL_getenv(name);
+std::filesystem::path environment(const char *name) {
+    const char *value = SDL_getenv(name);
 
-            return value != nullptr && *value != '\0' ? from_utf8(value) : std::filesystem::path{};
-        }
+    return value != nullptr && *value != '\0' ? from_utf8(value) : std::filesystem::path{};
+}
 
-        std::filesystem::path home() {
+std::filesystem::path home() {
 #ifdef _WIN32
-            return environment("USERPROFILE");
+    return environment("USERPROFILE");
 #else
-            return environment("HOME");
+    return environment("HOME");
 #endif
-        }
+}
 
-        std::string_view trimmed(std::string_view text) {
-            const std::size_t first = text.find_first_not_of(BLANKS);
+std::string_view trimmed(std::string_view text) {
+    const std::size_t first = text.find_first_not_of(BLANKS);
 
-            if (first == std::string_view::npos) {
-                return {};
-            }
+    if (first == std::string_view::npos) {
+        return {};
+    }
 
-            text.remove_prefix(first);
-            text.remove_suffix(text.size() - text.find_last_not_of(BLANKS) - 1);
+    text.remove_prefix(first);
+    text.remove_suffix(text.size() - text.find_last_not_of(BLANKS) - 1);
 
-            return text;
-        }
+    return text;
+}
 
-        // Quotes are optional, for those who write a path with spaces the way a shell wants it.
-        std::string_view unquoted(const std::string_view text) {
-            if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
-                return text.substr(1, text.size() - 2);
-            }
+// Quotes are optional, for those who write a path with spaces the way a shell wants it.
+std::string_view unquoted(const std::string_view text) {
+    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+        return text.substr(1, text.size() - 2);
+    }
 
-            return text;
-        }
+    return text;
+}
 
-        struct OrderName {
-            std::string_view name;
-            Folder::Order order;
-        };
+struct OrderName {
+    std::string_view name;
+    Folder::Order order;
+};
 
-        constexpr std::array ORDER_NAMES{
-                OrderName{.name = "a-z", .order = Folder::Order::AToZ},
-                OrderName{.name = "z-a", .order = Folder::Order::ZToA},
-                OrderName{.name = "newest", .order = Folder::Order::Newest},
-                OrderName{.name = "oldest", .order = Folder::Order::Oldest},
-                OrderName{.name = "size", .order = Folder::Order::Smallest},
-        };
+constexpr std::array ORDER_NAMES{
+        OrderName{.name = "a-z", .order = Folder::Order::AToZ},
+        OrderName{.name = "z-a", .order = Folder::Order::ZToA},
+        OrderName{.name = "newest", .order = Folder::Order::Newest},
+        OrderName{.name = "oldest", .order = Folder::Order::Oldest},
+        OrderName{.name = "size", .order = Folder::Order::Smallest},
+};
 
-        struct AwakeName {
-            std::string_view name;
-            Config::KeepAwake awake;
-        };
+struct AwakeName {
+    std::string_view name;
+    Config::KeepAwake awake;
+};
 
-        constexpr std::array AWAKE_NAMES{
-                AwakeName{.name = "always", .awake = Config::KeepAwake::Always},
-                AwakeName{.name = "fullscreen", .awake = Config::KeepAwake::Fullscreen},
-                AwakeName{.name = "never", .awake = Config::KeepAwake::Never},
-        };
+constexpr std::array AWAKE_NAMES{
+        AwakeName{.name = "always", .awake = Config::KeepAwake::Always},
+        AwakeName{.name = "fullscreen", .awake = Config::KeepAwake::Fullscreen},
+        AwakeName{.name = "never", .awake = Config::KeepAwake::Never},
+};
 
-        constexpr int MIN_HDR_WHITE = 50;
-        constexpr int MAX_HDR_WHITE = 1000;
+constexpr int MIN_HDR_WHITE = 50;
+constexpr int MAX_HDR_WHITE = 1000;
 
-        std::filesystem::path expanded(const std::string_view text) {
-            if (text == "~") {
-                return home();
-            }
+std::filesystem::path expanded(const std::string_view text) {
+    if (text == "~") {
+        return home();
+    }
 
-            if (text.starts_with("~/") || text.starts_with("~\\")) {
-                return home() / from_utf8(text.substr(2));
-            }
+    if (text.starts_with("~/") || text.starts_with("~\\")) {
+        return home() / from_utf8(text.substr(2));
+    }
 
-            return from_utf8(text);
-        }
+    return from_utf8(text);
+}
 
-        struct Setting {
-            std::string_view key;
-            // The description and default line of the key, as written into a file that lacks it.
-            std::string_view text;
-            // False when the value is not one the key takes.
-            bool (*apply)(Config &config, std::string_view value);
-        };
+struct Setting {
+    std::string_view key;
+    // The description and default line of the key, as written into a file that lacks it.
+    std::string_view text;
+    // False when the value is not one the key takes.
+    bool (*apply)(Config &config, std::string_view value);
+};
 
-        // Each line scans this in order. That takes nanoseconds at any count a person edits by hand.
-        constexpr std::array SETTINGS{
-                Setting{
-                        .key = "cache",
-                        .text = "# Folder for the tile caches. Leave it empty to keep each cache in a\n"
-                                "# tinyiv-cache folder next to the image. A relative path starts from the folder\n"
-                                "# of the image, and ~ means your home folder.\n"
-                                "cache =\n",
-                        .apply =
-                                [](Config &config, const std::string_view value) {
-                                    config.cache = expanded(value);
+// Each line scans this in order. That takes nanoseconds at any count a person edits by hand.
+constexpr std::array SETTINGS{
+        Setting{
+                .key = "cache",
+                .text = "# Folder for the tile caches. Leave it empty to keep each cache in a\n"
+                        "# tinyiv-cache folder next to the image. A relative path starts from the folder\n"
+                        "# of the image, and ~ means your home folder.\n"
+                        "cache =\n",
+                .apply =
+                        [](Config &config, const std::string_view value) {
+                            config.cache = expanded(value);
 
-                                    return true;
-                                },
-                },
-                Setting{
-                        .key = "cache_mode",
-                        .text = "# How huge PNGs are cached, fast or small. Fast stores every tile, so panning is\n"
-                                "# instant. Small stores only the points where decoding can resume. It takes\n"
-                                "# about a third of the space, but panning at full size waits a few tens of\n"
-                                "# milliseconds for each band of rows. The mode applies to new caches only.\n"
-                                "# Existing caches keep working in either mode. Shift+R rebuilds the cache of\n"
-                                "# the image on screen in this mode.\n"
-                                "cache_mode = fast\n",
-                        .apply =
-                                [](Config &config, const std::string_view value) {
-                                    config.small = value == "small";
+                            return true;
+                        },
+        },
+        Setting{
+                .key = "cache_mode",
+                .text = "# How huge PNGs are cached, fast or small. Fast stores every tile, so panning is\n"
+                        "# instant. Small stores only the points where decoding can resume. It takes\n"
+                        "# about a third of the space, but panning at full size waits a few tens of\n"
+                        "# milliseconds for each band of rows. The mode applies to new caches only.\n"
+                        "# Existing caches keep working in either mode. Shift+R rebuilds the cache of\n"
+                        "# the image on screen in this mode.\n"
+                        "cache_mode = fast\n",
+                .apply =
+                        [](Config &config, const std::string_view value) {
+                            config.small = value == "small";
 
-                                    return value == "small" || value == "fast";
-                                },
-                },
-                Setting{
-                        .key = "streaming_mode",
-                        .text = "# Whether streaming mode is on when tinyiv starts, on or off. S switches it while\n"
-                                "# tinyiv runs. Images too large for memory always stream.\n"
-                                "streaming_mode = off\n",
-                        .apply =
-                                [](Config &config, const std::string_view value) {
-                                    config.streaming = value == "on";
+                            return value == "small" || value == "fast";
+                        },
+        },
+        Setting{
+                .key = "streaming_mode",
+                .text = "# Whether streaming mode is on when tinyiv starts, on or off. S switches it while\n"
+                        "# tinyiv runs. Images too large for memory always stream.\n"
+                        "streaming_mode = off\n",
+                .apply =
+                        [](Config &config, const std::string_view value) {
+                            config.streaming = value == "on";
 
-                                    return value == "on" || value == "off";
-                                },
-                },
-                Setting{
-                        .key = "persist_streams",
-                        .text = "# Whether streamed images that fit in memory also keep their tiles on disk, on\n"
-                                "# or off. Off caches only images too large for memory. On caches every streamed\n"
-                                "# image, so it opens at once the next time.\n"
-                                "persist_streams = off\n",
-                        .apply =
-                                [](Config &config, const std::string_view value) {
-                                    config.persist = value == "on";
+                            return value == "on" || value == "off";
+                        },
+        },
+        Setting{
+                .key = "persist_streams",
+                .text = "# Whether streamed images that fit in memory also keep their tiles on disk, on\n"
+                        "# or off. Off caches only images too large for memory. On caches every streamed\n"
+                        "# image, so it opens at once the next time.\n"
+                        "persist_streams = off\n",
+                .apply =
+                        [](Config &config, const std::string_view value) {
+                            config.persist = value == "on";
 
-                                    return value == "on" || value == "off";
-                                },
-                },
-                Setting{
-                        .key = "memory_mode",
-                        .text = "# How tinyiv uses memory: speed or footprint. Speed decodes the images around\n"
-                                "# the current one ahead of time, so stepping through a folder is instant.\n"
-                                "# Footprint keeps only what is on screen. Every image streams, and tiles leave\n"
-                                "# memory once drawn. PNGs, TIFFs and non-progressive JPEGs are read again from\n"
-                                "# the file at full size instead of kept. Nothing is written to disk unless\n"
-                                "# streaming mode is on. Each step and zoom waits for decoding.\n"
-                                "memory_mode = speed\n",
-                        .apply =
-                                [](Config &config, const std::string_view value) {
-                                    config.footprint = value == "footprint";
+                            return value == "on" || value == "off";
+                        },
+        },
+        Setting{
+                .key = "memory_mode",
+                .text = "# How tinyiv uses memory: speed or footprint. Speed decodes the images around\n"
+                        "# the current one ahead of time, so stepping through a folder is instant.\n"
+                        "# Footprint keeps only what is on screen. Every image streams, and tiles leave\n"
+                        "# memory once drawn. PNGs, TIFFs and non-progressive JPEGs are read again from\n"
+                        "# the file at full size instead of kept. Nothing is written to disk unless\n"
+                        "# streaming mode is on. Each step and zoom waits for decoding.\n"
+                        "memory_mode = speed\n",
+                .apply =
+                        [](Config &config, const std::string_view value) {
+                            config.footprint = value == "footprint";
 
-                                    return value == "speed" || value == "footprint";
-                                },
-                },
-                Setting{
-                        .key = "sort",
-                        .text = "# The order of the images in a folder: a-z, z-a, newest, oldest or size. Newest\n"
-                                "# and oldest go by the last modified time. Size puts the smallest first. O\n"
-                                "# switches the order while tinyiv runs and leaves this file unchanged.\n"
-                                "sort = a-z\n",
-                        .apply =
-                                [](Config &config, const std::string_view value) {
-                                    const auto *const found = std::ranges::find(ORDER_NAMES, value, &OrderName::name);
+                            return value == "speed" || value == "footprint";
+                        },
+        },
+        Setting{
+                .key = "sort",
+                .text = "# The order of the images in a folder: a-z, z-a, newest, oldest or size. Newest\n"
+                        "# and oldest go by the last modified time. Size puts the smallest first. O\n"
+                        "# switches the order while tinyiv runs and leaves this file unchanged.\n"
+                        "sort = a-z\n",
+                .apply =
+                        [](Config &config, const std::string_view value) {
+                            const auto *const found = std::ranges::find(ORDER_NAMES, value, &OrderName::name);
 
-                                    if (found == ORDER_NAMES.end()) {
-                                        return false;
-                                    }
+                            if (found == ORDER_NAMES.end()) {
+                                return false;
+                            }
 
-                                    config.order = found->order;
+                            config.order = found->order;
 
-                                    return true;
-                                },
-                },
-                Setting{
-                        .key = "prevent_sleep",
-                        .text = "# When tinyiv prevents sleep: always, fullscreen or never.\n"
-                                "prevent_sleep = fullscreen\n",
-                        .apply =
-                                [](Config &config, const std::string_view value) {
-                                    const auto *const found = std::ranges::find(AWAKE_NAMES, value, &AwakeName::name);
+                            return true;
+                        },
+        },
+        Setting{
+                .key = "prevent_sleep",
+                .text = "# When tinyiv prevents sleep: always, fullscreen or never.\n"
+                        "prevent_sleep = fullscreen\n",
+                .apply =
+                        [](Config &config, const std::string_view value) {
+                            const auto *const found = std::ranges::find(AWAKE_NAMES, value, &AwakeName::name);
 
-                                    if (found == AWAKE_NAMES.end()) {
-                                        return false;
-                                    }
+                            if (found == AWAKE_NAMES.end()) {
+                                return false;
+                            }
 
-                                    config.awake = found->awake;
+                            config.awake = found->awake;
 
-                                    return true;
-                                },
-                },
-                Setting{
-                        .key = "hdr_white",
-                        .text = "# How bright the white of an HDR image shows on an HDR display, in nits, from\n"
-                                "# 50 to 1000. Lower leaves more room for highlights, higher makes the whole\n"
-                                "# image brighter.\n"
-                                "hdr_white = 100\n",
-                        .apply =
-                                [](Config &config, const std::string_view value) {
-                                    int nits = 0;
-                                    const char *const last = std::to_address(value.end());
-                                    const auto [end, failure] =
-                                            std::from_chars(std::to_address(value.begin()), last, nits);
+                            return true;
+                        },
+        },
+        Setting{
+                .key = "hdr_white",
+                .text = "# How bright the white of an HDR image shows on an HDR display, in nits, from\n"
+                        "# 50 to 1000. Lower leaves more room for highlights, higher makes the whole\n"
+                        "# image brighter.\n"
+                        "hdr_white = 100\n",
+                .apply =
+                        [](Config &config, const std::string_view value) {
+                            int nits = 0;
+                            const char *const last = std::to_address(value.end());
+                            const auto [end, failure] = std::from_chars(std::to_address(value.begin()), last, nits);
 
-                                    if (failure != std::errc{} || end != last || nits < MIN_HDR_WHITE
-                                        || nits > MAX_HDR_WHITE) {
-                                        return false;
-                                    }
+                            if (failure != std::errc{} || end != last || nits < MIN_HDR_WHITE || nits > MAX_HDR_WHITE) {
+                                return false;
+                            }
 
-                                    config.hdrWhite = nits;
+                            config.hdrWhite = nits;
 
-                                    return true;
-                                },
-                },
-        };
+                            return true;
+                        },
+        },
+};
 
-        const Setting *setting_for(const std::string_view key) {
-            for (const Setting &setting : SETTINGS) {
-                if (setting.key == key) {
-                    return &setting;
-                }
-            }
-
-            return nullptr;
-        }
-
-        // Every setting the file lacks goes at its end with its default, so all of them can be found
-        // there. A file that is not there yet is made with all of them.
-        void append_missing(const std::filesystem::path &file, const std::string_view text,
-                            const std::span<const bool> seen) {
-            if (std::ranges::all_of(seen, [](const bool found) { return found; })) {
-                return;
-            }
-
-            std::error_code failure;
-
-            std::filesystem::create_directories(file.parent_path(), failure);
-
-            std::ofstream out(file, std::ios::binary | std::ios::app);
-            bool first = text.empty();
-
-            if (!first && !text.ends_with('\n')) {
-                out << '\n';
-            }
-
-            for (std::size_t i = 0; i < SETTINGS.size(); ++i) {
-                if (!seen[i]) {
-                    out << (first ? "" : "\n") << SETTINGS.at(i).text;
-                    first = false;
-                }
-            }
+const Setting *setting_for(const std::string_view key) {
+    for (const Setting &setting : SETTINGS) {
+        if (setting.key == key) {
+            return &setting;
         }
     }
 
-    std::filesystem::path Config::location() {
-#ifdef _WIN32
-        // Beside the executable, which the installer puts in a per user folder that can be written.
-        const char *exe = SDL_GetBasePath();
+    return nullptr;
+}
 
-        return exe != nullptr ? from_utf8(exe) / "tinyiv.conf" : std::filesystem::path{};
-#else
-        std::filesystem::path base = environment("XDG_CONFIG_HOME");
-
-        if (base.empty() && !home().empty()) {
-            base = home() / ".config";
-        }
-
-        return base.empty() ? std::filesystem::path{} : base / "tinyiv" / "tinyiv.conf";
-#endif
+// Every setting the file lacks goes at its end with its default, so all of them can be found
+// there. A file that is not there yet is made with all of them.
+void append_missing(const std::filesystem::path &file, const std::string_view text, const std::span<const bool> seen) {
+    if (std::ranges::all_of(seen, [](const bool found) { return found; })) {
+        return;
     }
 
-    Config Config::load(const std::filesystem::path &file, std::vector<std::string> *warnings) {
-        Config config;
+    std::error_code failure;
 
-        if (file.empty()) {
-            return config;
+    std::filesystem::create_directories(file.parent_path(), failure);
+
+    std::ofstream out(file, std::ios::binary | std::ios::app);
+    bool first = text.empty();
+
+    if (!first && !text.ends_with('\n')) {
+        out << '\n';
+    }
+
+    for (std::size_t i = 0; i < SETTINGS.size(); ++i) {
+        if (!seen[i]) {
+            out << (first ? "" : "\n") << SETTINGS.at(i).text;
+            first = false;
         }
+    }
+}
+}
 
-        std::ifstream in(file, std::ios::binary | std::ios::ate);
+std::filesystem::path Config::location() {
+#ifdef _WIN32
+    // Beside the executable, which the installer puts in a per user folder that can be written.
+    const char *exe = SDL_GetBasePath();
 
-        if (!in) {
-            std::error_code failure;
+    return exe != nullptr ? from_utf8(exe) / "tinyiv.conf" : std::filesystem::path{};
+#else
+    std::filesystem::path base = environment("XDG_CONFIG_HOME");
 
-            if (!std::filesystem::exists(file, failure) && !failure) {
-                append_missing(file, {}, std::array<bool, SETTINGS.size()>{});
-            }
+    if (base.empty() && !home().empty()) {
+        base = home() / ".config";
+    }
 
-            return config;
+    return base.empty() ? std::filesystem::path{} : base / "tinyiv" / "tinyiv.conf";
+#endif
+}
+
+Config Config::load(const std::filesystem::path &file, std::vector<std::string> *warnings) {
+    Config config;
+
+    if (file.empty()) {
+        return config;
+    }
+
+    std::ifstream in(file, std::ios::binary | std::ios::ate);
+
+    if (!in) {
+        std::error_code failure;
+
+        if (!std::filesystem::exists(file, failure) && !failure) {
+            append_missing(file, {}, std::array<bool, SETTINGS.size()>{});
         }
-
-        // One read of the whole file, as it is opened at every start.
-        std::string text(static_cast<std::size_t>(std::max<std::streamoff>(in.tellg(), 0)), '\0');
-
-        in.seekg(0);
-        in.read(text.data(), static_cast<std::streamsize>(text.size()));
-        text.resize(static_cast<std::size_t>(std::max<std::streamsize>(in.gcount(), 0)));
-
-        const auto warn = [&](const int number, const std::string_view why) {
-            if (warnings != nullptr) {
-                warnings->push_back(std::format("{}:{}: {}", file.string(), number, why));
-            }
-        };
-
-        std::string_view rest = text;
-        int number = 0;
-        std::array<bool, SETTINGS.size()> seen{};
-
-        while (!rest.empty()) {
-            const std::size_t end = rest.find('\n');
-            std::string_view line = rest.substr(0, end);
-
-            rest.remove_prefix(end == std::string_view::npos ? rest.size() : end + 1);
-            ++number;
-
-            if (line.ends_with('\r')) {
-                line.remove_suffix(1);
-            }
-
-            line = trimmed(line);
-
-            if (line.empty() || line.starts_with('#')) {
-                continue;
-            }
-
-            const std::size_t equals = line.find('=');
-
-            if (equals == std::string_view::npos) {
-                warn(number, std::format("expected key = value, found \"{}\"", line));
-
-                continue;
-            }
-
-            const std::string_view key = trimmed(line.substr(0, equals));
-            const std::string_view value = unquoted(trimmed(line.substr(equals + 1)));
-            const Setting *setting = setting_for(key);
-
-            if (setting != nullptr) {
-                seen.at(static_cast<std::size_t>(setting - SETTINGS.data())) = true;
-            }
-
-            if (setting == nullptr) {
-                warn(number, std::format("unknown key \"{}\"", key));
-
-                continue;
-            }
-
-            if (!setting->apply(config, value)) {
-                warn(number, std::format("{} cannot be \"{}\"", key, value));
-            }
-        }
-
-        append_missing(file, text, seen);
 
         return config;
     }
+
+    // One read of the whole file, as it is opened at every start.
+    std::string text(static_cast<std::size_t>(std::max<std::streamoff>(in.tellg(), 0)), '\0');
+
+    in.seekg(0);
+    in.read(text.data(), static_cast<std::streamsize>(text.size()));
+    text.resize(static_cast<std::size_t>(std::max<std::streamsize>(in.gcount(), 0)));
+
+    const auto warn = [&](const int number, const std::string_view why) {
+        if (warnings != nullptr) {
+            warnings->push_back(std::format("{}:{}: {}", file.string(), number, why));
+        }
+    };
+
+    std::string_view rest = text;
+    int number = 0;
+    std::array<bool, SETTINGS.size()> seen{};
+
+    while (!rest.empty()) {
+        const std::size_t end = rest.find('\n');
+        std::string_view line = rest.substr(0, end);
+
+        rest.remove_prefix(end == std::string_view::npos ? rest.size() : end + 1);
+        ++number;
+
+        if (line.ends_with('\r')) {
+            line.remove_suffix(1);
+        }
+
+        line = trimmed(line);
+
+        if (line.empty() || line.starts_with('#')) {
+            continue;
+        }
+
+        const std::size_t equals = line.find('=');
+
+        if (equals == std::string_view::npos) {
+            warn(number, std::format("expected key = value, found \"{}\"", line));
+
+            continue;
+        }
+
+        const std::string_view key = trimmed(line.substr(0, equals));
+        const std::string_view value = unquoted(trimmed(line.substr(equals + 1)));
+        const Setting *setting = setting_for(key);
+
+        if (setting != nullptr) {
+            seen.at(static_cast<std::size_t>(setting - SETTINGS.data())) = true;
+        }
+
+        if (setting == nullptr) {
+            warn(number, std::format("unknown key \"{}\"", key));
+
+            continue;
+        }
+
+        if (!setting->apply(config, value)) {
+            warn(number, std::format("{} cannot be \"{}\"", key, value));
+        }
+    }
+
+    append_missing(file, text, seen);
+
+    return config;
+}
 }

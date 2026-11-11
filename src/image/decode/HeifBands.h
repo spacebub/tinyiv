@@ -20,51 +20,51 @@
 #include "image/decode/Decode.h"
 
 namespace tiv::Decode {
-    // A HEIF or AVIF image stored as a grid of separately coded tiles. Any band of rows decodes from the tiles
-    // it meets, and tiles decode side by side. libheif decodes each tile: https://github.com/strukturag/libheif
-    // (LGPL-3.0). Each thread gets a context, since one context does not decode tiles from several at once.
-    class HeifBands {
+// A HEIF or AVIF image stored as a grid of separately coded tiles. Any band of rows decodes from the tiles
+// it meets, and tiles decode side by side. libheif decodes each tile: https://github.com/strukturag/libheif
+// (LGPL-3.0). Each thread gets a context, since one context does not decode tiles from several at once.
+class HeifBands {
 
-    public:
-        // Null unless the primary image is a grid of more than one tile, 8 bits a sample, SDR,
-        // without alpha, and neither turned, mirrored nor cropped.
-        [[nodiscard]] static std::unique_ptr<HeifBands> open(const std::filesystem::path &file);
+public:
+    // Null unless the primary image is a grid of more than one tile, 8 bits a sample, SDR,
+    // without alpha, and neither turned, mirrored nor cropped.
+    [[nodiscard]] static std::unique_ptr<HeifBands> open(const std::filesystem::path &file);
 
-        ~HeifBands();
+    ~HeifBands();
 
-        HeifBands(const HeifBands &) = delete;
-        HeifBands(HeifBands &&) = delete;
-        HeifBands &operator=(const HeifBands &) = delete;
-        HeifBands &operator=(HeifBands &&) = delete;
+    HeifBands(const HeifBands &) = delete;
+    HeifBands(HeifBands &&) = delete;
+    HeifBands &operator=(const HeifBands &) = delete;
+    HeifBands &operator=(HeifBands &&) = delete;
 
-        [[nodiscard]] int width() const { return _width; }
-        [[nodiscard]] int height() const { return _height; }
+    [[nodiscard]] int width() const { return _width; }
+    [[nodiscard]] int height() const { return _height; }
 
-        // Count rows from top, or up to the bottom, as RGBA into out, which is as wide as the image.
-        // Uses up to threads threads.
-        bool decode(int top, int count, Bitmap *out, int threads, const Abort *abort) const;
+    // Count rows from top, or up to the bottom, as RGBA into out, which is as wide as the image.
+    // Uses up to threads threads.
+    bool decode(int top, int count, Bitmap *out, int threads, const Abort *abort) const;
 
-    private:
-        // A file read into libheif, and its primary image.
-        struct Opened;
+private:
+    // A file read into libheif, and its primary image.
+    struct Opened;
 
-        HeifBands() = default;
+    HeifBands() = default;
 
-        [[nodiscard]] std::unique_ptr<Opened> take() const;
-        void give(std::unique_ptr<Opened> opened) const;
-        bool read(const Opened &opened, int column, int row, int top, int bottom, Bitmap *out) const;
+    [[nodiscard]] std::unique_ptr<Opened> take() const;
+    void give(std::unique_ptr<Opened> opened) const;
+    bool read(const Opened &opened, int column, int row, int top, int bottom, Bitmap *out) const;
 
-        std::filesystem::path _file;
-        int _width = 0;
-        int _height = 0;
-        int _columns = 0;
-        int _rows = 0;
-        int _tileWidth = 0;
-        int _tileHeight = 0;
+    std::filesystem::path _file;
+    int _width = 0;
+    int _height = 0;
+    int _columns = 0;
+    int _rows = 0;
+    int _tileWidth = 0;
+    int _tileHeight = 0;
 
-        mutable std::mutex _guard;
-        mutable std::vector<std::unique_ptr<Opened>> _idle;
-    };
+    mutable std::mutex _guard;
+    mutable std::vector<std::unique_ptr<Opened>> _idle;
+};
 }
 
 

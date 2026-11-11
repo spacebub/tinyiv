@@ -17,36 +17,36 @@
 #include "image/Bitmap.h"
 
 namespace tiv {
-    // Averages blocks of factor by factor pixels as rows arrive, so a shrink costs its output
-    // plus one row of sums, whatever the size of the image. Rows are in the target's encoding.
-    class BoxShrink {
+// Averages blocks of factor by factor pixels as rows arrive, so a shrink costs its output
+// plus one row of sums, whatever the size of the image. Rows are in the target's encoding.
+class BoxShrink {
 
-    public:
-        // Rows arrive top first, from row from on, which is a multiple of factor. Height is
-        // the height of the whole image.
-        BoxShrink(int width, int height, int factor, Bitmap *target, int from = 0);
+public:
+    // Rows arrive top first, from row from on, which is a multiple of factor. Height is
+    // the height of the whole image.
+    BoxShrink(int width, int height, int factor, Bitmap *target, int from = 0);
 
-        // Rows arrive bottom first, from the last.
-        static BoxShrink upward(int width, int height, int factor, Bitmap *target);
+    // Rows arrive bottom first, from the last.
+    static BoxShrink upward(int width, int height, int factor, Bitmap *target);
 
-        void push(std::span<const std::uint8_t> row);
+    void push(std::span<const std::uint8_t> row);
 
-        // A row of transparent black, which costs nothing to add.
-        void skip();
+    // A row of transparent black, which costs nothing to add.
+    void skip();
 
-    private:
-        void push_pq(std::span<const std::uint8_t> row);
-        void advance();
+private:
+    void push_pq(std::span<const std::uint8_t> row);
+    void advance();
 
-        Bitmap *_target;
-        int _height;
-        int _factor;
-        int _y;
-        int _gathered = 0;
-        bool _upward = false;
-        std::vector<std::uint32_t> _sums;
-        std::vector<std::uint32_t> _counts;
-    };
+    Bitmap *_target;
+    int _height;
+    int _factor;
+    int _y;
+    int _gathered = 0;
+    bool _upward = false;
+    std::vector<std::uint32_t> _sums;
+    std::vector<std::uint32_t> _counts;
+};
 }
 
 

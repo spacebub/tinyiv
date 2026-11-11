@@ -17,29 +17,28 @@
 
 namespace tiv::Exif {
 
-    // Length bytes at the offset become the bytes given.
-    struct Splice {
-        std::size_t at = 0;
-        std::size_t length = 0;
-        std::vector<std::uint8_t> bytes;
-    };
+// Length bytes at the offset become the bytes given.
+struct Splice {
+    std::size_t at = 0;
+    std::size_t length = 0;
+    std::vector<std::uint8_t> bytes;
+};
 
-    // The orientation tag of a TIFF header block, 1 to 8, with 1 for anything missing or
-    // malformed. A leading "Exif\0\0", as JPEG carries it, is skipped.
-    // Spec: EXIF 2.32 (CIPA DC-008), section 4.6.4, tag 0x0112.
-    [[nodiscard]] int orientation(std::span<const std::uint8_t> block);
+// The orientation tag of a TIFF header block, 1 to 8, with 1 for anything missing or
+// malformed. A leading "Exif\0\0", as JPEG carries it, is skipped.
+// Spec: EXIF 2.32 (CIPA DC-008), section 4.6.4, tag 0x0112.
+[[nodiscard]] int orientation(std::span<const std::uint8_t> block);
 
-    // Splices that make IFD0 say the orientation. A tag already there is patched. Otherwise IFD0 is copied to
-    // the end with the tag added, and writing 1 later restores the same bytes. False when the block is not TIFF
-    // or the tag is not a single SHORT: https://www.itu.int/itudoc/itu-t/com16/tiff-fx/docs/tiff6.pdf, section 2.
-    bool orient(std::span<const std::uint8_t> block, int orientation, std::vector<Splice> *out);
+// Splices that make IFD0 say the orientation. A tag already there is patched. Otherwise IFD0 is copied to
+// the end with the tag added, and writing 1 later restores the same bytes. False when the block is not TIFF
+// or the tag is not a single SHORT: https://www.itu.int/itudoc/itu-t/com16/tiff-fx/docs/tiff6.pdf, section 2.
+bool orient(std::span<const std::uint8_t> block, int orientation, std::vector<Splice> *out);
 
-    // The smallest TIFF header block that holds the orientation.
-    [[nodiscard]] std::vector<std::uint8_t> minimal(int orientation);
+// The smallest TIFF header block that holds the orientation.
+[[nodiscard]] std::vector<std::uint8_t> minimal(int orientation);
 
-    // Splices are sorted and do not overlap.
-    [[nodiscard]] std::vector<std::uint8_t> apply(std::span<const std::uint8_t> data,
-                                                  const std::vector<Splice> &splices);
+// Splices are sorted and do not overlap.
+[[nodiscard]] std::vector<std::uint8_t> apply(std::span<const std::uint8_t> data, const std::vector<Splice> &splices);
 
 }
 

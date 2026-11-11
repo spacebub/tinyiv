@@ -21,36 +21,36 @@
 #include "image/decode/Decode.h"
 
 namespace {
-    int run(int argc, char **argv) {
-        const std::filesystem::path dir = std::filesystem::current_path() / "corpus";
+int run(int argc, char **argv) {
+    const std::filesystem::path dir = std::filesystem::current_path() / "corpus";
 
-        std::println(stderr, "corpus: {}", dir.string());
-        bench::Corpus::prepare(dir);
+    std::println(stderr, "corpus: {}", dir.string());
+    bench::Corpus::prepare(dir);
 
-        bench::register_bitmap();
-        bench::register_bmp();
-        bench::register_jpeg_bands();
-        bench::register_decode();
-        bench::register_pyramid();
-        bench::register_tile_cache();
-        bench::register_upload();
-        bench::register_loader();
-        bench::register_startup();
+    bench::register_bitmap();
+    bench::register_bmp();
+    bench::register_jpeg_bands();
+    bench::register_decode();
+    bench::register_pyramid();
+    bench::register_tile_cache();
+    bench::register_upload();
+    bench::register_loader();
+    bench::register_startup();
 
-        benchmark::Initialize(&argc, argv);
+    benchmark::Initialize(&argc, argv);
 
-        if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
-            return 1;
-        }
-
-        benchmark::RunSpecifiedBenchmarks();
-        benchmark::Shutdown();
-
-        bench::Headless::shutdown();
-        tiv::Decode::shutdown();
-
-        return 0;
+    if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
+        return 1;
     }
+
+    benchmark::RunSpecifiedBenchmarks();
+    benchmark::Shutdown();
+
+    bench::Headless::shutdown();
+    tiv::Decode::shutdown();
+
+    return 0;
+}
 }
 
 int main(int argc, char **argv) {

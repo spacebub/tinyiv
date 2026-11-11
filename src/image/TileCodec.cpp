@@ -22,307 +22,337 @@
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic): planes and rows are walked by offset.
 namespace tiv::TileCodec {
-    namespace {
-        enum class Mode : std::uint8_t {
-            Planes = 0,
-            Palette = 1,
-        };
+namespace {
+enum class Mode : std::uint8_t {
+    Planes = 0,
+    Palette = 1,
+};
 
-        // zstd's fastest level that keeps most of the ratio.
-        constexpr int ZSTD_LEVEL = 1;
-        constexpr std::size_t MAX_COLOURS = 256;
-        // Twice the colours, so probing stays short.
-        constexpr std::size_t SLOTS = 512;
-        constexpr std::uint32_t OPAQUE = 0xFF000000U;
+// zstd's fastest level that keeps most of the ratio.
+constexpr int ZSTD_LEVEL = 1;
+constexpr std::size_t MAX_COLOURS = 256;
+// Twice the colours, so probing stays short.
+constexpr std::size_t SLOTS = 512;
+constexpr std::uint32_t OPAQUE = 0xFF000000U;
 
-        [[nodiscard]] std::size_t filter_bytes(const int height) {
-            return (static_cast<std::size_t>(height) + 7) / 8;
-        }
+[[nodiscard]] std::size_t filter_bytes(const int height) {
+    return (static_cast<std::size_t>(height) + 7) / 8;
+}
 
-        // Resizing down then up again would zero the regrown bytes, which every caller overwrites.
-        void grow(std::vector<std::uint8_t> &buffer, const std::size_t size) {
-            if (buffer.size() < size) {
-                buffer.resize(size);
-            }
-        }
+// Resizing down then up again would zero the regrown bytes, which every caller overwrites.
+void grow(std::vector<std::uint8_t> &buffer, const std::size_t size) {
+    if (buffer.size() < size) {
+        buffer.resize(size);
+    }
+}
 
-        [[nodiscard]] bool green_apart(const int channels, const Bitmap::Encoding encoding) {
-            return channels >= 3 && encoding == Bitmap::Encoding::Srgb;
-        }
+[[nodiscard]] bool green_apart(const int channels, const Bitmap::Encoding encoding) {
+    return channels >= 3 && encoding == Bitmap::Encoding::Srgb;
+}
 
-        // The colours of the tile and each pixel's index into them, or false past MAX_COLOURS.
-        bool count_colours(const std::uint8_t *rows, const std::size_t pitch, const int width, const int height,
-                           std::vector<std::uint32_t> &colours, std::vector<std::uint8_t> &indices) {
-            std::array<std::uint32_t, SLOTS> keys{};
-            std::array<std::int16_t, SLOTS> slots{};
+// The colours of the tile and each pixel's index into them, or false past MAX_COLOURS.
+bool count_colours(const std::uint8_t *rows,
+                   const std::size_t pitch,
+                   const int width,
+                   const int height,
+                   std::vector<std::uint32_t> &colours,
+                   std::vector<std::uint8_t> &indices) {
+    std::array<std::uint32_t, SLOTS> keys{};
+    std::array<std::int16_t, SLOTS> slots{};
 
-            slots.fill(-1);
-            colours.clear();
-            grow(indices, static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    slots.fill(-1);
+    colours.clear();
+    grow(indices, static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
 
-            std::uint8_t *index = indices.data();
+    std::uint8_t *index = indices.data();
 
-            for (int y = 0; y < height; ++y) {
-                const std::uint8_t *row = rows + (pitch * static_cast<std::size_t>(y));
+    for (int y = 0; y < height; ++y) {
+        const std::uint8_t *row = rows + (pitch * static_cast<std::size_t>(y));
 
-                for (int x = 0; x < width; ++x) {
-                    std::uint32_t colour = 0;
+        for (int x = 0; x < width; ++x) {
+            std::uint32_t colour = 0;
 
-                    std::memcpy(&colour, row + (static_cast<std::size_t>(x) * Bitmap::CHANNELS), sizeof colour);
+            std::memcpy(&colour, row + (static_cast<std::size_t>(x) * Bitmap::CHANNELS), sizeof colour);
 
-                    // Fibonacci hashing, the top bits of the product.
-                    std::size_t slot = (colour * 2654435761U) >> 23U;
+            // Fibonacci hashing, the top bits of the product.
+            std::size_t slot = (colour * 2654435761U) >> 23U;
 
-                    while (slots.at(slot) >= 0 && keys.at(slot) != colour) {
-                        slot = (slot + 1) % SLOTS;
-                    }
-
-                    if (slots.at(slot) < 0) {
-                        if (colours.size() == MAX_COLOURS) {
-                            return false;
-                        }
-
-                        keys.at(slot) = colour;
-                        slots.at(slot) = static_cast<std::int16_t>(colours.size());
-                        colours.push_back(colour);
-                    }
-
-                    *index++ = static_cast<std::uint8_t>(slots.at(slot));
-                }
+            while (slots.at(slot) >= 0 && keys.at(slot) != colour) {
+                slot = (slot + 1) % SLOTS;
             }
 
-            return true;
-        }
-
-        // RGBA rows into planes of the channels, red and blue less green when it is apart.
-        void split(const std::uint8_t *rows, const std::size_t pitch, const std::size_t width, const int height,
-                   const std::size_t channels, const bool green, std::uint8_t *planes) {
-            const std::size_t area = width * static_cast<std::size_t>(height);
-
-            for (int y = 0; y < height; ++y) {
-                const std::size_t line = static_cast<std::size_t>(y) * width;
-
-                Channels::deinterleave(rows + (pitch * static_cast<std::size_t>(y)), width, green, planes + line,
-                                       planes + area + line, planes + (2 * area) + line,
-                                       channels == Bitmap::CHANNELS ? planes + (3 * area) + line : nullptr);
-            }
-        }
-
-        // One row of every plane less the row above, and less its left neighbour too when that
-        // leaves less. True when it does.
-        bool filter_row(const std::uint8_t *planes, const std::size_t width, const std::size_t area, const int y,
-                        const std::size_t channels, std::uint8_t *residuals) {
-            const std::size_t line = static_cast<std::size_t>(y) * width;
-            std::uint64_t up = 0;
-            std::uint64_t gradient = 0;
-
-            for (std::size_t c = 0; c < channels; ++c) {
-                const std::uint8_t *plane = planes + (c * area) + line;
-                std::uint8_t *out = residuals + (c * area) + line;
-
-                if (y > 0) {
-                    Channels::difference(plane, plane - width, out, width);
-                } else {
-                    std::memcpy(out, plane, width);
+            if (slots.at(slot) < 0) {
+                if (colours.size() == MAX_COLOURS) {
+                    return false;
                 }
 
-                Channels::magnitudes(out, width, &up, &gradient);
+                keys.at(slot) = colour;
+                slots.at(slot) = static_cast<std::int16_t>(colours.size());
+                colours.push_back(colour);
             }
 
-            if (gradient >= up) {
-                return false;
-            }
-
-            for (std::size_t c = 0; c < channels; ++c) {
-                Channels::slope(residuals + (c * area) + line, width);
-            }
-
-            return true;
+            *index++ = static_cast<std::uint8_t>(slots.at(slot));
         }
     }
 
-    void ContextFree::operator()(ZSTD_CCtx *context) const {
-        ZSTD_freeCCtx(context);
+    return true;
+}
+
+// RGBA rows into planes of the channels, red and blue less green when it is apart.
+void split(const std::uint8_t *rows,
+           const std::size_t pitch,
+           const std::size_t width,
+           const int height,
+           const std::size_t channels,
+           const bool green,
+           std::uint8_t *planes) {
+    const std::size_t area = width * static_cast<std::size_t>(height);
+
+    for (int y = 0; y < height; ++y) {
+        const std::size_t line = static_cast<std::size_t>(y) * width;
+
+        Channels::deinterleave(rows + (pitch * static_cast<std::size_t>(y)),
+                               width,
+                               green,
+                               planes + line,
+                               planes + area + line,
+                               planes + (2 * area) + line,
+                               channels == Bitmap::CHANNELS ? planes + (3 * area) + line : nullptr);
     }
+}
 
-    void ContextFree::operator()(ZSTD_DCtx *context) const {
-        ZSTD_freeDCtx(context);
-    }
+// One row of every plane less the row above, and less its left neighbour too when that
+// leaves less. True when it does.
+bool filter_row(const std::uint8_t *planes,
+                const std::size_t width,
+                const std::size_t area,
+                const int y,
+                const std::size_t channels,
+                std::uint8_t *residuals) {
+    const std::size_t line = static_cast<std::size_t>(y) * width;
+    std::uint64_t up = 0;
+    std::uint64_t gradient = 0;
 
-    std::size_t bound(const int width, const int height, const int channels) {
-        const std::size_t area = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-        const std::size_t head = 2 + std::max(filter_bytes(height), MAX_COLOURS * sizeof(std::uint32_t));
+    for (std::size_t c = 0; c < channels; ++c) {
+        const std::uint8_t *plane = planes + (c * area) + line;
+        std::uint8_t *out = residuals + (c * area) + line;
 
-        return head + ZSTD_compressBound(area * static_cast<std::size_t>(channels));
-    }
-
-    Encoder::Encoder() : _context(ZSTD_createCCtx()) {
-    }
-
-    std::span<const std::uint8_t> Encoder::encode(const std::uint8_t *rows, const std::size_t pitch, const int width,
-                                                  const int height, const int channels,
-                                                  const Bitmap::Encoding encoding) {
-        if (_context == nullptr) {
-            return {};
+        if (y > 0) {
+            Channels::difference(plane, plane - width, out, width);
+        } else {
+            std::memcpy(out, plane, width);
         }
 
-        const std::span<const std::uint8_t> filtered = planes(rows, pitch, width, height, channels, encoding);
-
-        // Few colours can still be a smooth ramp the filters do better on, so both are tried.
-        if (count_colours(rows, pitch, width, height, _colours, _indices)) {
-            const std::span<const std::uint8_t> indexed =
-                    palette(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
-
-            if (!indexed.empty() && (filtered.empty() || indexed.size() < filtered.size())) {
-                return indexed;
-            }
-        }
-
-        return filtered;
+        Channels::magnitudes(out, width, &up, &gradient);
     }
 
-    std::span<const std::uint8_t> Encoder::planes(const std::uint8_t *rows, const std::size_t pitch, const int width,
-                                                  const int height, const int channels,
-                                                  const Bitmap::Encoding encoding) {
-        const auto w = static_cast<std::size_t>(width);
-        const std::size_t area = w * static_cast<std::size_t>(height);
-        const auto count = static_cast<std::size_t>(channels);
-        const std::size_t head = 1 + filter_bytes(height);
-        const std::size_t size = area * count;
-        const std::size_t room = ZSTD_compressBound(size);
-
-        grow(_planes, size);
-        grow(_residuals, size);
-        split(rows, pitch, w, height, count, green_apart(channels, encoding), _planes.data());
-
-        grow(_packed, head + room);
-        std::fill_n(_packed.begin(), head, 0);
-        _packed.at(0) = static_cast<std::uint8_t>(Mode::Planes);
-
-        std::uint8_t *filters = _packed.data() + 1;
-
-        for (int y = 0; y < height; ++y) {
-            if (filter_row(_planes.data(), w, area, y, count, _residuals.data())) {
-                filters[y / 8] |= static_cast<std::uint8_t>(1U << (static_cast<unsigned>(y) % 8U));
-            }
-        }
-
-        const std::size_t made =
-                ZSTD_compressCCtx(_context.get(), _packed.data() + head, room, _residuals.data(), size, ZSTD_LEVEL);
-
-        return ZSTD_isError(made) != 0 ? std::span<const std::uint8_t>() : std::span(_packed).first(head + made);
-    }
-
-    std::span<const std::uint8_t> Encoder::palette(const std::size_t area) {
-        const std::size_t head = 2 + (_colours.size() * sizeof(std::uint32_t));
-        const std::size_t room = ZSTD_compressBound(area);
-
-        grow(_other, head + room);
-        _other.at(0) = static_cast<std::uint8_t>(Mode::Palette);
-        _other.at(1) = static_cast<std::uint8_t>(_colours.size() - 1);
-        std::memcpy(_other.data() + 2, _colours.data(), _colours.size() * sizeof(std::uint32_t));
-
-        const std::size_t made =
-                ZSTD_compressCCtx(_context.get(), _other.data() + head, room, _indices.data(), area, ZSTD_LEVEL);
-
-        return ZSTD_isError(made) != 0 ? std::span<const std::uint8_t>() : std::span(_other).first(head + made);
-    }
-
-    Decoder::Decoder() : _context(ZSTD_createDCtx()) {
-    }
-
-    bool Decoder::decode(const std::span<const std::uint8_t> packed, const int channels,
-                         const Bitmap::Encoding encoding, Bitmap *tile) {
-        if (_context == nullptr || packed.size() < 2 || (channels != 3 && channels != Bitmap::CHANNELS)) {
-            return false;
-        }
-
-        switch (static_cast<Mode>(packed.front())) {
-            case Mode::Palette:
-                return palette(packed, channels, tile);
-            case Mode::Planes:
-                return planes(packed, channels, encoding, tile);
-        }
-
+    if (gradient >= up) {
         return false;
     }
 
-    bool Decoder::palette(const std::span<const std::uint8_t> packed, const int channels, Bitmap *tile) {
-        const std::size_t area = static_cast<std::size_t>(tile->width()) * static_cast<std::size_t>(tile->height());
-        const std::size_t colours = static_cast<std::size_t>(packed[1]) + 1;
-        const std::size_t head = 2 + (colours * sizeof(std::uint32_t));
-        std::array<std::uint32_t, MAX_COLOURS> palette{};
-
-        if (packed.size() < head) {
-            return false;
-        }
-
-        std::memcpy(palette.data(), packed.data() + 2, colours * sizeof(std::uint32_t));
-        grow(_planes, area);
-
-        if (ZSTD_decompressDCtx(_context.get(), _planes.data(), area, packed.data() + head, packed.size() - head)
-            != area) {
-            return false;
-        }
-
-        const std::uint8_t *index = _planes.data();
-        std::uint8_t *out = tile->data();
-        const std::uint32_t opaque = channels == 3 ? OPAQUE : 0U;
-
-        for (std::size_t i = 0; i < area; ++i) {
-            const std::uint32_t colour = palette.at(index[i]) | opaque;
-
-            std::memcpy(out + (i * Bitmap::CHANNELS), &colour, sizeof colour);
-        }
-
-        return true;
+    for (std::size_t c = 0; c < channels; ++c) {
+        Channels::slope(residuals + (c * area) + line, width);
     }
 
-    bool Decoder::planes(const std::span<const std::uint8_t> packed, const int channels,
-                         const Bitmap::Encoding encoding, Bitmap *tile) {
-        const auto w = static_cast<std::size_t>(tile->width());
-        const int height = tile->height();
-        const std::size_t area = w * static_cast<std::size_t>(height);
-        const auto count = static_cast<std::size_t>(channels);
-        const std::size_t head = 1 + filter_bytes(height);
-        const std::size_t size = area * count;
+    return true;
+}
+}
 
-        grow(_planes, size);
+void ContextFree::operator()(ZSTD_CCtx *context) const {
+    ZSTD_freeCCtx(context);
+}
 
-        if (packed.size() < head
-            || ZSTD_decompressDCtx(_context.get(), _planes.data(), size, packed.data() + head, packed.size() - head)
-                       != size) {
-            return false;
+void ContextFree::operator()(ZSTD_DCtx *context) const {
+    ZSTD_freeDCtx(context);
+}
+
+std::size_t bound(const int width, const int height, const int channels) {
+    const std::size_t area = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    const std::size_t head = 2 + std::max(filter_bytes(height), MAX_COLOURS * sizeof(std::uint32_t));
+
+    return head + ZSTD_compressBound(area * static_cast<std::size_t>(channels));
+}
+
+Encoder::Encoder() : _context(ZSTD_createCCtx()) {
+}
+
+std::span<const std::uint8_t> Encoder::encode(const std::uint8_t *rows,
+                                              const std::size_t pitch,
+                                              const int width,
+                                              const int height,
+                                              const int channels,
+                                              const Bitmap::Encoding encoding) {
+    if (_context == nullptr) {
+        return {};
+    }
+
+    const std::span<const std::uint8_t> filtered = planes(rows, pitch, width, height, channels, encoding);
+
+    // Few colours can still be a smooth ramp the filters do better on, so both are tried.
+    if (count_colours(rows, pitch, width, height, _colours, _indices)) {
+        const std::span<const std::uint8_t> indexed =
+                palette(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+
+        if (!indexed.empty() && (filtered.empty() || indexed.size() < filtered.size())) {
+            return indexed;
         }
+    }
 
-        const std::uint8_t *filters = packed.data() + 1;
-        const bool green = green_apart(channels, encoding);
-        std::uint8_t *planes = _planes.data();
+    return filtered;
+}
 
-        for (int y = 0; y < height; ++y) {
-            const std::size_t line = static_cast<std::size_t>(y) * w;
-            const bool gradient =
-                    ((static_cast<unsigned>(filters[y / 8]) >> (static_cast<unsigned>(y) % 8U)) & 1U) != 0;
+std::span<const std::uint8_t> Encoder::planes(const std::uint8_t *rows,
+                                              const std::size_t pitch,
+                                              const int width,
+                                              const int height,
+                                              const int channels,
+                                              const Bitmap::Encoding encoding) {
+    const auto w = static_cast<std::size_t>(width);
+    const std::size_t area = w * static_cast<std::size_t>(height);
+    const auto count = static_cast<std::size_t>(channels);
+    const std::size_t head = 1 + filter_bytes(height);
+    const std::size_t size = area * count;
+    const std::size_t room = ZSTD_compressBound(size);
 
-            for (std::size_t c = 0; c < count; ++c) {
-                std::uint8_t *row = planes + (c * area) + line;
+    grow(_planes, size);
+    grow(_residuals, size);
+    split(rows, pitch, w, height, count, green_apart(channels, encoding), _planes.data());
 
-                if (gradient) {
-                    Channels::prefix(row, w);
-                }
+    grow(_packed, head + room);
+    std::fill_n(_packed.begin(), head, 0);
+    _packed.at(0) = static_cast<std::uint8_t>(Mode::Planes);
 
-                if (y > 0) {
-                    Channels::accumulate(row, row - w, w);
-                }
+    std::uint8_t *filters = _packed.data() + 1;
+
+    for (int y = 0; y < height; ++y) {
+        if (filter_row(_planes.data(), w, area, y, count, _residuals.data())) {
+            filters[y / 8] |= static_cast<std::uint8_t>(1U << (static_cast<unsigned>(y) % 8U));
+        }
+    }
+
+    const std::size_t made =
+            ZSTD_compressCCtx(_context.get(), _packed.data() + head, room, _residuals.data(), size, ZSTD_LEVEL);
+
+    return ZSTD_isError(made) != 0 ? std::span<const std::uint8_t>() : std::span(_packed).first(head + made);
+}
+
+std::span<const std::uint8_t> Encoder::palette(const std::size_t area) {
+    const std::size_t head = 2 + (_colours.size() * sizeof(std::uint32_t));
+    const std::size_t room = ZSTD_compressBound(area);
+
+    grow(_other, head + room);
+    _other.at(0) = static_cast<std::uint8_t>(Mode::Palette);
+    _other.at(1) = static_cast<std::uint8_t>(_colours.size() - 1);
+    std::memcpy(_other.data() + 2, _colours.data(), _colours.size() * sizeof(std::uint32_t));
+
+    const std::size_t made =
+            ZSTD_compressCCtx(_context.get(), _other.data() + head, room, _indices.data(), area, ZSTD_LEVEL);
+
+    return ZSTD_isError(made) != 0 ? std::span<const std::uint8_t>() : std::span(_other).first(head + made);
+}
+
+Decoder::Decoder() : _context(ZSTD_createDCtx()) {
+}
+
+bool Decoder::decode(const std::span<const std::uint8_t> packed,
+                     const int channels,
+                     const Bitmap::Encoding encoding,
+                     Bitmap *tile) {
+    if (_context == nullptr || packed.size() < 2 || (channels != 3 && channels != Bitmap::CHANNELS)) {
+        return false;
+    }
+
+    switch (static_cast<Mode>(packed.front())) {
+        case Mode::Palette:
+            return palette(packed, channels, tile);
+        case Mode::Planes:
+            return planes(packed, channels, encoding, tile);
+    }
+
+    return false;
+}
+
+bool Decoder::palette(const std::span<const std::uint8_t> packed, const int channels, Bitmap *tile) {
+    const std::size_t area = static_cast<std::size_t>(tile->width()) * static_cast<std::size_t>(tile->height());
+    const std::size_t colours = static_cast<std::size_t>(packed[1]) + 1;
+    const std::size_t head = 2 + (colours * sizeof(std::uint32_t));
+    std::array<std::uint32_t, MAX_COLOURS> palette{};
+
+    if (packed.size() < head) {
+        return false;
+    }
+
+    std::memcpy(palette.data(), packed.data() + 2, colours * sizeof(std::uint32_t));
+    grow(_planes, area);
+
+    if (ZSTD_decompressDCtx(_context.get(), _planes.data(), area, packed.data() + head, packed.size() - head) != area) {
+        return false;
+    }
+
+    const std::uint8_t *index = _planes.data();
+    std::uint8_t *out = tile->data();
+    const std::uint32_t opaque = channels == 3 ? OPAQUE : 0U;
+
+    for (std::size_t i = 0; i < area; ++i) {
+        const std::uint32_t colour = palette.at(index[i]) | opaque;
+
+        std::memcpy(out + (i * Bitmap::CHANNELS), &colour, sizeof colour);
+    }
+
+    return true;
+}
+
+bool Decoder::planes(const std::span<const std::uint8_t> packed,
+                     const int channels,
+                     const Bitmap::Encoding encoding,
+                     Bitmap *tile) {
+    const auto w = static_cast<std::size_t>(tile->width());
+    const int height = tile->height();
+    const std::size_t area = w * static_cast<std::size_t>(height);
+    const auto count = static_cast<std::size_t>(channels);
+    const std::size_t head = 1 + filter_bytes(height);
+    const std::size_t size = area * count;
+
+    grow(_planes, size);
+
+    if (packed.size() < head
+        || ZSTD_decompressDCtx(_context.get(), _planes.data(), size, packed.data() + head, packed.size() - head)
+                   != size) {
+        return false;
+    }
+
+    const std::uint8_t *filters = packed.data() + 1;
+    const bool green = green_apart(channels, encoding);
+    std::uint8_t *planes = _planes.data();
+
+    for (int y = 0; y < height; ++y) {
+        const std::size_t line = static_cast<std::size_t>(y) * w;
+        const bool gradient = ((static_cast<unsigned>(filters[y / 8]) >> (static_cast<unsigned>(y) % 8U)) & 1U) != 0;
+
+        for (std::size_t c = 0; c < count; ++c) {
+            std::uint8_t *row = planes + (c * area) + line;
+
+            if (gradient) {
+                Channels::prefix(row, w);
             }
 
-            const std::uint8_t *red = planes + line;
-
-            Channels::interleave(red, red + area, red + (2 * area),
-                                 count == Bitmap::CHANNELS ? red + (3 * area) : nullptr, green, tile->row(y).data(), w);
+            if (y > 0) {
+                Channels::accumulate(row, row - w, w);
+            }
         }
 
-        return true;
+        const std::uint8_t *red = planes + line;
+
+        Channels::interleave(red,
+                             red + area,
+                             red + (2 * area),
+                             count == Bitmap::CHANNELS ? red + (3 * area) : nullptr,
+                             green,
+                             tile->row(y).data(),
+                             w);
     }
+
+    return true;
+}
 }
 // NOLINTEND(cppcoreguidelines-pro-bounds-pointer-arithmetic)

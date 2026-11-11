@@ -22,21 +22,29 @@
 
 namespace tiv::Decode::Jxl {
 
-    [[nodiscard]] Tone::Source tone(std::span<const std::uint8_t> data);
+[[nodiscard]] Tone::Source tone(std::span<const std::uint8_t> data);
 
-    bool probe(std::span<const std::uint8_t> data, Info *info);
+bool probe(std::span<const std::uint8_t> data, Info *info);
 
-    // Animation stays with libvips.
-    Direct load(const std::filesystem::path &file, std::span<const std::uint8_t> data, Bitmap *out, std::string *error,
-                const Abort *abort, const Tone::Display &display);
+// Animation stays with libvips.
+Direct load(const std::filesystem::path &file,
+            std::span<const std::uint8_t> data,
+            Bitmap *out,
+            std::string *error,
+            const Abort *abort,
+            const Tone::Display &display);
 
-    // Band by band into take, in however many threads libjxl has, with only a few bands
-    // held. Animation stays with libvips.
-    Direct stream(std::span<const std::uint8_t> data, int rows, const Begin &begin, const Take &take,
-                  const Abort *abort, const Tone::Display &display);
+// Band by band into take, in however many threads libjxl has, with only a few bands
+// held. Animation stays with libvips.
+Direct stream(std::span<const std::uint8_t> data,
+              int rows,
+              const Begin &begin,
+              const Take &take,
+              const Abort *abort,
+              const Tone::Display &display);
 
-    // About the most memory stream() holds in bands of the rows given.
-    [[nodiscard]] std::uint64_t stream_bytes(std::span<const std::uint8_t> data, int rows);
+// About the most memory stream() holds in bands of the rows given.
+[[nodiscard]] std::uint64_t stream_bytes(std::span<const std::uint8_t> data, int rows);
 
 }
 

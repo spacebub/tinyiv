@@ -18,73 +18,73 @@
 #include "view/Viewport.h"
 
 namespace tiv {
-    class Input {
+class Input {
 
-    public:
-        enum class Action : std::uint8_t {
-            None,
-            Quit,
-            ToggleFullscreen,
-            // Whole wheel notches are waiting in scroll().
-            Scroll,
-            First,
-            Last,
-            Reload,
-            Rebuild,
-            TurnLeft,
-            TurnRight,
-            FlipVertical,
-            FlipHorizontal,
-            Save,
-            ToggleStream,
-            NextOrder,
-            ToggleBar,
-            ToggleHelp,
-            TogglePlay,
-            FrameBack,
-            FrameForward,
-            // The view changed.
-            Redraw,
-        };
-
-        // Natural log of the zoom per pixel of drag: about 139 pixels double it.
-        static constexpr double ZOOM_PER_PIXEL = 0.005;
-
-        // Two key presses double the zoom.
-        static constexpr double ZOOM_STEP = std::numbers::sqrt2;
-
-        // Window units a cursor held on an edge moves back in before it runs free again.
-        static constexpr float EDGE_RELEASE = 4.0F;
-
-        // Mouse positions arrive in window units. Density turns them into pixels, and top is where the view starts.
-        Action handle(const SDL_Event &event, float density, double top, Viewport &viewport);
-
-        // Positive is next, negative is previous. Clears what it returns.
-        [[nodiscard]] int scroll();
-
-        // A button is held and motion pans or zooms, as fast as the mouse reports it.
-        [[nodiscard]] bool dragging() const { return _drag != Drag::None; }
-
-    private:
-        enum class Drag : std::uint8_t {
-            None,
-            Pan,
-            Zoom,
-        };
-
-        Action key(const SDL_KeyboardEvent &event, Viewport &viewport);
-
-        // A drag confines the cursor to the window, and relative mode carries it on while the cursor
-        // rests on an edge. Wayland only reports motion past an edge to a locked cursor.
-        void follow(const SDL_MouseMotionEvent &motion);
-        void release(SDL_WindowID window);
-
-        Drag _drag = Drag::None;
-        bool _held = false;
-        double _pressZoom = 1.0;
-        double _zoomTravel = 0.0;
-        int _wheel = 0;
+public:
+    enum class Action : std::uint8_t {
+        None,
+        Quit,
+        ToggleFullscreen,
+        // Whole wheel notches are waiting in scroll().
+        Scroll,
+        First,
+        Last,
+        Reload,
+        Rebuild,
+        TurnLeft,
+        TurnRight,
+        FlipVertical,
+        FlipHorizontal,
+        Save,
+        ToggleStream,
+        NextOrder,
+        ToggleBar,
+        ToggleHelp,
+        TogglePlay,
+        FrameBack,
+        FrameForward,
+        // The view changed.
+        Redraw,
     };
+
+    // Natural log of the zoom per pixel of drag: about 139 pixels double it.
+    static constexpr double ZOOM_PER_PIXEL = 0.005;
+
+    // Two key presses double the zoom.
+    static constexpr double ZOOM_STEP = std::numbers::sqrt2;
+
+    // Window units a cursor held on an edge moves back in before it runs free again.
+    static constexpr float EDGE_RELEASE = 4.0F;
+
+    // Mouse positions arrive in window units. Density turns them into pixels, and top is where the view starts.
+    Action handle(const SDL_Event &event, float density, double top, Viewport &viewport);
+
+    // Positive is next, negative is previous. Clears what it returns.
+    [[nodiscard]] int scroll();
+
+    // A button is held and motion pans or zooms, as fast as the mouse reports it.
+    [[nodiscard]] bool dragging() const { return _drag != Drag::None; }
+
+private:
+    enum class Drag : std::uint8_t {
+        None,
+        Pan,
+        Zoom,
+    };
+
+    Action key(const SDL_KeyboardEvent &event, Viewport &viewport);
+
+    // A drag confines the cursor to the window, and relative mode carries it on while the cursor
+    // rests on an edge. Wayland only reports motion past an edge to a locked cursor.
+    void follow(const SDL_MouseMotionEvent &motion);
+    void release(SDL_WindowID window);
+
+    Drag _drag = Drag::None;
+    bool _held = false;
+    double _pressZoom = 1.0;
+    double _zoomTravel = 0.0;
+    int _wheel = 0;
+};
 }
 
 

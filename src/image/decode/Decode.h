@@ -29,128 +29,149 @@ struct _VipsImage;
 
 namespace tiv::Decode {
 
-    enum class Format : std::uint8_t {
-        Jpeg,
-        Png,
-        WebP,
-        Jxl,
-        Gif,
-        Bmp,
-        Ico,
-        Icns,
-        Tiff,
-        Heif,
-        Svg,
-        Pdf,
-        // Whatever libvips makes of it.
-        Other,
-    };
+enum class Format : std::uint8_t {
+    Jpeg,
+    Png,
+    WebP,
+    Jxl,
+    Gif,
+    Bmp,
+    Ico,
+    Icns,
+    Tiff,
+    Heif,
+    Svg,
+    Pdf,
+    // Whatever libvips makes of it.
+    Other,
+};
 
-    struct Info {
-        // As shown, once the orientation is applied.
-        int width = 0;
-        int height = 0;
-        // Short upper case name of the container: JPEG, PNG, WEBP.
-        std::string format;
-        Format kind = Format::Other;
-        // EXIF orientation, 1 to 8.
-        int orientation = 1;
-        // More than one for an animated GIF or WebP.
-        int frames = 1;
-        // Holds light beyond SDR white, by its transfer or in a gain map.
-        bool hdr = false;
+struct Info {
+    // As shown, once the orientation is applied.
+    int width = 0;
+    int height = 0;
+    // Short upper case name of the container: JPEG, PNG, WEBP.
+    std::string format;
+    Format kind = Format::Other;
+    // EXIF orientation, 1 to 8.
+    int orientation = 1;
+    // More than one for an animated GIF or WebP.
+    int frames = 1;
+    // Holds light beyond SDR white, by its transfer or in a gain map.
+    bool hdr = false;
 
-        [[nodiscard]] std::int64_t pixels() const { return static_cast<std::int64_t>(width) * height; }
-    };
+    [[nodiscard]] std::int64_t pixels() const { return static_cast<std::int64_t>(width) * height; }
+};
 
-    // Lets another thread cut a decode short. Once requested, every load using it fails
-    // until reset(). The direct decoders check between rows, and libvips is told to stop.
-    class Abort {
+// Lets another thread cut a decode short. Once requested, every load using it fails
+// until reset(). The direct decoders check between rows, and libvips is told to stop.
+class Abort {
 
-    public:
-        void request();
-        void reset();
+public:
+    void request();
+    void reset();
 
-        [[nodiscard]] bool requested() const { return _requested.load(std::memory_order_relaxed); }
+    [[nodiscard]] bool requested() const { return _requested.load(std::memory_order_relaxed); }
 
-        // For load() only.
-        void arm(_VipsImage *image);
-        void disarm();
+    // For load() only.
+    void arm(_VipsImage *image);
+    void disarm();
 
-    private:
-        std::mutex _guard;
-        std::atomic<bool> _requested = false;
-        _VipsImage *_image = nullptr;
-    };
+private:
+    std::mutex _guard;
+    std::atomic<bool> _requested = false;
+    _VipsImage *_image = nullptr;
+};
 
-    // Lowercase with the dot: what the folder lists.
-    [[nodiscard]] std::span<const std::string_view> suffixes();
+// Lowercase with the dot: what the folder lists.
+[[nodiscard]] std::span<const std::string_view> suffixes();
 
-    // From the first bytes of the file.
-    [[nodiscard]] Format sniff(std::span<const std::uint8_t> head);
+// From the first bytes of the file.
+[[nodiscard]] Format sniff(std::span<const std::uint8_t> head);
 
-    // True when the format decodes to a smaller size for a fraction of the whole file's cost,
-    // so a screen sized preview is worth asking for before the full decode.
-    [[nodiscard]] bool scales_cheaply(Format format);
+// True when the format decodes to a smaller size for a fraction of the whole file's cost,
+// so a screen sized preview is worth asking for before the full decode.
+[[nodiscard]] bool scales_cheaply(Format format);
 
-    // True when the format is drawn from shapes, so it renders sharp at any scale.
-    [[nodiscard]] bool scalable(Format format);
+// True when the format is drawn from shapes, so it renders sharp at any scale.
+[[nodiscard]] bool scalable(Format format);
 
-    // False when neither a decoder here nor libvips knows the file.
-    [[nodiscard]] bool recognised(const std::filesystem::path &file);
+// False when neither a decoder here nor libvips knows the file.
+[[nodiscard]] bool recognised(const std::filesystem::path &file);
 
-    // Reads the header only.
-    bool probe(const std::filesystem::path &file, Info *info, std::string *error = nullptr);
+// Reads the header only.
+bool probe(const std::filesystem::path &file, Info *info, std::string *error = nullptr);
 
-    enum class Fit : std::uint8_t {
-        // A box smaller than the image asks for the size fitted into it. Formats that scale cheaply
-        // deliver that size. The rest deliver the image whole and leave the shrinking to the caller.
-        Cheap,
-        // Every format delivers a size within the box without ever holding the image whole.
-        Force,
-    };
+enum class Fit : std::uint8_t {
+    // A box smaller than the image asks for the size fitted into it. Formats that scale cheaply
+    // deliver that size. The rest deliver the image whole and leave the shrinking to the caller.
+    Cheap,
+    // Every format delivers a size within the box without ever holding the image whole.
+    Force,
+};
 
-    // Decodes into a bitmap as stored and leaves the orientation for drawing. The box is in the shown orientation.
-    // Output is RGBA8. HDR for an HDR display comes as PQ, rolled off into its headroom with any gain map weighed.
-    // For SDR, HDR is tone mapped or brought down by its gain map. Scalable formats fit the box, larger or smaller.
-    bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error = nullptr,
-              Abort *abort = nullptr, Fit fit = Fit::Cheap, const Tone::Display &display = {});
+// Decodes into a bitmap as stored and leaves the orientation for drawing. The box is in the shown orientation.
+// Output is RGBA8. HDR for an HDR display comes as PQ, rolled off into its headroom with any gain map weighed.
+// For SDR, HDR is tone mapped or brought down by its gain map. Scalable formats fit the box, larger or smaller.
+bool load(const std::filesystem::path &file,
+          int boxWidth,
+          int boxHeight,
+          Bitmap *out,
+          std::string *error = nullptr,
+          Abort *abort = nullptr,
+          Fit fit = Fit::Cheap,
+          const Tone::Display &display = {});
 
-    // Part of a scalable image rendered at the scale, the part given in pixels of the image
-    // at that scale.
-    bool render(const std::filesystem::path &file, double scale, int x, int y, int width, int height, Bitmap *out,
-                std::string *error = nullptr, Abort *abort = nullptr);
+// Part of a scalable image rendered at the scale, the part given in pixels of the image
+// at that scale.
+bool render(const std::filesystem::path &file,
+            double scale,
+            int x,
+            int y,
+            int width,
+            int height,
+            Bitmap *out,
+            std::string *error = nullptr,
+            Abort *abort = nullptr);
 
-    struct Frame {
-        Bitmap bitmap;
-        // How long the frame stays up, in milliseconds.
-        int delay = 0;
-    };
+struct Frame {
+    Bitmap bitmap;
+    // How long the frame stays up, in milliseconds.
+    int delay = 0;
+};
 
-    // Every frame of an animation, each shrunk by the same integer factor as far as it takes
-    // for all of them to fit in the bytes given.
-    bool load_frames(const std::filesystem::path &file, std::size_t maxBytes, std::vector<Frame> *out,
-                     std::string *error = nullptr, Abort *abort = nullptr);
+// Every frame of an animation, each shrunk by the same integer factor as far as it takes
+// for all of them to fit in the bytes given.
+bool load_frames(const std::filesystem::path &file,
+                 std::size_t maxBytes,
+                 std::vector<Frame> *out,
+                 std::string *error = nullptr,
+                 Abort *abort = nullptr);
 
-    // Hands the image over as stored, top to bottom, in bands of the rows given, so any size decodes in the memory of
-    // one band. Begin first hears the size, the alpha and the band encoding that load() would pick for the display.
-    // Either returning false stops the decode. Only a JPEG shrinks on the way, by 2, 4 or 8 as its blocks scale.
-    using Begin = std::function<bool(int width, int height, bool alpha, Bitmap::Encoding encoding)>;
-    using Take = std::function<bool(int y, int rows, std::span<const std::uint8_t> pixels)>;
+// Hands the image over as stored, top to bottom, in bands of the rows given, so any size decodes in the memory of
+// one band. Begin first hears the size, the alpha and the band encoding that load() would pick for the display.
+// Either returning false stops the decode. Only a JPEG shrinks on the way, by 2, 4 or 8 as its blocks scale.
+using Begin = std::function<bool(int width, int height, bool alpha, Bitmap::Encoding encoding)>;
+using Take = std::function<bool(int y, int rows, std::span<const std::uint8_t> pixels)>;
 
-    bool stream(const std::filesystem::path &file, int rows, const Begin &begin, const Take &take,
-                std::string *error = nullptr, Abort *abort = nullptr, const Tone::Display &display = Tone::Display(),
-                int shrink = 1);
+bool stream(const std::filesystem::path &file,
+            int rows,
+            const Begin &begin,
+            const Take &take,
+            std::string *error = nullptr,
+            Abort *abort = nullptr,
+            const Tone::Display &display = Tone::Display(),
+            int shrink = 1);
 
-    // About the most memory stream() holds for the file in bands of the rows given, for the
-    // formats whose decoder holds much of the image. Zero for the rest.
-    [[nodiscard]] std::uint64_t stream_bytes(const std::filesystem::path &file, int rows);
+// About the most memory stream() holds for the file in bands of the rows given, for the
+// formats whose decoder holds much of the image. Zero for the rest.
+[[nodiscard]] std::uint64_t stream_bytes(const std::filesystem::path &file, int rows);
 
-    // A PNG held in memory, decoded whole.
-    bool load_png_memory(std::span<const std::uint8_t> data, Bitmap *out, std::string *error = nullptr);
+// A PNG held in memory, decoded whole.
+bool load_png_memory(std::span<const std::uint8_t> data, Bitmap *out, std::string *error = nullptr);
 
-    // libvips starts on first use. This frees it, once nothing decodes any more.
-    void shutdown();
+// libvips starts on first use. This frees it, once nothing decodes any more.
+void shutdown();
 
 }
 

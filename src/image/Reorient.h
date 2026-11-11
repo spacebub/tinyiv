@@ -17,12 +17,12 @@
 
 namespace tiv::Reorient {
 
-    // True when the format keeps an orientation in its metadata that can be written here.
-    [[nodiscard]] bool supported(Decode::Format format);
+// True when the format keeps an orientation in its metadata that can be written here.
+[[nodiscard]] bool supported(Decode::Format format);
 
-    // Makes the file say the orientation and changes nothing else: the pixel data stays byte
-    // for byte, and writing back the orientation it had gives back the same file.
-    bool write(const std::filesystem::path &file, int orientation, std::string *error = nullptr);
+// Makes the file say the orientation and changes nothing else: the pixel data stays byte
+// for byte, and writing back the orientation it had gives back the same file.
+bool write(const std::filesystem::path &file, int orientation, std::string *error = nullptr);
 
 }
 

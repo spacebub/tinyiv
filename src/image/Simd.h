@@ -19,8 +19,8 @@
 
 namespace tiv::Simd {
 
-    // True when both the processor and the system run AVX2.
-    [[nodiscard]] bool avx2();
+// True when both the processor and the system run AVX2.
+[[nodiscard]] bool avx2();
 
 }
 

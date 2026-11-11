@@ -14,18 +14,18 @@
 
 namespace tiv::Memory {
 
-    // Returns to the system what the allocator holds freed. The allocator keeps freed buffers for
-    // reuse, which saves zeroing fresh pages while decodes follow one another. This is for once
-    // they stop.
-    void give_back();
+// Returns to the system what the allocator holds freed. The allocator keeps freed buffers for
+// reuse, which saves zeroing fresh pages while decodes follow one another. This is for once
+// they stop.
+void give_back();
 
-    // Every large block goes back to the system the moment it is freed, at the cost of the system
-    // zeroing fresh pages for the next. Before any thread starts.
-    void lean();
+// Every large block goes back to the system the moment it is freed, at the cost of the system
+// zeroing fresh pages for the next. Before any thread starts.
+void lean();
 
-    // What the system can hand out without swapping, or all of its memory where that cannot
-    // be told.
-    [[nodiscard]] std::uint64_t available();
+// What the system can hand out without swapping, or all of its memory where that cannot
+// be told.
+[[nodiscard]] std::uint64_t available();
 
 }
 

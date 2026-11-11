@@ -14,12 +14,12 @@
 
 namespace bench::Headless {
 
-    // Made on first use, on a hidden window with the driver the app uses. Null when none can be made.
-    [[nodiscard]] SDL_Renderer *renderer();
+// Made on first use, on a hidden window with the driver the app uses. Null when none can be made.
+[[nodiscard]] SDL_Renderer *renderer();
 
-    [[nodiscard]] int max_texture();
+[[nodiscard]] int max_texture();
 
-    void shutdown();
+void shutdown();
 
 }
 

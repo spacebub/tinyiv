@@ -28,161 +28,179 @@
 #include "image/decode/Vips.h"
 
 namespace tiv {
-    namespace {
-        using vips::VImage;
+namespace {
+using vips::VImage;
 
-        // librsvg sizes every filter and mask buffer to the whole document, and libvips renders
-        // an SVG in tiles this size, each drawing the whole document again. So the part is cut
-        // into pieces, each a separate document that shows only the piece and fits one tile.
-        constexpr int SVG_TILE = 2000;
+// librsvg sizes every filter and mask buffer to the whole document, and libvips renders
+// an SVG in tiles this size, each drawing the whole document again. So the part is cut
+// into pieces, each a separate document that shows only the piece and fits one tile.
+constexpr int SVG_TILE = 2000;
 
-        // A blur reaches past the piece it lands in, so this much around each is drawn and dropped.
-        constexpr int SVG_REACH = 256;
+// A blur reaches past the piece it lands in, so this much around each is drawn and dropped.
+constexpr int SVG_REACH = 256;
 
-        struct Part {
-            int x = 0;
-            int y = 0;
-            int width = 0;
-            int height = 0;
-        };
+struct Part {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
 
-        // One piece of the part as a separate document, drawn with its reach and cropped back.
-        bool render_svg_piece(const std::span<const std::uint8_t> document, const double scale,
-                              const Decode::Size whole, const Part piece, Bitmap *out) {
-            const int left = std::max(piece.x - SVG_REACH, 0);
-            const int top = std::max(piece.y - SVG_REACH, 0);
-            const int width = std::min(piece.x + piece.width + SVG_REACH, whole.width) - left;
-            const int height = std::min(piece.y + piece.height + SVG_REACH, whole.height) - top;
+// One piece of the part as a separate document, drawn with its reach and cropped back.
+bool render_svg_piece(const std::span<const std::uint8_t> document,
+                      const double scale,
+                      const Decode::Size whole,
+                      const Part piece,
+                      Bitmap *out) {
+    const int left = std::max(piece.x - SVG_REACH, 0);
+    const int top = std::max(piece.y - SVG_REACH, 0);
+    const int width = std::min(piece.x + piece.width + SVG_REACH, whole.width) - left;
+    const int height = std::min(piece.y + piece.height + SVG_REACH, whole.height) - top;
 
-            // Pieces draw on separate threads, so a piece with no memory for it fails like a bad one.
-            try {
-                const std::string narrowed =
-                        Svg::narrow(document, scale, whole.width, whole.height, left, top, width, height);
+    // Pieces draw on separate threads, so a piece with no memory for it fails like a bad one.
+    try {
+        const std::string narrowed = Svg::narrow(document, scale, whole.width, whole.height, left, top, width, height);
 
-                if (narrowed.empty()) {
-                    return false;
-                }
-
-                const VImage drawn = VImage::new_from_buffer(narrowed.data(), narrowed.size(), "");
-
-                if (drawn.width() != width || drawn.height() != height) {
-                    return false;
-                }
-
-                return Decode::Vips::write_rgba(
-                        Decode::Vips::prepare(drawn.crop(piece.x - left, piece.y - top, piece.width, piece.height), {}),
-                        out, nullptr);
-            } catch (const vips::VError &) {
-                return false;
-            } catch (const std::bad_alloc &) {
-                return false;
-            }
+        if (narrowed.empty()) {
+            return false;
         }
 
-        // The pieces render on separate threads, since libvips would draw them one by one.
-        bool render_svg(const std::span<const std::uint8_t> document, const double scale, const Decode::Size whole,
-                        const Part part, Bitmap *out, const Decode::Abort *abort) {
-            constexpr int STEP = SVG_TILE - (2 * SVG_REACH);
-            const int across = (part.width + STEP - 1) / STEP;
-            const int down = (part.height + STEP - 1) / STEP;
-            const int pieceWidth = (part.width + across - 1) / across;
-            const int pieceHeight = (part.height + down - 1) / down;
-            const int count = across * down;
-            const int wanted = std::min(Decode::MAX_THREADS, static_cast<int>(std::thread::hardware_concurrency()));
-            Bitmap target = Bitmap::allocate(part.width, part.height);
-            std::atomic<int> next = 0;
-            std::atomic<bool> failed = false;
+        const VImage drawn = VImage::new_from_buffer(narrowed.data(), narrowed.size(), "");
 
-            const auto work = [&] {
-                for (int index = next++; index < count && !failed && !Decode::aborted(abort); index = next++) {
-                    const int column = index % across;
-                    const int row = index / across;
-                    const Part piece{
-                            .x = part.x + (column * pieceWidth),
-                            .y = part.y + (row * pieceHeight),
-                            .width = std::min(pieceWidth, part.width - (column * pieceWidth)),
-                            .height = std::min(pieceHeight, part.height - (row * pieceHeight)),
-                    };
-                    Bitmap drawn;
+        if (drawn.width() != width || drawn.height() != height) {
+            return false;
+        }
 
-                    if (!render_svg_piece(document, scale, whole, piece, &drawn)) {
-                        failed = true;
+        return Decode::Vips::write_rgba(
+                Decode::Vips::prepare(drawn.crop(piece.x - left, piece.y - top, piece.width, piece.height), {}),
+                out,
+                nullptr);
+    } catch (const vips::VError &) {
+        return false;
+    } catch (const std::bad_alloc &) {
+        return false;
+    }
+}
 
-                        break;
-                    }
+// The pieces render on separate threads, since libvips would draw them one by one.
+bool render_svg(const std::span<const std::uint8_t> document,
+                const double scale,
+                const Decode::Size whole,
+                const Part part,
+                Bitmap *out,
+                const Decode::Abort *abort) {
+    constexpr int STEP = SVG_TILE - (2 * SVG_REACH);
+    const int across = (part.width + STEP - 1) / STEP;
+    const int down = (part.height + STEP - 1) / STEP;
+    const int pieceWidth = (part.width + across - 1) / across;
+    const int pieceHeight = (part.height + down - 1) / down;
+    const int count = across * down;
+    const int wanted = std::min(Decode::MAX_THREADS, static_cast<int>(std::thread::hardware_concurrency()));
+    Bitmap target = Bitmap::allocate(part.width, part.height);
+    std::atomic<int> next = 0;
+    std::atomic<bool> failed = false;
 
-                    for (int y = 0; y < drawn.height(); ++y) {
-                        std::ranges::copy(drawn.row(y), target.row((row * pieceHeight) + y)
-                                                                .subspan(static_cast<std::size_t>(column * pieceWidth)
-                                                                         * Bitmap::CHANNELS)
-                                                                .begin());
-                    }
-                }
+    const auto work = [&] {
+        for (int index = next++; index < count && !failed && !Decode::aborted(abort); index = next++) {
+            const int column = index % across;
+            const int row = index / across;
+            const Part piece{
+                    .x = part.x + (column * pieceWidth),
+                    .y = part.y + (row * pieceHeight),
+                    .width = std::min(pieceWidth, part.width - (column * pieceWidth)),
+                    .height = std::min(pieceHeight, part.height - (row * pieceHeight)),
             };
+            Bitmap drawn;
 
-            {
-                std::vector<std::jthread> workers;
+            if (!render_svg_piece(document, scale, whole, piece, &drawn)) {
+                failed = true;
 
-                for (int i = 1; i < std::min(count, std::max(wanted, 1)); ++i) {
-                    workers.emplace_back(work);
-                }
-
-                work();
+                break;
             }
 
-            if (failed || Decode::aborted(abort)) {
-                return false;
+            for (int y = 0; y < drawn.height(); ++y) {
+                std::ranges::copy(drawn.row(y),
+                                  target.row((row * pieceHeight) + y)
+                                          .subspan(static_cast<std::size_t>(column * pieceWidth) * Bitmap::CHANNELS)
+                                          .begin());
             }
-
-            *out = std::move(target);
-
-            return true;
         }
+    };
+
+    {
+        std::vector<std::jthread> workers;
+
+        for (int i = 1; i < std::min(count, std::max(wanted, 1)); ++i) {
+            workers.emplace_back(work);
+        }
+
+        work();
     }
 
-    bool Decode::render(const std::filesystem::path &file, const double scale, const int x, const int y,
-                        const int width, const int height, Bitmap *out, std::string *error, Abort *abort) {
-        Vips::ensure();
+    if (failed || Decode::aborted(abort)) {
+        return false;
+    }
 
-        const Vips::ErrorMark mark;
+    *out = std::move(target);
 
-        try {
-            const VImage image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("scale", scale));
-            const int left = std::clamp(x, 0, image.width() - 1);
-            const int top = std::clamp(y, 0, image.height() - 1);
-            const int partWidth = std::clamp(width, 1, image.width() - left);
-            const int partHeight = std::clamp(height, 1, image.height() - top);
+    return true;
+}
+}
 
-            if (Mapped mapped; Mapped::open(file, &mapped) && sniff(mapped.data()) == Format::Svg) {
-                if (render_svg(mapped.data(), scale, {.width = image.width(), .height = image.height()},
-                               {.x = left, .y = top, .width = partWidth, .height = partHeight}, out, abort)) {
-                    return true;
-                }
+bool Decode::render(const std::filesystem::path &file,
+                    const double scale,
+                    const int x,
+                    const int y,
+                    const int width,
+                    const int height,
+                    Bitmap *out,
+                    std::string *error,
+                    Abort *abort) {
+    Vips::ensure();
 
-                if (aborted(abort)) {
-                    fail(error, file, "aborted");
+    const Vips::ErrorMark mark;
 
-                    return false;
-                }
+    try {
+        const VImage image = VImage::new_from_file(file.string().c_str(), VImage::option()->set("scale", scale));
+        const int left = std::clamp(x, 0, image.width() - 1);
+        const int top = std::clamp(y, 0, image.height() - 1);
+        const int partWidth = std::clamp(width, 1, image.width() - left);
+        const int partHeight = std::clamp(height, 1, image.height() - top);
+
+        if (Mapped mapped; Mapped::open(file, &mapped) && sniff(mapped.data()) == Format::Svg) {
+            if (render_svg(mapped.data(),
+                           scale,
+                           {.width = image.width(), .height = image.height()},
+                           {.x = left, .y = top, .width = partWidth, .height = partHeight},
+                           out,
+                           abort)) {
+                return true;
             }
 
-            const VImage part = image.crop(left, top, partWidth, partHeight);
-
-            if (!Vips::write_rgba(Vips::prepare(part, {}), out, abort)) {
-                fail(error, file, mark.since());
+            if (aborted(abort)) {
+                fail(error, file, "aborted");
 
                 return false;
             }
+        }
 
-            return true;
-        } catch (const vips::VError &thrown) {
-            if (abort != nullptr) {
-                abort->disarm();
-            }
+        const VImage part = image.crop(left, top, partWidth, partHeight);
 
-            fail(error, file, mark.since(thrown));
+        if (!Vips::write_rgba(Vips::prepare(part, {}), out, abort)) {
+            fail(error, file, mark.since());
 
             return false;
         }
+
+        return true;
+    } catch (const vips::VError &thrown) {
+        if (abort != nullptr) {
+            abort->disarm();
+        }
+
+        fail(error, file, mark.since(thrown));
+
+        return false;
     }
+}
 }

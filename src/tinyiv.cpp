@@ -18,31 +18,31 @@
 #include "image/decode/Decode.h"
 
 namespace {
-    int run(const std::span<char *> args) {
-        if (args.size() > 2) {
-            std::println(stderr, "usage: tinyiv [image]");
+int run(const std::span<char *> args) {
+    if (args.size() > 2) {
+        std::println(stderr, "usage: tinyiv [image]");
 
-            return 2;
-        }
-
-        int status = 0;
-
-        {
-            tiv::App app;
-            std::string error;
-
-            if (app.start(args.size() == 2 ? args.back() : std::filesystem::path(), &error)) {
-                app.run();
-            } else {
-                std::println(stderr, "tinyiv: {}", error);
-                status = 1;
-            }
-        }
-
-        tiv::Decode::shutdown();
-
-        return status;
+        return 2;
     }
+
+    int status = 0;
+
+    {
+        tiv::App app;
+        std::string error;
+
+        if (app.start(args.size() == 2 ? args.back() : std::filesystem::path(), &error)) {
+            app.run();
+        } else {
+            std::println(stderr, "tinyiv: {}", error);
+            status = 1;
+        }
+    }
+
+    tiv::Decode::shutdown();
+
+    return status;
+}
 }
 
 int main(const int argc, char **argv) {

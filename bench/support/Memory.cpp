@@ -15,51 +15,50 @@
 #include "support/Memory.h"
 
 namespace bench {
-    namespace {
-        std::size_t status_kb(const std::string &key) {
-            std::ifstream in("/proc/self/status");
-            std::string line;
+namespace {
+std::size_t status_kb(const std::string &key) {
+    std::ifstream in("/proc/self/status");
+    std::string line;
 
-            while (std::getline(in, line)) {
-                if (line.starts_with(key)) {
-                    return std::stoull(line.substr(key.size() + 1)) * 1024;
-                }
-            }
-
-            return 0;
+    while (std::getline(in, line)) {
+        if (line.starts_with(key)) {
+            return std::stoull(line.substr(key.size() + 1)) * 1024;
         }
     }
 
-    std::size_t Memory::resident() {
-        return status_kb("VmRSS:");
-    }
+    return 0;
+}
+}
 
-    std::size_t Memory::peak() {
-        return status_kb("VmHWM:");
-    }
+std::size_t Memory::resident() {
+    return status_kb("VmRSS:");
+}
 
-    namespace {
-        std::size_t &baseline() {
-            static std::size_t held = 0;
+std::size_t Memory::peak() {
+    return status_kb("VmHWM:");
+}
 
-            return held;
-        }
-    }
+namespace {
+std::size_t &baseline() {
+    static std::size_t held = 0;
 
-    void Memory::reset_peak() {
-        // Writing 5 resets the high water mark, which needs no privilege for one's own process.
-        // https://man7.org/linux/man-pages/man5/proc_pid_clear_refs.5.html
-        std::ofstream("/proc/self/clear_refs") << "5\n";
-        baseline() = resident();
-    }
+    return held;
+}
+}
 
-    void Memory::report_peak(benchmark::State &state) {
-        const std::size_t most = peak();
+void Memory::reset_peak() {
+    // Writing 5 resets the high water mark, which needs no privilege for one's own process.
+    // https://man7.org/linux/man-pages/man5/proc_pid_clear_refs.5.html
+    std::ofstream("/proc/self/clear_refs") << "5\n";
+    baseline() = resident();
+}
 
-        state.counters.insert_or_assign("peak_rss_mb",
-                                        benchmark::Counter(static_cast<double>(most) / (1024.0 * 1024.0)));
-        state.counters.insert_or_assign(
-                "rss_added_mb",
-                benchmark::Counter(static_cast<double>(most > baseline() ? most - baseline() : 0) / (1024.0 * 1024.0)));
-    }
+void Memory::report_peak(benchmark::State &state) {
+    const std::size_t most = peak();
+
+    state.counters.insert_or_assign("peak_rss_mb", benchmark::Counter(static_cast<double>(most) / (1024.0 * 1024.0)));
+    state.counters.insert_or_assign(
+            "rss_added_mb",
+            benchmark::Counter(static_cast<double>(most > baseline() ? most - baseline() : 0) / (1024.0 * 1024.0)));
+}
 }

@@ -4,7 +4,7 @@ ColumnLimit: 120
 IndentWidth: 4
 ContinuationIndentWidth: 8
 AccessModifierOffset: -4
-NamespaceIndentation: All
+NamespaceIndentation: None
 IndentCaseLabels: true
 PointerAlignment: Right
 DerivePointerAlignment: false
@@ -13,9 +13,22 @@ AllowShortFunctionsOnASingleLine: InlineOnly
 AllowShortEnumsOnASingleLine: false
 MaxEmptyLinesToKeep: 2
 IncludeBlocks: Preserve
+# <windows.h> defines the types and macros the other Windows headers are written against, so it
+# leads its block instead of sorting alphabetically. The rest keeps LLVM's order: quoted, then angled.
+IncludeCategories:
+  - Regex: '^<windows\.h>$'
+    Priority: 1
+  - Regex: '^<'
+    Priority: 3
+  - Regex: '.*'
+    Priority: 2
 InsertNewlineAtEOF: true
 FixNamespaceComments: false
 ReflowComments: Never
 SpacesInLineCommentPrefix:
   Minimum: 0
 BreakTemplateDeclarations: Yes
+BinPackArguments: false
+BinPackParameters: OnePerLine
+PackConstructorInitializers: NextLine
+BreakStringLiterals: false

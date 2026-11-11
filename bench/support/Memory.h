@@ -16,14 +16,14 @@
 
 namespace bench::Memory {
 
-    // Resident bytes now, and the most since the last reset.
-    [[nodiscard]] std::size_t resident();
-    [[nodiscard]] std::size_t peak();
-    void reset_peak();
+// Resident bytes now, and the most since the last reset.
+[[nodiscard]] std::size_t resident();
+[[nodiscard]] std::size_t peak();
+void reset_peak();
 
-    // Adds peak_rss_mb, the most resident since reset_peak(). Also adds rss_added_mb, how far that
-    // peak went above what was resident at the reset.
-    void report_peak(benchmark::State &state);
+// Adds peak_rss_mb, the most resident since reset_peak(). Also adds rss_added_mb, how far that
+// peak went above what was resident at the reset.
+void report_peak(benchmark::State &state);
 
 }
 
