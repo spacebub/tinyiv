@@ -62,6 +62,9 @@ namespace tiv {
         // Positive is next, negative is previous. Clears what it returns.
         [[nodiscard]] int scroll();
 
+        // A button is held and motion pans or zooms, as fast as the mouse reports it.
+        [[nodiscard]] bool dragging() const { return _drag != Drag::None; }
+
     private:
         enum class Drag : std::uint8_t {
             None,

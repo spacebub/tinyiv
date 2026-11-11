@@ -366,6 +366,12 @@ namespace tiv {
         std::erase_if(_warm, [&](const Held &held) { return std::ranges::find(images, held.image) == images.end(); });
     }
 
+    void Canvas::renumber(const std::uint64_t image) {
+        _current.image = image;
+        _detail.image = image;
+        _warm.clear();
+    }
+
     void Canvas::clear() {
         _detail = {};
         _current = {};
@@ -441,6 +447,14 @@ namespace tiv {
 
             if (visible.width > 0.0) {
                 const Rect area = area_of(_current, sheet, visible, image);
+
+                // Tiles the budget leaves out of the wanted sheet would show from the coarsest sheet,
+                // so the next coarser one covers the screen first.
+                if (sheet > 0 && !_lean && tiles.uploadable_bytes(area) > budget) {
+                    Tiles &coarser = *_current.sheets.at(sheet - 1).tiles;
+
+                    spent += coarser.upload(area_of(_current, sheet - 1, visible, image), budget, _frame);
+                }
 
                 spent += tiles.upload(area, budget - std::min(spent, budget), _frame);
 

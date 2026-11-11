@@ -219,6 +219,7 @@ namespace tiv {
         bool pick(Job *out, bool *later);
         [[nodiscard]] bool wants_job(const std::filesystem::path &file, bool *whole, bool *frames, bool *later) const;
         void decode(Job &job);
+        void decode_image(Job &job);
         void decode_frames(Job &job);
         void decode_stream(Job &job, Entry entry);
         bool admit(const Job &job, std::size_t estimate);
@@ -230,12 +231,14 @@ namespace tiv {
         void release(Entry &entry);
         void release_animation(Entry &entry);
         void abort_strays();
+        void abort_farthest();
         void trim();
         void evict_outside();
         void cut(Entry &entry);
         bool evict_one();
         void post_cached(const Entry &entry);
         void post(Result result);
+        void wake_app() const;
 
         std::uint32_t _event;
         int _screenWidth = 3840;
@@ -252,7 +255,7 @@ namespace tiv {
         std::size_t _bytes = 0;
         std::vector<Job> _jobs;
         std::size_t _inflight = 0;
-        // Pyramids and animations evicted on the main thread, freed by whichever worker wakes next.
+        // Pyramids, animations and tiles let go of on the main thread, freed by whichever worker wakes next.
         std::vector<std::shared_ptr<const void>> _trash;
 
         std::filesystem::path _tileFolder;

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <functional>
@@ -292,10 +293,13 @@ namespace tiv {
                 });
             }
 
-            // What the images left behind unpacked of their tiles goes, the tiles themselves stay.
+            // What the images left behind unpacked of their tiles goes, the tiles themselves stay. A worker
+            // frees it, since hundreds of tiles take milliseconds to free.
             for (auto &[file, entry] : _cache) {
                 if (entry.tileCache != nullptr && file != current) {
-                    entry.tileCache->shrink();
+                    for (std::shared_ptr<const Bitmap> &tile : entry.tileCache->shrink()) {
+                        _trash.push_back(std::move(tile));
+                    }
                 }
             }
 
@@ -309,6 +313,7 @@ namespace tiv {
 
             size_budget();
             abort_strays();
+            abort_farthest();
             trim();
         }
 
@@ -704,13 +709,60 @@ namespace tiv {
         return stopped;
     }
 
+    // Nothing thrown on a worker leaves it. A decode that throws ends the file failed, and frames that
+    // throw leave the image still. A job may already be finished when the throw comes, so it is looked
+    // up by its abort, which no other job shares.
     void Loader::decode(Job &job) {
+        std::string error;
+
+        try {
+            if (job.frames) {
+                decode_frames(job);
+            } else {
+                decode_image(job);
+            }
+
+            return;
+        } catch (const std::bad_alloc &) {
+            error = "not enough memory";
+        } catch (const std::exception &failure) {
+            error = failure.what();
+        } catch (...) {
+            error = "could not decode";
+        }
+
+        {
+            const std::scoped_lock hold(_guard);
+
+            const auto found = std::ranges::find(_jobs, job.abort, &Job::abort);
+
+            if (found == _jobs.end()) {
+                _wake.notify_all();
+
+                return;
+            }
+
+            if (found->abort->requested()) {
+                finish(job.file);
+                _wake.notify_all();
+
+                return;
+            }
+        }
+
         if (job.frames) {
-            decode_frames(job);
+            store_frames(job.file, nullptr);
 
             return;
         }
 
+        Entry entry;
+
+        entry.error = std::format("{}: {}", job.file.string(), error);
+        store(job.file, std::move(entry));
+    }
+
+    void Loader::decode_image(Job &job) {
         Entry entry;
         Decode::Abort &abort = *job.abort;
 
@@ -1070,8 +1122,12 @@ namespace tiv {
 
         const Entry &kept = _cache.emplace(file, std::move(entry)).first->second;
 
+        // The app warms the neighbours on the GPU each time it hears from here, and one decoded after
+        // the current image would otherwise wait for the step to it.
         if (file == _request.current) {
             post_cached(kept);
+        } else if (kept.pyramid != nullptr && near(file)) {
+            wake_app();
         }
 
         _starved = false;
@@ -1140,6 +1196,52 @@ namespace tiv {
                 || ((job.frames || job.streaming) && job.file != _request.current)) {
                 job.abort->request();
             }
+        }
+    }
+
+    // The current image with nothing to show waits for a worker while every one decodes another file, so the
+    // job farthest from it stops and is picked again later. A job already stopping frees its worker soon,
+    // so only the others count as busy.
+    void Loader::abort_farthest() {
+        if (_request.current.empty()) {
+            return;
+        }
+
+        if (const auto found = _cache.find(_request.current); found != _cache.end()) {
+            const Entry &entry = found->second;
+
+            if (entry.pyramid != nullptr || entry.tileCache != nullptr || !entry.error.empty()) {
+                return;
+            }
+        }
+
+        bool whole = false;
+        bool frames = false;
+        bool later = false;
+
+        if (!wants_job(_request.current, &whole, &frames, &later)) {
+            return;
+        }
+
+        // A neighbour is the likeliest next step, so one stops only when nothing farther is decoding.
+        const auto distance = [&](const Job &job) { return rank(job.file) + (near(job.file) ? 0 : FAR); };
+        const Job *farthest = nullptr;
+        std::size_t busy = 0;
+
+        for (const Job &job : _jobs) {
+            if (job.abort->requested()) {
+                continue;
+            }
+
+            ++busy;
+
+            if (farthest == nullptr || distance(job) > distance(*farthest)) {
+                farthest = &job;
+            }
+        }
+
+        if (farthest != nullptr && busy >= _workers.size()) {
+            farthest->abort->request();
         }
     }
 
@@ -1309,7 +1411,10 @@ namespace tiv {
 
     void Loader::post(Result result) {
         _results.push_back(std::move(result));
+        wake_app();
+    }
 
+    void Loader::wake_app() const {
         SDL_Event event{};
 
         event.type = _event;

@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <new>
 #include <ranges>
 #include <span>
 #include <string>
@@ -193,25 +194,37 @@ namespace tiv::Decode {
             return Direct::Done;
         }
 
-        // Bands of rows of the height on up to MAX_THREADS threads, until an abort.
+        // Bands of rows of the height on up to MAX_THREADS threads, until an abort. A band with no
+        // memory for it throws std::bad_alloc on the calling thread, once every thread is done.
         void parallel_rows(const int height, const std::function<void(int from, int to)> &each, const Abort *abort) {
             const int bands = (height + ABORT_ROWS - 1) / ABORT_ROWS;
             const int wanted = std::min(MAX_THREADS, static_cast<int>(std::thread::hardware_concurrency()));
             std::atomic<int> next = 0;
+            std::atomic<bool> starved = false;
 
             const auto work = [&] {
-                for (int band = next++; band < bands && !aborted(abort); band = next++) {
-                    each(band * ABORT_ROWS, std::min((band + 1) * ABORT_ROWS, height));
+                try {
+                    for (int band = next++; band < bands && !starved && !aborted(abort); band = next++) {
+                        each(band * ABORT_ROWS, std::min((band + 1) * ABORT_ROWS, height));
+                    }
+                } catch (const std::bad_alloc &) {
+                    starved = true;
                 }
             };
 
-            std::vector<std::jthread> workers;
+            {
+                std::vector<std::jthread> workers;
 
-            for (int i = 1; i < std::min(bands, std::max(wanted, 1)); ++i) {
-                workers.emplace_back(work);
+                for (int i = 1; i < std::min(bands, std::max(wanted, 1)); ++i) {
+                    workers.emplace_back(work);
+                }
+
+                work();
             }
 
-            work();
+            if (starved) {
+                throw std::bad_alloc();
+            }
         }
 
         // The base rendition lifted by its gain map as far as the display's headroom goes, into

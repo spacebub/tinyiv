@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <new>
 #include <span>
 #include <string>
 #include <thread>
@@ -52,14 +53,16 @@ namespace tiv {
             const int top = std::max(piece.y - SVG_REACH, 0);
             const int width = std::min(piece.x + piece.width + SVG_REACH, whole.width) - left;
             const int height = std::min(piece.y + piece.height + SVG_REACH, whole.height) - top;
-            const std::string narrowed =
-                    Svg::narrow(document, scale, whole.width, whole.height, left, top, width, height);
 
-            if (narrowed.empty()) {
-                return false;
-            }
-
+            // Pieces draw on threads of their own, so a piece with no memory for it fails like a bad one.
             try {
+                const std::string narrowed =
+                        Svg::narrow(document, scale, whole.width, whole.height, left, top, width, height);
+
+                if (narrowed.empty()) {
+                    return false;
+                }
+
                 const VImage drawn = VImage::new_from_buffer(narrowed.data(), narrowed.size(), "");
 
                 if (drawn.width() != width || drawn.height() != height) {
@@ -70,6 +73,8 @@ namespace tiv {
                         Decode::Vips::prepare(drawn.crop(piece.x - left, piece.y - top, piece.width, piece.height), {}),
                         out, nullptr);
             } catch (const vips::VError &) {
+                return false;
+            } catch (const std::bad_alloc &) {
                 return false;
             }
         }

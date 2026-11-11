@@ -89,6 +89,7 @@ namespace tiv {
         bool open_window(std::string *error);
         void layout();
         void update_display();
+        void update_refresh();
         bool make_renderer(bool linear);
         void follow_output(const Loader::Result &result);
         void set_fullscreen(bool on);
@@ -133,6 +134,8 @@ namespace tiv {
         void wait_for_event();
         // Milliseconds the loop may sleep, or -1 for until the next event.
         [[nodiscard]] int wait_ms() const;
+        // Milliseconds until the frame wanted may be drawn, or -1 when no frame is wanted.
+        [[nodiscard]] int frame_wait_ms() const;
         [[nodiscard]] Rect play_bar() const;
 
         // Where in the folder the image is and its name, marked while turned and not saved.
@@ -234,6 +237,12 @@ namespace tiv {
         bool _running = true;
         bool _dirty = true;
         int _repaints = 0;
+        // Presentation waits for the display. Without it, a frame of a drag follows the one before after
+        // half a refresh at the soonest.
+        bool _vsync = true;
+        float _refreshRate = 60.0F;
+        // In SDL_GetTicksNS() time.
+        std::uint64_t _drawnAt = 0;
     };
 }
 

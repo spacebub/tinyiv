@@ -320,7 +320,7 @@ namespace tiv {
     bool Decode::recognised(const std::filesystem::path &file) {
         Mapped mapped;
 
-        if (Mapped::open(file, &mapped) && sniff(mapped.data()) != Format::Other) {
+        if (Mapped::open(file, &mapped, nullptr, Mapped::Use::Head) && sniff(mapped.data()) != Format::Other) {
             return true;
         }
 
@@ -336,7 +336,7 @@ namespace tiv {
     bool Decode::probe(const std::filesystem::path &file, Info *info, std::string *error) {
         Mapped mapped;
 
-        if (!Mapped::open(file, &mapped, error)) {
+        if (!Mapped::open(file, &mapped, error, Mapped::Use::Head)) {
             return false;
         }
 

@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <new>
 #include <span>
 #include <thread>
 #include <utility>
@@ -449,15 +450,8 @@ namespace tiv {
 
         set_masks(masks);
 
-        // Alpha that is zero everywhere is taken for no alpha at all, as Chromium's reader does:
-        // https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/platform/image-decoders/bmp/bmp_image_reader.cc
-        if (alphaInPixels && any_alpha(masks.at(3))) {
-            _alpha = Alpha::Pixels;
-        } else if (!_mask.empty()) {
-            _alpha = Alpha::Mask;
-        } else {
-            _alpha = Alpha::Opaque;
-        }
+        _alphaBits = alphaInPixels ? masks.at(3) : 0;
+        _alpha = _mask.empty() ? Alpha::Opaque : Alpha::Mask;
 
         return true;
     }
@@ -799,7 +793,13 @@ namespace tiv {
         }
     }
 
-    bool Bmp::Image::decode(const int factor, Bitmap *out, const Decode::Abort *abort, const Kernel kernel) const {
+    bool Bmp::Image::decode(const int factor, Bitmap *out, const Decode::Abort *abort, const Kernel kernel) {
+        // Alpha that is zero everywhere is taken for no alpha at all, as Chromium's reader does:
+        // https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/platform/image-decoders/bmp/bmp_image_reader.cc
+        if (_alphaBits != 0 && any_alpha(_alphaBits)) {
+            _alpha = Alpha::Pixels;
+        }
+
         Bitmap target = Bitmap::allocate((_width + factor - 1) / factor, (_height + factor - 1) / factor);
 
         if (_layout == Layout::Rle8 || _layout == Layout::Rle4) {
@@ -823,7 +823,13 @@ namespace tiv {
 
             for (int from = band; from < target.height(); from += band) {
                 workers.emplace_back([&, from] {
-                    decode_band(from, std::min(from + band, target.height()), factor, target, kernels, abort, stopped);
+                    // A band with no memory for it stops the decode as an abort would.
+                    try {
+                        decode_band(from, std::min(from + band, target.height()), factor, target, kernels, abort,
+                                    stopped);
+                    } catch (const std::bad_alloc &) {
+                        stopped = true;
+                    }
                 });
             }
 

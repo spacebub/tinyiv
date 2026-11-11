@@ -253,8 +253,10 @@ namespace tiv {
                         continue;
                     }
 
-                    const std::size_t images = reader.u32(entry + 4) / MP_ENTRY_BYTES;
                     const std::size_t table = reader.u32(entry + 8);
+                    // A count read from the file is held to the entries that fit in the segment.
+                    const std::size_t fit = table < tiff.size() ? (tiff.size() - table) / MP_ENTRY_BYTES : 0;
+                    const std::size_t images = std::min<std::size_t>(reader.u32(entry + 4) / MP_ENTRY_BYTES, fit);
 
                     // The first entry is the primary image itself.
                     for (std::size_t i = 1; i < images; ++i) {
@@ -265,6 +267,9 @@ namespace tiv {
                             held.push_back(data.subspan(origin + offset, size));
                         }
                     }
+
+                    // A segment has one MP entry tag.
+                    break;
                 }
             }
 

@@ -16,6 +16,7 @@
 // jpeglib.h names FILE without including it.
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <numeric>
 #include <span>
 #include <thread>
@@ -310,7 +311,7 @@ namespace tiv::Decode {
 
             // One scan of every component, else the rows are spread over several scans.
             if (marker == SOS) {
-                if (frame.components == 0 || std::cmp_not_equal(segment[4], frame.components)) {
+                if (segment.size() < 5 || frame.components == 0 || std::cmp_not_equal(segment[4], frame.components)) {
                     return false;
                 }
 
@@ -407,8 +408,9 @@ namespace tiv::Decode {
         }
 
         // Only ordered and within the file: reading each marker would touch the whole file again.
+        // A step ends at the restart marker before the next start, so starts lie at least a marker apart.
         for (std::size_t i = 1; i < starts.size(); ++i) {
-            if (starts.at(i) <= starts.at(i - 1) || starts.at(i) >= data.size()) {
+            if (starts.at(i) < starts.at(i - 1) + 2 || starts.at(i) >= data.size()) {
                 return false;
             }
         }
@@ -439,6 +441,11 @@ namespace tiv::Decode {
         const int rows = std::min(last * _step, _height) - top;
         const std::uint64_t from = _starts.at(static_cast<std::size_t>(first));
         const std::uint64_t to = last < steps() ? _starts.at(static_cast<std::size_t>(last)) - 2 : _end;
+
+        if (to < from) {
+            return false;
+        }
+
         std::vector<std::uint8_t> header(_header);
 
         header.at(_heightAt) = static_cast<std::uint8_t>(static_cast<unsigned>(rows) >> 8U);
@@ -544,8 +551,13 @@ namespace tiv::Decode {
             const int keepTop = std::max(scaled(from * _step, num), outTop);
             const int keepBottom = scaled(std::min(to * _step, bottom), num);
 
-            if (!decode_steps(fetch, std::max(from - margin, 0), std::min(to + margin, steps()), num, keepTop,
-                              keepBottom, outTop, out, abort)) {
+            // A band with no memory for it fails like one that cannot be read.
+            try {
+                if (!decode_steps(fetch, std::max(from - margin, 0), std::min(to + margin, steps()), num, keepTop,
+                                  keepBottom, outTop, out, abort)) {
+                    ok = false;
+                }
+            } catch (const std::bad_alloc &) {
                 ok = false;
             }
         };

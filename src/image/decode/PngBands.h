@@ -70,8 +70,8 @@ namespace tiv::Decode {
 
         [[nodiscard]] std::span<const Checkpoint> checkpoints() const { return _checkpoints; }
 
-        // The checkpoints of an earlier scan of the same file.
-        void adopt(std::vector<Checkpoint> checkpoints) { _checkpoints = std::move(checkpoints); }
+        // The checkpoints of an earlier scan of the same file. False when they could not have come from one.
+        bool adopt(std::vector<Checkpoint> checkpoints);
 
         // The rows from top, count of them or to the bottom, as RGBA into out, which is as wide as
         // the image, from the checkpoints before them. Uses up to threads threads.

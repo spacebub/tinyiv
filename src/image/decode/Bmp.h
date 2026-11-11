@@ -47,7 +47,7 @@ namespace tiv::Bmp {
 
         // Every row as RGBA8, averaged factor by factor when factor is above one. Rows missing
         // from a truncated file come out transparent.
-        bool decode(int factor, Bitmap *out, const Decode::Abort *abort = nullptr, Kernel kernel = Kernel::Auto) const;
+        bool decode(int factor, Bitmap *out, const Decode::Abort *abort = nullptr, Kernel kernel = Kernel::Auto);
 
     private:
         enum class Layout : std::uint8_t {
@@ -105,6 +105,8 @@ namespace tiv::Bmp {
         std::array<Channel, 4> _channels{};
         std::size_t _stride = 0;
         std::size_t _maskStride = 0;
+        // The bits of a pixel that may hold alpha, looked at only once the pixels are decoded.
+        std::uint32_t _alphaBits = 0;
         int _width = 0;
         int _height = 0;
         int _depth = 0;

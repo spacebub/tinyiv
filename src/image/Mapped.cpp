@@ -196,7 +196,7 @@ namespace tiv {
         if (use == Use::Through) {
             madvise(memory, size, MADV_SEQUENTIAL);
             madvise(memory, read_ahead(size), MADV_WILLNEED);
-        } else {
+        } else if (use == Use::Scattered) {
             madvise(memory, size, MADV_RANDOM);
         }
 

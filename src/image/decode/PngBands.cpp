@@ -16,7 +16,9 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <new>
 #include <span>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -474,8 +476,12 @@ namespace tiv::Decode {
         const std::uint8_t *data = body.data();
 
         if (named(type, "IHDR") && body.size() >= IHDR) {
-            _width = static_cast<int>(std::min(big32(data), MAX_SIDE));
-            _height = static_cast<int>(std::min(big32(data + 4), MAX_SIDE));
+            const std::uint32_t width = big32(data);
+            const std::uint32_t height = big32(data + 4);
+
+            // A side too large to hold is made zero, which supported() refuses.
+            _width = width <= MAX_SIDE ? static_cast<int>(width) : 0;
+            _height = height <= MAX_SIDE ? static_cast<int>(height) : 0;
             _depth = data[DEPTH];
             _colour = data[COLOUR];
             *plain = data[INTERLACE] == 0;
@@ -765,6 +771,32 @@ namespace tiv::Decode {
         return lines.y == _height;
     }
 
+    bool PngBands::adopt(std::vector<Checkpoint> checkpoints) {
+        const std::uint64_t line = _rowBytes + 1;
+        const std::uint64_t total = static_cast<std::uint64_t>(_height) * line;
+        std::error_code failure;
+        const std::uintmax_t size = std::filesystem::file_size(_file, failure);
+
+        if (failure || checkpoints.empty() || checkpoints.front().out != 0) {
+            return false;
+        }
+
+        // As scan() makes them: in order, in the image data, fewer than eight bits held, the first row from out.
+        for (std::size_t i = 0; i < checkpoints.size(); ++i) {
+            const Checkpoint &point = checkpoints.at(i);
+            const bool ordered = i == 0 || point.out > checkpoints.at(i - 1).out;
+
+            if (!ordered || point.bits >= 8 || point.file < _data || point.file >= size || point.out > total
+                || point.first != (point.out + line - 1) / line) {
+                return false;
+            }
+        }
+
+        _checkpoints = std::move(checkpoints);
+
+        return true;
+    }
+
     bool PngBands::decode_from(const std::size_t checkpoint, const int first, const int last, Bitmap *out,
                                const int outTop, const Recall &recall) const {
         const Checkpoint &point = _checkpoints.at(checkpoint);
@@ -863,7 +895,12 @@ namespace tiv::Decode {
             for (std::size_t i = taken++; i < pieces.size() && ok; i = taken++) {
                 const Piece &piece = pieces.at(i);
 
-                if (!decode_from(piece.checkpoint, piece.first, piece.last, out, top, recall)) {
+                // A piece with no memory for it fails like one that cannot be read.
+                try {
+                    if (!decode_from(piece.checkpoint, piece.first, piece.last, out, top, recall)) {
+                        ok = false;
+                    }
+                } catch (const std::bad_alloc &) {
                     ok = false;
                 }
             }

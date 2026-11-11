@@ -72,6 +72,8 @@ namespace tiv {
         // Keeps white at or below the knee of the roll off, which starts at 80% of the headroom.
         constexpr float MIN_HDR_HEADROOM = 1.25F;
         constexpr float HEADROOM_STEPS = 100.0F;
+        // Where the display gives no refresh rate.
+        constexpr float FALLBACK_REFRESH_RATE = 60.0F;
 
         // Keys are two spaces apart, the words of one key a single space.
         constexpr std::array<StatusBar::Row, 19> HELP = {
@@ -334,6 +336,7 @@ namespace tiv {
 
         layout();
         update_display();
+        update_refresh();
         // Said even when SDR, since HDR images wait for it before they build pyramids of tiles.
         _loader->set_display(_display);
         // A result posted before SDL_Init has no event queue to wake the loop.
@@ -412,7 +415,11 @@ namespace tiv {
         }
 
         _linear = linear;
-        SDL_SetRenderVSync(_renderer, vsync_setting(_renderer, _window));
+
+        const int vsync = vsync_setting(_renderer, _window);
+
+        SDL_SetRenderVSync(_renderer, vsync);
+        _vsync = vsync != 0;
 
         const auto maxTexture = static_cast<int>(SDL_GetNumberProperty(
                 SDL_GetRendererProperties(_renderer), SDL_PROP_RENDERER_MAX_TEXTURE_SIZE_NUMBER, Tiles::SIZE));
@@ -533,11 +540,10 @@ namespace tiv {
             // Asks for the streamed tiles the view meets before deciding there is nothing to do.
             _canvas->fetch(_viewport);
 
-            const bool idle = !_canvas->pending(_viewport) && _repaints == 0;
-
-            // Nothing to upload or repaint means nothing to do until something happens, except
-            // that a loading indicator has to keep moving and an animation has frames due.
-            if (idle) {
+            // Nothing to upload and no frame to draw yet means nothing to do until something happens,
+            // except that a frame comes due, a loading indicator has to keep moving or an animation
+            // has frames due.
+            if (!_canvas->pending(_viewport) && frame_wait_ms() != 0) {
                 wait_for_event();
             }
 
@@ -563,7 +569,8 @@ namespace tiv {
                 _dirty = true;
             }
 
-            if (_dirty || _repaints > 0) {
+            if (frame_wait_ms() == 0) {
+                _drawnAt = SDL_GetTicksNS();
                 frame();
                 // Presented from idle, a frame can land before the compositor has caught up and
                 // stay unseen until the next, so every change is drawn once more after it.
@@ -627,6 +634,7 @@ namespace tiv {
         if (is_window_event(event)) {
             layout();
             update_display();
+            update_refresh();
 
             return;
         }
@@ -1145,6 +1153,12 @@ namespace tiv {
         }
     }
 
+    void App::update_refresh() {
+        const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(_window));
+
+        _refreshRate = mode != nullptr && mode->refresh_rate > 0.0F ? mode->refresh_rate : FALLBACK_REFRESH_RATE;
+    }
+
     void App::toggle_stream() {
         const bool on = !_loader->streaming_all();
 
@@ -1171,12 +1185,21 @@ namespace tiv {
         show(_folder.index(), _direction);
     }
 
-    // The images prefetched stay as they are, and the next step fetches the new neighbours.
+    // The images prefetched stay as they are, and the next step fetches the new neighbours. The canvas
+    // keeps its images by place in the folder, so the image on screen takes its new place. Before the
+    // current image arrives, or once it failed, the canvas holds the one before, which goes.
     void App::next_order() {
         const auto *const at = std::ranges::find(ORDERS, _folder.order(), &OrderText::order);
         const OrderText &next = std::next(at) == ORDERS.end() ? ORDERS.front() : *std::next(at);
 
         _folder.sort(next.order);
+
+        if (_shown == _generation && _failure.empty()) {
+            _canvas->renumber(static_cast<std::uint64_t>(_folder.index()));
+        } else {
+            _canvas->clear();
+        }
+
         _flash = next.text;
         _switchedAt = SDL_GetTicks();
         _dirty = true;
@@ -1341,14 +1364,34 @@ namespace tiv {
         give_back();
 
         SDL_Event event{};
-        const int wait = wait_ms();
+        const int deadline = wait_ms();
+        const int frameWait = frame_wait_ms();
+        const int wait = deadline < 0 || (frameWait >= 0 && frameWait < deadline) ? frameWait : deadline;
 
         if (wait < 0 ? SDL_WaitEvent(&event) : SDL_WaitEventTimeout(&event, wait)) {
             handle(event);
-        } else {
-            // Every timeout is a deadline that changes the frame, such as the badge going away.
+        } else if (wait == deadline) {
+            // A deadline changes the frame, such as the badge going away. A frame coming due does not.
             _dirty = true;
         }
+    }
+
+    int App::frame_wait_ms() const {
+        if (!_dirty && _repaints == 0) {
+            return -1;
+        }
+
+        // Only a drag asks for frames faster than the display shows them. Anything else is drawn at once.
+        if (_vsync || (!_input.dragging() && !_seeking)) {
+            return 0;
+        }
+
+        const auto gap = static_cast<std::uint64_t>(static_cast<double>(SDL_NS_PER_SECOND) / 2.0 / _refreshRate);
+        const std::uint64_t due = _drawnAt + gap;
+        const std::uint64_t now = SDL_GetTicksNS();
+
+        // Rounded up, so a wait shorter than a millisecond sleeps instead of spinning.
+        return due > now ? static_cast<int>((due - now + SDL_NS_PER_MS - 1) / SDL_NS_PER_MS) : 0;
     }
 
     int App::wait_ms() const {

@@ -68,23 +68,55 @@ namespace tiv {
             return SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE * TEXT_SCALE * scale;
         }
 
+        bool continues(const char c) {
+            return (static_cast<unsigned char>(c) & 0xC0U) == 0x80U;
+        }
+
+        // The debug font advances one glyph per UTF-8 code point.
+        std::size_t code_points(const std::string_view text) {
+            return static_cast<std::size_t>(std::ranges::count_if(text, [](const char c) { return !continues(c); }));
+        }
+
+        // The first count code points of text, whole.
+        std::string leading(const std::string &text, const std::size_t count) {
+            std::size_t seen = 0;
+
+            for (std::size_t i = 0; i < text.size(); ++i) {
+                if (continues(text.at(i))) {
+                    continue;
+                }
+
+                if (seen == count) {
+                    return text.substr(0, i);
+                }
+
+                ++seen;
+            }
+
+            return text;
+        }
+
+        float text_width(const std::string_view text, const float scale) {
+            return static_cast<float>(code_points(text)) * glyph(scale);
+        }
+
         float badge_width(const std::string &text, const float scale) {
-            return (static_cast<float>(text.size()) * glyph(scale)) + (2.0F * PADDING * scale);
+            return text_width(text, scale) + (2.0F * PADDING * scale);
         }
 
         // Cut to the width in glyphs, ending in three dots when something had to go.
         std::string fitted(const std::string &text, const float width, const float scale) {
             const auto room = static_cast<std::size_t>(std::max(width / glyph(scale), 0.0F));
 
-            if (text.size() <= room) {
+            if (code_points(text) <= room) {
                 return text;
             }
 
             if (room <= CUT_MARK) {
-                return text.substr(0, room);
+                return leading(text, room);
             }
 
-            return text.substr(0, room - CUT_MARK) + "...";
+            return leading(text, room - CUT_MARK) + "...";
         }
 
         void text_at(SDL_Renderer *renderer, const float x, const float y, const float scale, const std::string &text) {
@@ -121,14 +153,14 @@ namespace tiv {
         const float padding = PADDING * scale;
         const float y = area.y + ((area.h - glyph(scale)) / 2.0F);
         const std::string rightText = fitted(loading ? spinning(right) : right, area.w - (2.0F * padding), scale);
-        const float rightWidth = static_cast<float>(rightText.size()) * glyph(scale);
+        const float rightWidth = text_width(rightText, scale);
         const std::string leftText = fitted(left, area.w - (3.0F * padding) - rightWidth, scale);
-        const float leftWidth = static_cast<float>(leftText.size()) * glyph(scale);
+        const float leftWidth = text_width(leftText, scale);
         // Clear of the left and right texts, with a padding between them.
         const float first = area.x + padding + (leftWidth > 0.0F ? leftWidth + padding : 0.0F);
         const float end = area.x + area.w - padding - (rightWidth > 0.0F ? rightWidth + padding : 0.0F);
         const std::string middleText = fitted(middle, end - first, scale);
-        const float middleWidth = static_cast<float>(middleText.size()) * glyph(scale);
+        const float middleWidth = text_width(middleText, scale);
         // Slides off the centre when it would run into either side.
         const float middleX = std::max(std::min(area.x + ((area.w - middleWidth) / 2.0F), end - middleWidth), first);
 
@@ -179,11 +211,6 @@ namespace tiv {
             const int which = static_cast<unsigned char>(text.at(at + 2)) - ARROW_FIRST;
 
             return which >= 0 && which < 4 ? TURNS.at(static_cast<std::size_t>(which)) : -1;
-        }
-
-        std::size_t code_points(const std::string_view text) {
-            return static_cast<std::size_t>(std::ranges::count_if(
-                    text, [](const char c) { return (static_cast<unsigned char>(c) & 0xC0U) != 0x80U; }));
         }
 
         // A shaft and a head filling the glyph cell at (x, y), turned from pointing right.

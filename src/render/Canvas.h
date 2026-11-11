@@ -71,6 +71,10 @@ namespace tiv {
         // Forgets every image but the one shown and the ones listed.
         void keep(std::span<const std::uint64_t> images);
 
+        // The image shown is now this one, as the folder sorted again. The neighbours go, since the
+        // numbers they are kept by may name other images now.
+        void renumber(std::uint64_t image);
+
         void clear();
 
         [[nodiscard]] bool has_image() const { return !_current.sheets.empty(); }

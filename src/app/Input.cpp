@@ -14,6 +14,23 @@
 #include "view/Viewport.h"
 
 namespace tiv {
+    namespace {
+        // Held down, these step and zoom on. Any other key acts once per press.
+        bool repeats(const SDL_Keycode key) {
+            switch (key) {
+                case SDLK_LEFT:
+                case SDLK_RIGHT:
+                case SDLK_UP:
+                case SDLK_DOWN:
+                case SDLK_COMMA:
+                case SDLK_PERIOD:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+    }
+
     Input::Action Input::handle(const SDL_Event &event, const float density, const double top, Viewport &viewport) {
         switch (event.type) {
             case SDL_EVENT_QUIT:
@@ -86,6 +103,10 @@ namespace tiv {
     }
 
     Input::Action Input::key(const SDL_KeyboardEvent &event, Viewport &viewport) {
+        if (event.repeat && !repeats(event.key)) {
+            return Action::None;
+        }
+
         switch (event.key) {
             case SDLK_ESCAPE:
             case SDLK_Q:

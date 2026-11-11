@@ -35,6 +35,8 @@ namespace tiv {
             Through,
             // Here and there, as an index points.
             Scattered,
+            // Only the headers, as a probe reads them, left to the system's usual read ahead.
+            Head,
         };
 
         static bool open(const std::filesystem::path &file, Mapped *out, std::string *error = nullptr,

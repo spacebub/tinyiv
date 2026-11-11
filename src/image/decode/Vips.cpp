@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <mutex>
 #include <optional>
@@ -170,7 +171,8 @@ namespace tiv::Decode {
             const int slice = (area->height + threads - 1) / threads;
             const int bottom = area->top + area->height;
 
-            {
+            // libvips calls this from C, so a thread that cannot start fails the region instead of unwinding.
+            try {
                 std::vector<std::jthread> workers;
 
                 for (int from = area->top + slice; from < bottom; from += slice) {
@@ -178,6 +180,8 @@ namespace tiv::Decode {
                 }
 
                 map_rows<Sample>(region, area, sink, area->top, std::min(area->top + slice, bottom));
+            } catch (const std::exception &) {
+                return -1;
             }
 
             return 0;
@@ -346,8 +350,11 @@ namespace tiv::Decode {
 
             if (via == Via::Thumbnail || via == Via::Scaled) {
                 const VipsSize size = via == Via::Scaled ? VIPS_SIZE_BOTH : VIPS_SIZE_DOWN;
+                // Shapes carry no orientation, and opening a document to ask would parse all of it.
                 const bool swapped =
-                        vips_image_get_orientation_swap(VImage::new_from_file(file.string().c_str()).get_image()) != 0;
+                        via == Via::Thumbnail
+                        && vips_image_get_orientation_swap(VImage::new_from_file(file.string().c_str()).get_image())
+                                   != 0;
 
                 image = VImage::thumbnail(file.string().c_str(), swapped ? boxHeight : boxWidth,
                                           VImage::option()
@@ -430,6 +437,8 @@ namespace tiv::Decode {
     Tone::Source Vips::container_tone(const std::filesystem::path &file) {
         Mapped mapped;
 
-        return Mapped::open(file, &mapped) ? container_tone(sniff(mapped.data()), mapped.data()) : Tone::Source{};
+        return Mapped::open(file, &mapped, nullptr, Mapped::Use::Head)
+                       ? container_tone(sniff(mapped.data()), mapped.data())
+                       : Tone::Source{};
     }
 }

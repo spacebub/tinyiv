@@ -66,6 +66,9 @@ namespace tiv {
         // upload() would do something.
         [[nodiscard]] bool uploadable(const Rect &area) const;
 
+        // Bytes of the tiles meeting the area that upload() would upload with no limit on the budget.
+        [[nodiscard]] std::size_t uploadable_bytes(const Rect &area) const;
+
         // The tile cache's keys of the tiles meeting the area that have no texture, nearest its
         // centre first. Nothing for a bitmap, which has every tile at hand.
         void missing(const Rect &area, std::vector<TileCache::Key> *out) const;
@@ -74,7 +77,8 @@ namespace tiv {
         // orientation. Tiles drawn are stamped as used.
         void draw(const Rect &area, const Rect &shown, int orientation, std::uint64_t stamp, const Missing &missing);
 
-        // Frees tiles last used before the stamp until the wanted bytes are freed. Returns what was freed.
+        // Frees tiles last used before the stamp, the least recently used first, until the wanted bytes
+        // are freed. Returns what was freed.
         std::size_t evict(std::uint64_t before, std::size_t wanted);
 
         std::size_t evict_all();

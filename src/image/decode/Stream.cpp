@@ -92,10 +92,11 @@ namespace tiv::Decode {
                 std::string *error, Abort *abort, const Tone::Display &display, const int shrink) {
         Format kind = Format::Other;
 
-        if (Mapped mapped; Mapped::open(file, &mapped)) {
+        if (Mapped mapped; Mapped::open(file, &mapped, nullptr, Mapped::Use::Head)) {
             kind = sniff(mapped.data());
 
-            if (kind == Format::Jxl && shrink == 1) {
+            // Mapped again to be read through, now that it is known to be decoded from the mapping.
+            if (kind == Format::Jxl && shrink == 1 && Mapped::open(file, &mapped)) {
                 const Direct direct = Jxl::stream(mapped.data(), rows, begin, take, abort, display);
 
                 if (direct != Direct::Skip) {
@@ -114,7 +115,7 @@ namespace tiv::Decode {
     std::uint64_t stream_bytes(const std::filesystem::path &file, const int rows) {
         Mapped mapped;
 
-        if (!Mapped::open(file, &mapped) || sniff(mapped.data()) != Format::Jxl) {
+        if (!Mapped::open(file, &mapped, nullptr, Mapped::Use::Head) || sniff(mapped.data()) != Format::Jxl) {
             return 0;
         }
 

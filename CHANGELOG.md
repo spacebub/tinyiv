@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- An image that is not decoded yet no longer waits behind the images being decoded ahead of it
+- The images either side of the one on screen are ready on the GPU more often, so a step to them draws at once
+- A large image opened fresh shows at medium sharpness across the whole view first, then sharpens
+- Dragging draws at most two frames for each refresh of the display
+
+### Fixed
+
+- Making room in the cache folder no longer deletes `.part` files of other programs kept there
+- A JPEG with a malformed MPF segment no longer hangs a decoder
+- Sorting with O no longer shows another image of the same size under the wrong name
+- File names with characters outside ASCII are centred and cut at the right width in the top bar
+- Holding a key no longer repeats F, S, O, R and the other switches. The arrows, comma and period still repeat
+- Ctrl+S writes the new file to disk before it replaces the image, so a power loss cannot leave the image cut short
+- Running out of memory in the middle of a decode no longer quits tinyiv
+
 ## 1.3.5 - 2026-11-11
 
 ### Added

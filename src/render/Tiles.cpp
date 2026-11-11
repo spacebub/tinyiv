@@ -285,6 +285,18 @@ namespace tiv {
         });
     }
 
+    std::size_t Tiles::uploadable_bytes(const Rect &area) const {
+        std::size_t bytes = 0;
+
+        for (const auto &[column, row] : wanting(area)) {
+            if (_tileCache == nullptr || _tileCache->find({.level = _level, .column = column, .row = row}) != nullptr) {
+                bytes += bytes_of(at(column, row));
+            }
+        }
+
+        return bytes;
+    }
+
     void Tiles::missing(const Rect &area, std::vector<TileCache::Key> *out) const {
         if (_tileCache == nullptr) {
             return;
@@ -361,17 +373,25 @@ namespace tiv {
     }
 
     std::size_t Tiles::evict(const std::uint64_t before, const std::size_t wanted) {
-        std::size_t freed = 0;
+        std::vector<Tile *> stale;
 
         for (Tile &tile : _tiles) {
+            if (tile.texture != nullptr && tile.used < before) {
+                stale.push_back(&tile);
+            }
+        }
+
+        std::ranges::stable_sort(stale, std::ranges::less(), [](const Tile *tile) { return tile->used; });
+
+        std::size_t freed = 0;
+
+        for (Tile *tile : stale) {
             if (freed >= wanted) {
                 break;
             }
 
-            if (tile.texture != nullptr && tile.used < before) {
-                freed += bytes_of(tile);
-                release(tile);
-            }
+            freed += bytes_of(*tile);
+            release(*tile);
         }
 
         return freed;

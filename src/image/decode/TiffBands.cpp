@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <span>
 #include <thread>
 #include <vector>
@@ -210,7 +211,12 @@ namespace tiv::Decode {
     void TiffBands::give(TIFF *handle) const {
         const std::scoped_lock hold(_guard);
 
-        _idle.push_back(handle);
+        // A handle with no room to keep it is closed, and opened again when one is wanted.
+        try {
+            _idle.push_back(handle);
+        } catch (const std::bad_alloc &) {
+            TIFFClose(handle);
+        }
     }
 
     std::vector<TiffBands::Unit> TiffBands::units(const int top, const int bottom) const {
@@ -231,9 +237,7 @@ namespace tiv::Decode {
     }
 
     bool TiffBands::read(TIFF *handle, const Unit &unit, const int top, const int bottom,
-                         std::vector<std::uint8_t> &scratch, Bitmap *out) const {
-        scratch.resize(_unitBytes);
-
+                         const std::span<std::uint8_t> scratch, Bitmap *out) const {
         const tmsize_t got =
                 _tiled ? TIFFReadEncodedTile(handle, unit.index, scratch.data(), static_cast<tmsize_t>(scratch.size()))
                        : TIFFReadEncodedStrip(handle, unit.index, scratch.data(),
@@ -267,23 +271,28 @@ namespace tiv::Decode {
         std::atomic<bool> ok = true;
 
         const auto work = [&] {
-            TIFF *handle = take();
+            // A thread with no memory for its scratch fails like a unit that cannot be read.
+            try {
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays): the array form is how unique_ptr owns a raw buffer.
+                const auto scratch = std::make_unique_for_overwrite<std::uint8_t[]>(_unitBytes);
+                TIFF *handle = take();
 
-            if (handle == nullptr) {
-                ok = false;
-
-                return;
-            }
-
-            std::vector<std::uint8_t> scratch;
-
-            for (std::size_t i = next++; i < todo.size() && ok && !aborted(abort); i = next++) {
-                if (!read(handle, todo.at(i), top, bottom, scratch, out)) {
+                if (handle == nullptr) {
                     ok = false;
-                }
-            }
 
-            give(handle);
+                    return;
+                }
+
+                for (std::size_t i = next++; i < todo.size() && ok && !aborted(abort); i = next++) {
+                    if (!read(handle, todo.at(i), top, bottom, std::span(scratch.get(), _unitBytes), out)) {
+                        ok = false;
+                    }
+                }
+
+                give(handle);
+            } catch (const std::bad_alloc &) {
+                ok = false;
+            }
         };
 
         {

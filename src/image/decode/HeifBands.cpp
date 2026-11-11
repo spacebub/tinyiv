@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -182,7 +183,12 @@ namespace tiv::Decode {
     void HeifBands::give(std::unique_ptr<Opened> opened) const {
         const std::scoped_lock hold(_guard);
 
-        _idle.push_back(std::move(opened));
+        // A handle with no room to keep it is closed, and opened again when one is wanted.
+        try {
+            _idle.push_back(std::move(opened));
+        } catch (const std::bad_alloc &) {
+            opened.reset();
+        }
     }
 
     bool HeifBands::read(const Opened &opened, const int column, const int row, const int top, const int bottom,
@@ -241,7 +247,16 @@ namespace tiv::Decode {
         std::atomic<bool> ok = true;
 
         const auto work = [&] {
-            std::unique_ptr<Opened> opened = take();
+            std::unique_ptr<Opened> opened;
+
+            // A thread with no memory to open the file fails like a tile that cannot be read.
+            try {
+                opened = take();
+            } catch (const std::bad_alloc &) {
+                ok = false;
+
+                return;
+            }
 
             if (opened == nullptr) {
                 ok = false;

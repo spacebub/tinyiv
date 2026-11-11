@@ -144,7 +144,7 @@ namespace bench {
             const std::vector<tiv::TileCache::Key> keys = every_tile(*tileCache, 0);
 
             for ([[maybe_unused]] auto step : state) {
-                tileCache->shrink();
+                tileCache->shrink().clear();
                 benchmark::DoNotOptimize(read_all(*tileCache, keys).data());
             }
 

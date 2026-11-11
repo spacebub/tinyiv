@@ -188,8 +188,9 @@ namespace tiv {
         // Tiles asked for that have not arrived yet.
         [[nodiscard]] bool reading() const;
 
-        // Lets go of every tile in memory but the pinned ones.
-        void shrink() const;
+        // Lets go of every tile in memory but the pinned ones, and hands them back so the caller
+        // chooses the thread that frees them.
+        [[nodiscard]] std::vector<std::shared_ptr<const Bitmap>> shrink() const;
 
         // The tile is on the GPU, so a lean tile cache lets go of it unless pinned.
         void uploaded(const Key &key) const;

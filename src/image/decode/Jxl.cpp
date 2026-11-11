@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -155,6 +156,12 @@ namespace tiv::Decode {
 
             void take(const std::size_t x, const std::size_t y, const std::size_t pixels, const void *samples) const {
                 const std::span<std::uint8_t> out = place(x, y, pixels);
+
+                // Nowhere to put them when the decode has stopped for want of memory.
+                if (out.empty()) {
+                    return;
+                }
+
                 const std::size_t count = pixels * Bitmap::CHANNELS;
                 // Captured by reference, so the adjust fits in std::function without an allocation per run.
                 const std::array<std::size_t, 2> start{x, y};
@@ -421,12 +428,20 @@ namespace tiv::Decode {
                 Slot &slot = _slots.at(index);
 
                 wait_for(index);
-                std::call_once(slot.made, [&] {
-                    const int rows = std::min(_rows, _height - (static_cast<int>(index) * _rows));
 
-                    slot.band = Bitmap::allocate(_width, rows, _encoding);
-                    slot.remaining.store(static_cast<std::size_t>(_width) * static_cast<std::size_t>(rows));
-                });
+                // libjxl calls this from C, so a band with no memory for it stops the decode instead of unwinding.
+                try {
+                    std::call_once(slot.made, [&] {
+                        const int rows = std::min(_rows, _height - (static_cast<int>(index) * _rows));
+
+                        slot.band = Bitmap::allocate(_width, rows, _encoding);
+                        slot.remaining.store(static_cast<std::size_t>(_width) * static_cast<std::size_t>(rows));
+                    });
+                } catch (const std::bad_alloc &) {
+                    stop();
+
+                    return {};
+                }
 
                 return slot.band.row(static_cast<int>(y % static_cast<std::size_t>(_rows)))
                         .subspan(x * Bitmap::CHANNELS, pixels * Bitmap::CHANNELS);

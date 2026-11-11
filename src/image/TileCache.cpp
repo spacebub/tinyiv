@@ -17,8 +17,10 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <list>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -77,6 +79,8 @@ namespace tiv {
         constexpr std::size_t WRITE_BUFFER = std::size_t{16} * 1024 * 1024;
         constexpr std::string_view SUFFIX = ".tiles";
         constexpr std::string_view PART = ".part";
+        // A build writes far more often than this. A fresher unfinished pyramid may belong to another window.
+        constexpr std::chrono::minutes PART_AGE{10};
         constexpr int MAX_ENCODERS = 16;
         // Each encoder holds a tile's worth of buffers, so a lean build keeps to few.
         constexpr int LEAN_ENCODERS = 2;
@@ -358,6 +362,31 @@ namespace tiv {
             return std::format("{:016x}{}", hash(std::as_bytes(std::span(text))), SUFFIX);
         }
 
+        enum class Named : std::uint8_t {
+            Foreign,
+            Finished,
+            Unfinished,
+        };
+
+        // Only names as name_of() gives them, so a folder shared with other programs keeps their files.
+        Named named(const std::filesystem::path &file) {
+            constexpr std::size_t DIGITS = 16;
+            const std::u8string name = file.filename().u8string();
+            const auto digit = [](const char8_t c) { return (c >= u8'0' && c <= u8'9') || (c >= u8'a' && c <= u8'f'); };
+
+            if (name.size() < DIGITS || !std::ranges::all_of(std::u8string_view(name).substr(0, DIGITS), digit)) {
+                return Named::Foreign;
+            }
+
+            const std::u8string_view rest = std::u8string_view(name).substr(DIGITS);
+
+            if (rest == utf8(SUFFIX)) {
+                return Named::Finished;
+            }
+
+            return rest == utf8(SUFFIX) + utf8(PART) ? Named::Unfinished : Named::Foreign;
+        }
+
         // A pyramid of the same image made for another display's headroom, found by its header. Its
         // highlights roll off where that display's did, but it saves a pass over the whole image.
         std::filesystem::path made_for(const std::filesystem::path &dir, const Identity &identity,
@@ -365,7 +394,7 @@ namespace tiv {
             std::error_code failure;
 
             for (const std::filesystem::directory_entry &entry : std::filesystem::directory_iterator(dir, failure)) {
-                if (!entry.is_regular_file(failure) || entry.path().extension() != SUFFIX) {
+                if (!entry.is_regular_file(failure) || named(entry.path()) != Named::Finished) {
                     continue;
                 }
 
@@ -702,11 +731,16 @@ namespace tiv {
                     continue;
                 }
 
-                const std::filesystem::path extension = entry.path().extension();
+                const Named name = named(entry.path());
 
-                if (extension == PART) {
-                    std::filesystem::remove(entry.path(), failure);
-                } else if (extension == SUFFIX) {
+                if (name == Named::Unfinished) {
+                    std::error_code unknown;
+                    const std::filesystem::file_time_type written = entry.last_write_time(unknown);
+
+                    if (!unknown && std::filesystem::file_time_type::clock::now() - written >= PART_AGE) {
+                        std::filesystem::remove(entry.path(), failure);
+                    }
+                } else if (name == Named::Finished) {
                     kept.push_back({
                             .file = entry.path(),
                             .time = entry.last_write_time(failure),
@@ -1196,24 +1230,27 @@ namespace tiv {
             bool read(const int top, const int count, Bitmap *out) const override {
                 const Decode::PngBands::Recall recall = [this](const std::size_t checkpoint,
                                                                std::vector<std::uint8_t> &state) {
-                    std::vector<std::uint8_t> scratch;
-
                     if (checkpoint >= _kept.size() || !_fetch) {
                         return false;
                     }
 
-                    const std::span<const std::uint8_t> packed =
-                            _fetch(_kept.at(checkpoint).at, _kept.at(checkpoint).bytes, scratch);
-                    const unsigned long long size = ZSTD_getFrameContentSize(packed.data(), packed.size());
+                    try {
+                        std::vector<std::uint8_t> scratch;
+                        const std::span<const std::uint8_t> packed =
+                                _fetch(_kept.at(checkpoint).at, _kept.at(checkpoint).bytes, scratch);
+                        const unsigned long long size = ZSTD_getFrameContentSize(packed.data(), packed.size());
 
-                    if (packed.empty() || size == ZSTD_CONTENTSIZE_ERROR || size == ZSTD_CONTENTSIZE_UNKNOWN
-                        || size > MAX_STATE) {
+                        if (packed.empty() || size == ZSTD_CONTENTSIZE_ERROR || size == ZSTD_CONTENTSIZE_UNKNOWN
+                            || size > MAX_STATE) {
+                            return false;
+                        }
+
+                        state.resize(static_cast<std::size_t>(size));
+
+                        return ZSTD_decompress(state.data(), state.size(), packed.data(), packed.size()) == size;
+                    } catch (const std::bad_alloc &) {
                         return false;
                     }
-
-                    state.resize(static_cast<std::size_t>(size));
-
-                    return ZSTD_decompress(state.data(), state.size(), packed.data(), packed.size()) == size;
                 };
 
                 return _bands->decode(top, count, out, read_threads(), recall);
@@ -1257,9 +1294,7 @@ namespace tiv {
                     _kept.at(i) = {.at = stored.at, .bytes = stored.bytes};
                 }
 
-                _bands->adopt(std::move(points));
-
-                return true;
+                return _bands->adopt(std::move(points));
             }
 
         private:
@@ -2157,20 +2192,26 @@ namespace tiv {
             for (int column = next++; column < level.columns; column = next++) {
                 const int width = std::min(TILE, level.width - (column * TILE));
                 const std::size_t from = static_cast<std::size_t>(column) * TILE * Bitmap::CHANNELS;
-                Bitmap tile = Bitmap::allocate(width, rows, _encoding);
 
-                for (int y = 0; y < rows; ++y) {
-                    const std::span<std::uint8_t> target = tile.row(y);
+                // A tile with no memory for it stays missing, to be asked for again.
+                try {
+                    Bitmap tile = Bitmap::allocate(width, rows, _encoding);
 
-                    // A band that cannot be read shows as a hole, else the view would ask for it forever.
-                    if (read) {
-                        std::memcpy(target.data(), band.row(y).subspan(from).data(), target.size());
-                    } else {
-                        std::memset(target.data(), 0, target.size());
+                    for (int y = 0; y < rows; ++y) {
+                        const std::span<std::uint8_t> target = tile.row(y);
+
+                        // A band that cannot be read shows as a hole, else the view would ask for it forever.
+                        if (read) {
+                            std::memcpy(target.data(), band.row(y).subspan(from).data(), target.size());
+                        } else {
+                            std::memset(target.data(), 0, target.size());
+                        }
                     }
-                }
 
-                tiles.at(static_cast<std::size_t>(column)) = std::make_shared<const Bitmap>(std::move(tile));
+                    tiles.at(static_cast<std::size_t>(column)) = std::make_shared<const Bitmap>(std::move(tile));
+                } catch (const std::bad_alloc &) {
+                    continue;
+                }
             }
         };
 
@@ -2188,8 +2229,10 @@ namespace tiv {
         const std::scoped_lock hold(_guard);
 
         for (int column = 0; column < level.columns; ++column) {
-            keep(id_of({.level = index, .column = column, .row = row}),
-                 std::move(tiles.at(static_cast<std::size_t>(column))), pinned);
+            if (tiles.at(static_cast<std::size_t>(column)) != nullptr) {
+                keep(id_of({.level = index, .column = column, .row = row}),
+                     std::move(tiles.at(static_cast<std::size_t>(column))), pinned);
+            }
         }
     }
 
@@ -2238,48 +2281,76 @@ namespace tiv {
                 continue;
             }
 
-            const Key key = key_of(id);
+            bool marked = false;
 
-            if (key.level < _sourced) {
-                read_source_row(hold, key.level, key.row, band);
+            // A tile with no memory for it stays missing, to be asked for again.
+            try {
+                const Key key = key_of(id);
 
-                // A band of the finest level is the widest buffer there is.
-                if (_lean) {
-                    band = {};
+                if (key.level < _sourced) {
+                    read_source_row(hold, key.level, key.row, band);
+
+                    // A band of the finest level is the widest buffer there is.
+                    if (_lean) {
+                        band = {};
+                    }
+
+                    continue;
                 }
 
-                continue;
+                const Level &level = _levels.at(static_cast<std::size_t>(key.level));
+                const Span &span =
+                        _spans.at(static_cast<std::size_t>(key.level))
+                                .at((static_cast<std::size_t>(key.row) * static_cast<std::size_t>(level.columns))
+                                    + static_cast<std::size_t>(key.column));
+
+                _reading.insert(id);
+                marked = true;
+                hold.unlock();
+
+                const std::span<const std::uint8_t> packed =
+                        fetch(reader.get(), _blocks, span.offset, span.bytes, decoder.packed);
+                auto tile =
+                        std::make_shared<const Bitmap>(read_tile(packed, level, _channels, _encoding, key, decoder));
+
+                hold.lock();
+                _reading.erase(id);
+                marked = false;
+                keep(id, std::move(tile), false);
+                announce(hold);
+            } catch (const std::bad_alloc &) {
+                if (!hold.owns_lock()) {
+                    hold.lock();
+                }
+
+                if (marked) {
+                    _reading.erase(id);
+                }
             }
-
-            const Level &level = _levels.at(static_cast<std::size_t>(key.level));
-            const Span &span = _spans.at(static_cast<std::size_t>(key.level))
-                                       .at((static_cast<std::size_t>(key.row) * static_cast<std::size_t>(level.columns))
-                                           + static_cast<std::size_t>(key.column));
-
-            _reading.insert(id);
-            hold.unlock();
-
-            const std::span<const std::uint8_t> packed =
-                    fetch(reader.get(), _blocks, span.offset, span.bytes, decoder.packed);
-            auto tile = std::make_shared<const Bitmap>(read_tile(packed, level, _channels, _encoding, key, decoder));
-
-            hold.lock();
-            _reading.erase(id);
-            keep(id, std::move(tile), false);
-            announce(hold);
         }
     }
 
     // The source decodes whole rows of tiles, so the row is read at once and kept whole.
     void TileCache::read_source_row(std::unique_lock<std::mutex> &hold, const int index, const int row, Bitmap &band) {
+        const int columns = _levels.at(static_cast<std::size_t>(index)).columns;
         std::vector<std::uint64_t> reading;
 
-        for (int column = 0; column < _levels.at(static_cast<std::size_t>(index)).columns; ++column) {
-            const std::uint64_t each = id_of({.level = index, .column = column, .row = row});
+        reading.reserve(static_cast<std::size_t>(columns));
 
-            if (!_cache.contains(each) && _reading.insert(each).second) {
-                reading.push_back(each);
+        try {
+            for (int column = 0; column < columns; ++column) {
+                const std::uint64_t each = id_of({.level = index, .column = column, .row = row});
+
+                if (!_cache.contains(each) && _reading.insert(each).second) {
+                    reading.push_back(each);
+                }
             }
+        } catch (const std::bad_alloc &) {
+            for (const std::uint64_t each : reading) {
+                _reading.erase(each);
+            }
+
+            return;
         }
 
         if (reading.empty()) {
@@ -2287,7 +2358,14 @@ namespace tiv {
         }
 
         hold.unlock();
-        read_source(index, row, false, band);
+
+        // The tiles of a row with no memory for it stay missing, to be asked for again.
+        try {
+            read_source(index, row, false, band);
+        } catch (const std::bad_alloc &) {
+            band = {};
+        }
+
         hold.lock();
 
         for (const std::uint64_t each : reading) {
@@ -2310,6 +2388,13 @@ namespace tiv {
     }
 
     void TileCache::keep(const std::uint64_t id, std::shared_ptr<const Bitmap> bitmap, const bool pinned) const {
+        std::list<std::uint64_t> order;
+
+        // Pinned tiles stay out of the order of use, so nothing ever evicts them.
+        if (!pinned) {
+            order.push_front(id);
+        }
+
         // A row read again for one tile keeps every column, so the tile may already be here. Its old
         // slot goes first, else its bytes count twice and its place in the order of use is left behind.
         if (const auto held = _cache.find(id); held != _cache.end()) {
@@ -2321,19 +2406,19 @@ namespace tiv {
             _cache.erase(held);
         }
 
+        const std::size_t bytes = bitmap->bytes();
         Slot slot;
 
         slot.pinned = pinned;
-
-        // Pinned tiles stay out of the order of use, so nothing ever evicts them.
-        if (!pinned) {
-            _used.push_front(id);
-            slot.used = _used.begin();
-            _bytes += bitmap->bytes();
-        }
-
+        slot.used = order.begin();
         slot.bitmap = std::move(bitmap);
+        // Spliced in only once the slot is in, so a failed insert leaves the order untouched.
         _cache.insert_or_assign(id, std::move(slot));
+
+        if (!pinned) {
+            _used.splice(_used.begin(), order);
+            _bytes += bytes;
+        }
 
         while (_bytes > budget() && !_used.empty()) {
             const auto oldest = _cache.find(_used.back());
@@ -2392,6 +2477,8 @@ namespace tiv {
     }
 
     void TileCache::want(const std::span<const Key> keys) const {
+        bool queued = false;
+
         {
             const std::scoped_lock hold(_guard);
             std::unordered_set<std::uint64_t> seen;
@@ -2421,9 +2508,13 @@ namespace tiv {
 
                 _queue.push_back(id);
             }
+
+            queued = !_queue.empty();
         }
 
-        _wake.notify_all();
+        if (queued) {
+            _wake.notify_all();
+        }
     }
 
     void TileCache::on_ready(std::function<void()> ready) const {
@@ -2438,15 +2529,23 @@ namespace tiv {
         return !_queue.empty() || !_reading.empty();
     }
 
-    void TileCache::shrink() const {
+    std::vector<std::shared_ptr<const Bitmap>> TileCache::shrink() const {
         const std::scoped_lock hold(_guard);
+        std::vector<std::shared_ptr<const Bitmap>> dropped;
+
+        dropped.reserve(_used.size());
 
         for (const std::uint64_t id : _used) {
-            _cache.erase(id);
+            if (const auto found = _cache.find(id); found != _cache.end()) {
+                dropped.push_back(std::move(found->second.bitmap));
+                _cache.erase(found);
+            }
         }
 
         _used.clear();
         _bytes = 0;
+
+        return dropped;
     }
 
     std::size_t TileCache::cached_bytes() const {

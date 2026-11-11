@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <span>
 #include <vector>
 
 #include "image/Bitmap.h"
@@ -64,7 +65,7 @@ namespace tiv::Decode {
 
         // The strips or tiles meeting the rows.
         [[nodiscard]] std::vector<Unit> units(int top, int bottom) const;
-        bool read(tiff *handle, const Unit &unit, int top, int bottom, std::vector<std::uint8_t> &scratch,
+        bool read(tiff *handle, const Unit &unit, int top, int bottom, std::span<std::uint8_t> scratch,
                   Bitmap *out) const;
 
         std::filesystem::path _file;

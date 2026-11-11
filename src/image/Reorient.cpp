@@ -20,6 +20,15 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 #include <webp/decode.h>
 
 #include "image/Exif.h"
@@ -182,7 +191,9 @@ namespace tiv {
             const std::size_t header = 4 + EXIF_PREFIX.size();
             Edited edited;
 
-            if (!edit(data.subspan(exif->at + header, exif->total - header), orientation, &edited)) {
+            if (exif->total < header) {
+                plan.why = "malformed JPEG";
+            } else if (!edit(data.subspan(exif->at + header, exif->total - header), orientation, &edited)) {
                 plan.why = "unreadable Exif";
             } else if (edited.removable) {
                 plan.splices.push_back({.at = exif->at, .length = exif->total, .bytes = {}});
@@ -431,7 +442,8 @@ namespace tiv {
             Plan plan;
             const std::vector<Chunk> chunks = webp_chunks(data);
 
-            if (chunks.empty()) {
+            // The last chunk can lack its pad byte, and the flags byte has to be there.
+            if (chunks.empty() || chunks.back().at + chunks.back().total > data.size() || data.size() <= FLAGS_AT) {
                 plan.why = "malformed WebP";
 
                 return plan;
@@ -483,6 +495,34 @@ namespace tiv {
             if (error != nullptr) {
                 *error = file.string() + ": " + std::string(why);
             }
+        }
+
+        // Flushes the written file to the disk, so a rename over the original never lands before its data.
+        bool sync(const std::filesystem::path &file) {
+#ifdef _WIN32
+            HANDLE handle = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+
+            if (handle == INVALID_HANDLE_VALUE) {
+                return false;
+            }
+
+            const bool flushed = FlushFileBuffers(handle) != 0;
+
+            CloseHandle(handle);
+
+            return flushed;
+#else
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg): open() is variadic in C.
+            const int fd = ::open(file.c_str(), O_WRONLY | O_CLOEXEC);
+
+            if (fd < 0) {
+                return false;
+            }
+
+            const bool flushed = ::fsync(fd) == 0;
+
+            return ::close(fd) == 0 && flushed;
+#endif
         }
 
         // Splices of the same length as what they replace are written in place, which keeps
@@ -539,7 +579,7 @@ namespace tiv {
                 write(data.subspan(from));
                 out.close();
 
-                if (!out) {
+                if (!out || !sync(temporary)) {
                     std::filesystem::remove(temporary, failure);
                     fail(error, file, "could not write");
 
@@ -547,7 +587,12 @@ namespace tiv {
                 }
             }
 
-            std::filesystem::permissions(temporary, std::filesystem::status(file).permissions(), failure);
+            const std::filesystem::file_status status = std::filesystem::status(file, failure);
+
+            if (!failure) {
+                std::filesystem::permissions(temporary, status.permissions(), failure);
+            }
+
             mapped = {};
             std::filesystem::rename(temporary, file, failure);
 
