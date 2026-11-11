@@ -59,8 +59,8 @@ namespace tiv {
         }
 
 #if defined(__x86_64__) || defined(_M_X64)
-        // Each byte of the 32 plus every one before it and the carry, which comes back as the last
-        // byte in all 32. Log steps within each 128 bit lane, then the low lane's total into the high.
+        // Each of the 32 bytes gains every byte before it and the carry. The carry comes back as the last
+        // byte in all 32. Log steps run within each 128 bit lane, then the low lane total goes into the high.
         TIV_AVX2 __m256i prefix_step(__m256i bytes, const __m256i carry) {
             bytes = _mm256_add_epi8(bytes, _mm256_slli_si256(bytes, 1));
             bytes = _mm256_add_epi8(bytes, _mm256_slli_si256(bytes, 2));
@@ -91,7 +91,7 @@ namespace tiv {
         }
 
         // 32 pixels a step. The unpacks work within lanes, so the four results hold pixels 0 to 3
-        // and 16 to 19, then 4 to 7 and 20 to 23, and so on, and the lanes are put back in order.
+        // and 16 to 19, then 4 to 7 and 20 to 23, and so on. The lanes are then put back in order.
         TIV_AVX2 std::size_t interleave_avx2(const std::uint8_t *red, const std::uint8_t *green,
                                              const std::uint8_t *blue, const std::uint8_t *alpha, const bool greenApart,
                                              std::uint8_t *rgba, const std::size_t pixels) {
@@ -150,15 +150,15 @@ namespace tiv {
                           pixels - x);
         }
 
-        // Eight pixels a step. The 32 bytes written reach 8 past the 24 meant, which the next
-        // step or the tail writes over, so the loop stops while that much is left.
+        // Eight pixels a step. The 32 bytes written reach 8 past the 24 meant, and the next step or
+        // the tail writes over them. The loop stops while that much is left.
         TIV_AVX2 void pack_avx2(const std::uint8_t *rgba, std::uint8_t *rgb, const int pixels) {
             // Per lane, four pixels become twelve bytes at the front.
             // clang-format off
             const __m256i squeeze = _mm256_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1,
                                                      0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
             // clang-format on
-            // The high lane's twelve bytes follow the low lane's.
+            // The twelve bytes of the high lane follow those of the low lane.
             const __m256i join = _mm256_setr_epi32(0, 1, 2, 4, 5, 6, 7, 7);
             int x = 0;
 
@@ -207,10 +207,9 @@ namespace tiv {
             return i;
         }
 
-        // 32 pixels a step: each load's four pixels per lane are gathered into a dword a channel, the
-        // four loads are unpacked by dword then by qword, which leaves each channel's pixels in the
-        // order 0 to 3, 8 to 11, 16 to 19, 24 to 27 in the low lane and 4 to 7 onwards in the high
-        // one, and the permute puts them in order.
+        // 32 pixels a step. The gather turns the four pixels per lane of each load into a dword a channel.
+        // Unpacking the four loads by dword, then by qword, leaves each channel in the order 0 to 3, 8 to 11,
+        // 16 to 19, 24 to 27 in the low lane and 4 to 7 onwards in the high one. The permute puts them in order.
         TIV_AVX2 std::size_t deinterleave_avx2(const std::uint8_t *rgba, const std::size_t pixels,
                                                const bool greenApart, std::uint8_t *red, std::uint8_t *green,
                                                std::uint8_t *blue, std::uint8_t *alpha) {

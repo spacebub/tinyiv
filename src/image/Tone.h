@@ -58,16 +58,16 @@ namespace tiv::Tone {
     // Over linear RGBA in place.
     void transform(const Matrix &matrix, std::span<float> rgba);
 
-    // Changes linear light before it is written, told the index of its first pixel in the row.
+    // Changes linear light before it is written. First is the index of the first pixel in the row.
     using Adjust = std::function<void(std::size_t first, std::span<float> rgba)>;
 
     // Pixels of 1 to 4 channels: grey, grey and alpha, RGB, RGBA.
     class Mapper {
 
     public:
-        // For an SDR display the pixels come out RGBA8 sRGB, for an HDR one PQ as Bitmap
-        // lays it out. Light beyond the display's headroom rolls off into it, or without the
-        // roll off clips, as it should once a gain map has brought it down.
+        // For an SDR display the pixels come out RGBA8 sRGB, and for an HDR one PQ as Bitmap lays it out.
+        // Light beyond the display headroom rolls off into it. Without the roll off it clips, as it should
+        // once a gain map has brought it down.
         explicit Mapper(Source source, Display display = Display(), bool rolledOff = true);
 
         // To RGBA in linear light of the source's primaries, SDR white at 1. Samples span

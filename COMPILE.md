@@ -2,12 +2,12 @@
 
 Needs a C++23 compiler, CMake 3.25, Git, libvips with its C++ API, libjpeg, libpng, libwebp,
 libjxl, libtiff, libheif, zlib and zstd. SDL 3 is fetched and built with tinyiv on every system,
-and linked in statically. The benchmarks in `bench/` build on Linux only, see [bench/README.md](bench/README.md).
+and linked in statically. The benchmarks in `bench/` build on Linux only. See [bench/README.md](bench/README.md).
 
 ## Linux
 
-Install the libraries and pkg-config from the distribution, and the development files SDL
-builds its windowing from, as it leaves out whichever it finds missing: wayland, wayland-protocols,
+Install the libraries and pkg-config from the distribution. SDL also needs the development files
+it builds its windowing from, since it leaves out any it finds missing: wayland, wayland-protocols,
 libxkbcommon and libdecor for Wayland, and libx11, libxext, libxcursor, libxfixes, libxi and
 libxrandr for X11. On Arch they are packages of those names. Then:
 
@@ -72,10 +72,10 @@ What the repository adds to vcpkg, both picked up through `vcpkg-configuration.j
 
 - `vcpkg-triplets/x64-windows-release.cmake`, the default triplet on Windows. It builds DLLs
   as `x64-windows` does, but only their release half, which halves the first build.
-- `vcpkg-ports/libvips`, the upstream port with features for the libvips options it has none
-  for. The upstream portfile turns every such option off, which loses the built-in GIF, PPM,
-  Radiance and Analyze loaders, and PDF, JPEG XL, HEIF and AVIF, OpenEXR, JPEG 2000 and
-  highway. `vcpkg.json` lists libheif itself only to leave out its x265 encoder, which vcpkg
+- `vcpkg-ports/libvips`, the upstream port with features added for the libvips options that
+  have none upstream. The upstream portfile turns every such option off, which loses the
+  built-in GIF, PPM, Radiance and Analyze loaders, and PDF, JPEG XL, HEIF and AVIF, OpenEXR,
+  JPEG 2000 and highway. `vcpkg.json` lists libheif itself only to leave out its x265 encoder, which vcpkg
   builds by default otherwise.
 
 ### Build

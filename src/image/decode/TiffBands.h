@@ -20,13 +20,12 @@
 #include "image/Bitmap.h"
 #include "image/decode/Decode.h"
 
-// NOLINTNEXTLINE(readability-identifier-naming): libtiff's own name for its handle.
+// NOLINTNEXTLINE(readability-identifier-naming): the name libtiff gives its handle.
 struct tiff;
 
 namespace tiv::Decode {
-    // A TIFF read by its strips or tiles, each of which decodes on its own, so any band of rows decodes
-    // without the rest and bands decode side by side. libtiff does the reading, a handle per thread
-    // since one handle cannot be shared: https://libtiff.gitlab.io/libtiff/
+    // A TIFF read by its strips or tiles, so any band of rows decodes alone and bands decode side by side.
+    // libtiff reads with a handle per thread, since one handle cannot be shared: https://libtiff.gitlab.io/libtiff/
     // vliv shows strips as tiles the same way: https://github.com/delhoume/vliv (MIT)
     class TiffBands {
 
@@ -46,8 +45,8 @@ namespace tiv::Decode {
         [[nodiscard]] int height() const { return _height; }
         [[nodiscard]] bool alpha() const { return _samples == 2 || _samples == 4; }
 
-        // The rows from top, count of them or to the bottom, as RGBA into out, which is as wide as
-        // the image. Uses up to threads threads.
+        // Count rows from top, or up to the bottom, as RGBA into out, which is as wide as the image.
+        // Uses up to threads threads.
         bool decode(int top, int count, Bitmap *out, int threads, const Abort *abort) const;
 
     private:

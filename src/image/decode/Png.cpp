@@ -131,7 +131,7 @@ namespace tiv::Decode {
         }
 
         // Rows come out RGBA8, through the tone mapper when png_open made them wide. Wide rows
-        // gather in bands that a thread of its own maps while libpng reads the next, since the
+        // gather in bands that a separate thread maps while libpng reads the next, since the
         // mapping would add a tenth to the decode.
         class PngRows {
 
@@ -290,7 +290,7 @@ namespace tiv::Decode {
             std::jthread _worker;
         };
 
-        // Wide rows only for images that are not interlaced, whose passes build on the rows before.
+        // Wide rows only for images that are not interlaced. The passes of interlaced images build on the rows before.
         bool png_read(const PngHandle &handle, Bitmap &target, const Tone::Mapper *mapper, const Abort *abort) {
             PngRows rows(mapper, target.width());
 

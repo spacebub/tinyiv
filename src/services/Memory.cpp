@@ -35,8 +35,8 @@ namespace tiv {
 
     void Memory::lean() {
 #ifdef __GLIBC__
-        // glibc's own starting point, held there: it otherwise rises to the largest block freed, and
-        // tiles and bands below it stay in the heap once freed.
+        // The glibc default, held there. Otherwise it rises to the largest block freed, and tiles and
+        // bands below it stay in the heap once freed.
         constexpr int MMAP_THRESHOLD = 128 * 1024;
 
         // NOLINTNEXTLINE(concurrency-mt-unsafe): called before any thread starts.

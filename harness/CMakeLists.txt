@@ -1,4 +1,3 @@
-# Drives the whole app headless through scripted sittings, for profilers and sanitizers. See README.md here.
 add_executable(tiv_harness
         Main.cpp
 

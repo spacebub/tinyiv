@@ -32,15 +32,9 @@
 #include "image/decode/Decode.h"
 
 namespace tiv {
-    // An image as a pyramid of compressed tiles, made by decoding top to bottom. One too large for
-    // memory goes in a file on disk and is kept so reopening is instant, one that fits is held in
-    // memory and never written. A file that can be decoded from partway, a JPEG with restart markers,
-    // a TIFF by its strips or tiles, a HEIF or AVIF grid, or a PNG with checkpoints when asked for
-    // small, gives its full
-    // resolution itself, and only the smaller levels are stored, as GDAL's external overviews do:
-    // https://gdal.org/en/stable/programs/gdaladdo.html
-    // Tiles are unpacked on background threads as the view asks for them and cached, so memory
-    // follows what the screen shows, whatever the image's size.
+    // An image as a pyramid of compressed tiles, unpacked on background threads as the view asks. Memory follows
+    // what the screen shows. One too large for memory stays on disk, so reopening is instant. A file that decodes from
+    // partway gives the finest level, and only the rest is stored: https://gdal.org/en/stable/programs/gdaladdo.html
     class TileCache {
 
     public:
@@ -97,12 +91,12 @@ namespace tiv {
             [[nodiscard]] virtual bool alpha() const = 0;
             [[nodiscard]] virtual Bitmap::Encoding encoding() const { return Bitmap::Encoding::Srgb; }
 
-            // Rows from top, count of them or to the bottom, in its encoding as wide as the image. The
-            // top is a multiple of TILE.
+            // Count rows from top, or up to the bottom, as wide as the image and in the source encoding.
+            // Top is a multiple of TILE.
             virtual bool read(int top, int count, Bitmap *out) const = 0;
             // The levels it reads itself, each half the one before, the finest first.
             [[nodiscard]] virtual int levels() const { return 1; }
-            // As read(), of a level up to levels(), in its rows.
+            // As read(), for a level below levels(), in rows of that level.
             virtual bool read_level(const int level, const int top, const int count, Bitmap *out) const {
                 return level == 0 && read(top, count, out);
             }
@@ -118,7 +112,7 @@ namespace tiv {
             // The whole image once, top to bottom, in bands of TILE rows, keeping what read() will want.
             virtual bool pass(const Take &take, const Keep &keep, const Decode::Abort *abort);
 
-            // Where what pass() kept is found again, said before the first read().
+            // Says where to find what pass() kept. Called before the first read().
             virtual void found(const Fetch & /*fetch*/) {}
 
             // What opens the same source again without a pass over the file.
@@ -127,13 +121,13 @@ namespace tiv {
             virtual void cancel() {}
         };
 
-        // About the memory a pyramid of the image takes held in memory: the levels below the finest,
-        // and the finest too, compressed, for a format no source reads from the file.
+        // Roughly the memory a pyramid of the image takes when held in memory. It counts the compressed levels
+        // below the finest. The finest counts too when no source reads the format from the file.
         [[nodiscard]] static std::uint64_t memory_bytes(Decode::Format kind, std::int64_t pixels);
 
-        // The folder the file's pyramid goes in: the one asked for, taken from the file's folder
-        // when relative, else one beside the file. Where that cannot be made, the user's cache.
-        // Without create, the first that is already there, or empty.
+        // The folder for the pyramid of the file: the folder asked for, relative to the folder of the file, else
+        // one beside the file. Where that cannot be made, it is the user's cache. Without create, it is the first
+        // folder that already exists, or empty.
         [[nodiscard]] static std::filesystem::path
         location(const std::filesystem::path &file, const std::filesystem::path &folder = {}, bool create = true);
 
@@ -145,11 +139,9 @@ namespace tiv {
                                                              const Tone::Display &display = Tone::Display(),
                                                              bool lean = false);
 
-        // Decodes the file into a new pyramid and opens it. On disk it goes in the folder as
-        // location() takes it. Progress goes from 0 to 1.
-        // Small keeps a PNG's full resolution as places to begin inflating it again, a fraction of the
-        // room, but panning there has to decode whole bands of rows. Lean in memory reads the finest
-        // level again from the file of any format whose decoder streams, rather than keep it.
+        // Decodes the file into a new pyramid and opens it. On disk it goes where location() picks. Progress is 0 to 1.
+        // Small keeps the full size of a PNG as points to resume inflating. That takes a fraction of the room, but
+        // panning there decodes whole bands of rows. Lean in memory rereads the finest level when the decoder streams.
         [[nodiscard]] static std::shared_ptr<TileCache>
         build(const std::filesystem::path &file, const std::filesystem::path &folder, const Tone::Display &display,
               Store store, bool small, std::atomic<float> *progress, std::string *error = nullptr,

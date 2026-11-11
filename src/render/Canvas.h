@@ -24,8 +24,8 @@
 #include "view/Viewport.h"
 
 namespace tiv {
-    // The image on screen as tiles of every level, only what the view meets on the GPU, and
-    // the neighbours' screen sized levels kept ready so a step needs no upload at all.
+    // The image on screen as tiles of every level, with only what the view meets on the GPU. The
+    // screen sized levels of the neighbours stay ready, so a step needs no upload at all.
     class Canvas {
 
     public:
@@ -36,13 +36,13 @@ namespace tiv {
         // Lean asks for and uploads only the tiles the view meets, nothing around them or below.
         Canvas(SDL_Renderer *renderer, int maxTexture, std::size_t vramBudget = DEFAULT_VRAM_BUDGET, bool lean = false);
 
-        // The image to draw. Width and height are the image's own as stored, which the pyramid
-        // may be smaller than, and the orientation is how it is shown. Levels the same size as
-        // before, of the same image, keep their tiles.
+        // The image to draw. Width and height are those of the image as stored, and the pyramid
+        // may be smaller. The orientation is how it is shown. Levels the same size as before, of
+        // the same image, keep their tiles.
         void show(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height, int orientation);
 
-        // The image from a pyramid on disk. Its tiles come as the tile cache reads them, the
-        // coarser levels standing in until they do.
+        // The image from a pyramid on disk. The tiles come as the tile cache reads them, and the
+        // coarser levels stand in until they do.
         void show(std::shared_ptr<const TileCache> tileCache, std::uint64_t image, int width, int height,
                   int orientation);
 
@@ -60,9 +60,9 @@ namespace tiv {
         // A neighbour to have ready: its levels up to the screen stay resident.
         void warm(std::shared_ptr<const Pyramid> pyramid, std::uint64_t image, int width, int height, int orientation);
 
-        // A sharper rendering of part of the image shown, at the scale given, x and y being
-        // where the bitmap sits in the image as stored at that scale. It is drawn wherever it is nearer
-        // the zoom than the levels are, and goes when another image is shown.
+        // A sharper rendering of part of the image shown, at the scale given. X and y are where the
+        // bitmap sits in the image as stored at that scale. It is drawn wherever it is nearer the zoom
+        // than the levels are, and goes when another image is shown.
         void refine(std::shared_ptr<const Bitmap> bitmap, double scale, int x, int y);
 
         // True when the rendering is at this zoom and covers the area, in pixels of the image as stored.

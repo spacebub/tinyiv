@@ -50,10 +50,10 @@ namespace tiv::Decode {
         constexpr std::uint64_t MAX_HEAD = std::uint64_t{16} << 20U;
         constexpr std::size_t READ_BYTES = std::size_t{1} << 20U;
         constexpr std::size_t INFLATE_BYTES = std::size_t{256} * 1024;
-        // What inflateInit2 is told for raw deflate, the zlib wrapper being skipped by hand.
+        // What inflateInit2 is told for raw deflate, as the zlib wrapper is skipped by hand.
         constexpr int RAW_DEFLATE = -15;
         constexpr std::size_t ZLIB_WRAPPER = 2;
-        // Each piece of a band pays for its own inflate state and first row, so a thread takes at least
+        // Each piece of a band pays for a separate inflate state and first row, so a thread takes at least
         // this many rows.
         constexpr int MIN_ROWS = 16;
         constexpr std::uint32_t OPAQUE = 0xFF000000U;
@@ -109,7 +109,7 @@ namespace tiv::Decode {
             // The next bytes of the stream, empty at its end. It ends where they end in at() and left().
             std::span<const std::uint8_t> next() {
                 while (_left == 0) {
-                    // Past the chunk's CRC to the next one's length and type.
+                    // Past the CRC of the chunk to the length and type of the next one.
                     if (fill(_at, CRC + CHUNK_HEAD) < CRC + CHUNK_HEAD) {
                         return {};
                     }
@@ -164,7 +164,7 @@ namespace tiv::Decode {
             std::size_t _held = 0;
         };
 
-        // A raw deflate stream, the zlib wrapper being behind it.
+        // A raw deflate stream, with the zlib wrapper already behind it.
         struct Inflater {
             z_stream stream{};
             bool ready;
@@ -224,10 +224,9 @@ namespace tiv::Decode {
         }
 
 #if defined(__x86_64__) || defined(_M_X64)
-        // Paeth on whole pixels of 3 to 8 bytes at once: each still waits on the one to its left, but
-        // its channels go together in 16 bit lanes, ties going left, then up, then to the corner.
-        // As libpng's filter_sse2_intrinsics.c does it (libpng licence):
-        // https://github.com/pnggroup/libpng/blob/libpng16/intel/filter_sse2_intrinsics.c
+        // Paeth on whole pixels of 3 to 8 bytes at once. Each pixel still waits on the one to its left, but its
+        // channels go together in 16 bit lanes. Ties go left, then up, then to the corner, as libpng does it
+        // (libpng licence): https://github.com/pnggroup/libpng/blob/libpng16/intel/filter_sse2_intrinsics.c
         TIV_AVX2 void paeth_pixels(const std::uint8_t *in, const std::uint8_t *above, std::uint8_t *row,
                                    const std::size_t bytes, const std::size_t step) {
             const __m128i zero = _mm_setzero_si128();
@@ -396,7 +395,7 @@ namespace tiv::Decode {
         std::uint8_t lastByte = 0;
         std::uint64_t inflated = 0;
         std::uint64_t mark = CHECKPOINT_BYTES;
-        // A checkpoint whose first row's row above is not whole yet.
+        // A checkpoint where the row above its first row is not whole yet.
         bool pending = false;
 
         Scan(PngBands &of, const Keep &kept) : png(&of), keep(&kept), window(WINDOW) {}
@@ -423,7 +422,7 @@ namespace tiv::Decode {
             inflated += made.size();
         }
 
-        // Keeps the last checkpoint's state, the row above its first being the one given.
+        // Keeps the state of the last checkpoint. The row above its first row is the one given.
         bool keep_last(const std::vector<std::uint8_t> &above) {
             std::memcpy(state.data() + (state.size() - png->_rowBytes), above.data(), png->_rowBytes);
             pending = false;

@@ -278,7 +278,7 @@ namespace tiv {
                                                                         && !other.abort->requested();
                                                              });
                        job != _jobs.end()) {
-                // Shown again while its tiles are being written, say when the mode switched as
+                // Shown again while its tiles are being written, for instance when the mode switched as
                 // the job started. It said so for the request before, which the view has dropped.
                 post({
                         .generation = generation,
@@ -293,8 +293,8 @@ namespace tiv {
                 });
             }
 
-            // What the images left behind unpacked of their tiles goes, the tiles themselves stay. A worker
-            // frees it, since hundreds of tiles take milliseconds to free.
+            // Images left behind let go of the tiles they unpacked, and the packed tiles stay. A worker
+            // frees them, since hundreds of tiles take milliseconds to free.
             for (auto &[file, entry] : _cache) {
                 if (entry.tileCache != nullptr && file != current) {
                     for (std::shared_ptr<const Bitmap> &tile : entry.tileCache->shrink()) {
@@ -489,7 +489,7 @@ namespace tiv {
 
         const bool animate = file == _request.current && entry.info.frames > 1 && entry.animation == nullptr;
 
-        // A scalable image is only ever rendered for the screen, the Refiner draws it sharper.
+        // A scalable image is only ever rendered for the screen. The Refiner draws it sharper.
         const bool done = entry.whole || Decode::scalable(entry.info.kind);
 
         if (!entry.error.empty() || (done && !animate) || !near(file)) {
@@ -788,7 +788,7 @@ namespace tiv {
             all = _streamAll;
         }
 
-        // Too large for memory, in streaming mode or in footprint mode, a still image shows from tiles.
+        // A still image shows from tiles when it is too large for memory, in streaming mode or in footprint mode.
         // Drawings and animations have no pyramid to stream, so they stay in memory.
         const bool still = !Decode::scalable(entry.info.kind) && entry.info.frames <= 1;
 
@@ -879,11 +879,9 @@ namespace tiv {
         store(job.file, std::move(entry));
     }
 
-    // Opens the pyramid made for the file before, in either cache mode, or makes one when it is the
-    // current image. The others wait for a pyramid until they are shown, since it takes a pass over
-    // the whole file. An image that fits in memory, streamed only because streaming mode is on, keeps
-    // its pyramid in memory and never touches the disk, unless every stream persists or a rebuild
-    // replaces one on disk.
+    // Opens the pyramid made for the file before, in either cache mode, or makes one for the current image. The others
+    // wait until shown, since a pyramid takes a pass over the whole file. An image that fits in memory and streams only
+    // for streaming mode keeps its pyramid in memory, unless every stream persists or a rebuild replaces one on disk.
     void Loader::decode_stream(Job &job, Entry entry) {
         entry.streamed = true;
 
@@ -1245,9 +1243,9 @@ namespace tiv {
         }
     }
 
-    // Full resolution and frames stay only for the current image and its neighbours. Over budget, the
-    // farthest files go, least recently wanted first, then the far end of the window, then the neighbours'
-    // frames, and last the neighbours drop to the screen. The current image is never touched.
+    // Full resolution and frames stay only for the current image and its neighbours. Over budget, the farthest
+    // files go, least recently wanted first. Then the far end of the window goes, then the frames of the
+    // neighbours. Last, the neighbours drop to the screen. The current image is never touched.
     void Loader::trim() {
         evict_outside();
 

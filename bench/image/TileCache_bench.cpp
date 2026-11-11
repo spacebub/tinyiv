@@ -33,7 +33,7 @@
 
 namespace bench {
     namespace {
-        // The restart JPEGs and the TIFFs read their full resolution from the file, the rest store it.
+        // The restart JPEGs and the TIFFs read their full resolution from the file. The rest store it.
         constexpr std::array<std::string_view, 6> FILES = {"noise.jpg",   "noise.png",      "noise.tif",
                                                            "restart.jpg", "restart444.jpg", "tiled.tif"};
 

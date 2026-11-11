@@ -27,9 +27,9 @@ namespace tiv {
         // Width and height sit at fixed offsets in IHDR, the first chunk: https://www.w3.org/TR/png-3/#11IHDR
         constexpr std::size_t PNG_IHDR = 16;
 
-        // A run byte below this starts that many plus one literal bytes, one at or above it
-        // repeats the next byte, three times for the smallest. The scheme and the ICNS types are
-        // described at https://en.wikipedia.org/wiki/Apple_Icon_Image_format
+        // A run byte below this starts that many plus one literal bytes. One at or above it repeats
+        // the next byte, three times for the smallest. The scheme and the ICNS types are described
+        // at https://en.wikipedia.org/wiki/Apple_Icon_Image_format
         constexpr std::uint8_t PACKED_REPEAT = 0x80;
         constexpr std::size_t PACKED_SHORTEST = 3;
 

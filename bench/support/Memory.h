@@ -21,8 +21,8 @@ namespace bench::Memory {
     [[nodiscard]] std::size_t peak();
     void reset_peak();
 
-    // Adds peak_rss_mb, the most resident since reset_peak(), and rss_added_mb, how far above
-    // what was resident at the reset that went.
+    // Adds peak_rss_mb, the most resident since reset_peak(). Also adds rss_added_mb, how far that
+    // peak went above what was resident at the reset.
     void report_peak(benchmark::State &state);
 
 }

@@ -125,7 +125,6 @@ namespace tiv {
             return true;
         }
 
-        // Only the largest entry is shown.
         // Strips or tiles side by side, for the layouts TiffBands takes. Should the bands fail for any
         // reason but an abort, libvips still gets its turn.
         Decode::Direct load_tiff(const std::filesystem::path &file, Bitmap *out, std::string *error,

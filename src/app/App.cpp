@@ -75,7 +75,7 @@ namespace tiv {
         // Where the display gives no refresh rate.
         constexpr float FALLBACK_REFRESH_RATE = 60.0F;
 
-        // Keys are two spaces apart, the words of one key a single space.
+        // Keys are two spaces apart. The words of one key are a single space apart.
         constexpr std::array<StatusBar::Row, 19> HELP = {
                 {
                         {.left = "Wheel  ←  →", .right = "Previous, next image"},
@@ -186,10 +186,10 @@ namespace tiv {
             return event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST;
         }
 
-        // What the gpu renderer would make for itself, kept so a renderer made again for another
-        // output skips making a device. The features are the ones it turns off:
+        // The device the gpu renderer would make, kept so a renderer for another output reuses it. It turns off
+        // the same features:
         // https://github.com/libsdl-org/SDL/blob/release-3.4.x/src/render/gpu/SDL_render_gpu.c
-        // Vulkan first, as SDL's Direct3D 12 backend never presents HDR, then whatever SDL picks.
+        // Vulkan comes first, as SDL's Direct3D 12 backend never presents HDR, then whatever SDL picks.
         SDL_GPUDevice *create_device() {
             const SDL_PropertiesID properties = SDL_CreateProperties();
 
@@ -540,9 +540,9 @@ namespace tiv {
             // Asks for the streamed tiles the view meets before deciding there is nothing to do.
             _canvas->fetch(_viewport);
 
-            // Nothing to upload and no frame to draw yet means nothing to do until something happens,
-            // except that a frame comes due, a loading indicator has to keep moving or an animation
-            // has frames due.
+            // Nothing to upload and no frame to draw yet means nothing to do until something happens.
+            // The exceptions are a frame coming due, a loading indicator that has to keep moving and
+            // an animation with frames due.
             if (!_canvas->pending(_viewport) && frame_wait_ms() != 0) {
                 wait_for_event();
             }
@@ -581,7 +581,7 @@ namespace tiv {
     }
 
     App::State App::state() const {
-        // Only a scalable image renders again once the view rests, so the rest matters for no other.
+        // Only a scalable image renders again once the view rests. For any other image the rest does not matter.
         const bool resting = _settling && Decode::scalable(_info.kind);
         const bool settled = _shown == _generation && !_loading && !_building && !resting && !_dirty && _repaints == 0
                              && !_canvas->pending(_viewport) && !_canvas->reading() && _loader->idle()

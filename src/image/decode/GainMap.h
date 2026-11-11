@@ -31,7 +31,7 @@ namespace tiv::GainMap {
         std::array<float, 3> alternateOffset{1.0F / 64.0F, 1.0F / 64.0F, 1.0F / 64.0F};
         float baseHeadroom = 0.0F;
         float alternateHeadroom = 0.0F;
-        // Otherwise in the alternate rendition's.
+        // Otherwise the gains apply in the colours of the alternate rendition.
         bool inBaseColours = true;
 
         // How much of the gain a display with this headroom takes, negative where the
@@ -43,11 +43,11 @@ namespace tiv::GainMap {
     bool parse_iso(std::span<const std::uint8_t> data, Metadata *out);
 
     // The hdrgm namespace of Adobe's gain map XMP: https://helpx.adobe.com/camera-raw/using/gain-map.html
-    // False for a base rendition that is HDR, whose gains that form stores inverted.
+    // False when the base rendition is HDR, since this form stores its gains inverted.
     bool parse_xmp(std::string_view xmp, Metadata *out);
 
     struct Jpeg {
-        // The gain map, a JPEG of its own after the primary image.
+        // The gain map, a separate JPEG after the primary image.
         std::span<const std::uint8_t> image;
         Metadata metadata;
     };
@@ -56,10 +56,10 @@ namespace tiv::GainMap {
     bool find_jpeg(std::span<const std::uint8_t> data, Jpeg *out);
 
     struct Jxl {
-        // A JPEG XL codestream of its own.
+        // A separate JPEG XL codestream.
         std::span<const std::uint8_t> image;
         Metadata metadata;
-        // The alternate rendition's primaries, where the gains apply unless in the base's.
+        // The primaries of the alternate rendition, where the gains apply unless inBaseColours is set.
         // Only the default encoding, sRGB, is read, and gains in any other are refused.
         bool alternateSrgb = true;
     };
@@ -83,7 +83,7 @@ namespace tiv::GainMap {
         const Bitmap *_map;
         float _scaleX;
         float _scaleY;
-        // 2 to the gain, by the map's value in fine steps, for each channel.
+        // For each channel, 2 to the power of the gain, indexed by the map value in fine steps.
         std::array<std::vector<float>, 3> _factors;
     };
 

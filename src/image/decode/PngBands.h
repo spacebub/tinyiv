@@ -25,10 +25,9 @@
 #include "image/decode/Decode.h"
 
 namespace tiv::Decode {
-    // A PNG, which has no way in but the top, given places to begin inflating again, found on one pass
-    // over it. At each, the state inflate needs is kept, as Mark Adler's zran.c does for gzip
-    // (https://github.com/madler/zlib/blob/develop/examples/zran.c, zlib licence), with the row above
-    // for the filters, so any band of rows decodes from the nearest one and bands decode side by side.
+    // A PNG has no way in but the top, so one pass finds places to begin inflating again. Each keeps the inflate state,
+    // as Mark Adler's zran.c does for gzip (https://github.com/madler/zlib/blob/develop/examples/zran.c, zlib licence),
+    // and the row above for the filters. Any band of rows decodes from the nearest one, and bands decode side by side.
     class PngBands {
 
     public:
@@ -49,7 +48,7 @@ namespace tiv::Decode {
         // kept by whoever holds the checkpoints.
         using Keep = std::function<bool(std::size_t checkpoint, std::span<const std::uint8_t> state)>;
         using Recall = std::function<bool(std::size_t checkpoint, std::vector<std::uint8_t> &state)>;
-        // Rows as RGBA from y, count of them.
+        // Count rows as RGBA, from y.
         using Take = std::function<bool(int y, int count, std::span<const std::uint8_t> pixels)>;
 
         // Null unless the file is a PNG this reads: not interlaced, 8 or 16 bits, grey, RGB or 8 bit
@@ -64,8 +63,8 @@ namespace tiv::Decode {
         // PQ when an HDR image is shown on an HDR display.
         [[nodiscard]] Bitmap::Encoding encoding() const { return _encoding; }
 
-        // Every row top to bottom, in bands of the rows given, a checkpoint at the first block to
-        // start past each stretch of about CHECKPOINT_BYTES inflated.
+        // Every row top to bottom, in bands of the rows given. A checkpoint goes at the first block that
+        // starts past each stretch of about CHECKPOINT_BYTES inflated.
         bool scan(int rows, const Take &take, const Keep &keep, const Abort *abort);
 
         [[nodiscard]] std::span<const Checkpoint> checkpoints() const { return _checkpoints; }
@@ -73,8 +72,8 @@ namespace tiv::Decode {
         // The checkpoints of an earlier scan of the same file. False when they could not have come from one.
         bool adopt(std::vector<Checkpoint> checkpoints);
 
-        // The rows from top, count of them or to the bottom, as RGBA into out, which is as wide as
-        // the image, from the checkpoints before them. Uses up to threads threads.
+        // Count rows from top, or up to the bottom, as RGBA into out, which is as wide as the image.
+        // They decode from the checkpoints before them, on up to threads threads.
         bool decode(int top, int count, Bitmap *out, int threads, const Recall &recall) const;
 
         // Inflated bytes between checkpoints, so a stretch of rows decodes in a few milliseconds.
@@ -91,11 +90,11 @@ namespace tiv::Decode {
 
         // What a chunk before the image data says. Plain is cleared by an interlaced image.
         void take_chunk(std::span<const std::uint8_t> type, std::span<const std::uint8_t> body, bool *plain);
-        // The layout is one this reads, the chunks before the image data given for the tone.
+        // True when this reads the layout. The chunks before the image data are given for the tone.
         [[nodiscard]] bool supported(std::span<const std::uint8_t> start, bool plain) const;
 
-        // An unfiltered row to RGBA, as tinyiv's PNG decoder has libpng make it, or through the tone
-        // mapper for HDR, the samples widened in the scratch.
+        // An unfiltered row to RGBA, as the PNG decoder of tinyiv has libpng make it. HDR goes through
+        // the tone mapper, with the samples widened in the scratch.
         void expand(const std::uint8_t *row, std::uint8_t *out, std::vector<std::uint16_t> &wide) const;
         void expand_mapped(const Tone::Mapper &mapper, const std::uint8_t *row, std::uint8_t *out,
                            std::vector<std::uint16_t> &wide) const;

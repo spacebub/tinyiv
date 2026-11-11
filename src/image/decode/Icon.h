@@ -20,7 +20,7 @@ namespace tiv::Icon {
     enum class Payload : std::uint8_t {
         Png,
         Jpeg2000,
-        // The run length coded RGB planes of older ICNS files, with the alpha in an entry of its own.
+        // The run length coded RGB planes of older ICNS files, with the alpha in a separate entry.
         Packed,
         // A Windows bitmap without its file header.
         Dib,

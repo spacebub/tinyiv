@@ -118,7 +118,7 @@ namespace tiv {
                         return xmp.substr(after + 2, end - after - 2);
                     }
                 } else if (xmp.at(after) == '>' && at > 0 && xmp.at(at - 1) == '<') {
-                    // An rdf:Seq holds nested closing tags, so the element's own is looked for.
+                    // An rdf:Seq holds nested closing tags, so the search looks for the one of this element.
                     const std::size_t close = xmp.find(std::string("</hdrgm:").append(name), after + 1);
 
                     if (close != std::string_view::npos) {
@@ -213,7 +213,7 @@ namespace tiv {
             return {reinterpret_cast<const char *>(data.data()), data.size()};
         }
 
-        // The metadata a gain map image carries in its own markers, the binary form first.
+        // The metadata in the markers of a gain map image, trying the binary form first.
         bool metadata_of(const std::span<const std::uint8_t> image, GainMap::Metadata *out) {
             const std::vector<Segment> found = segments(image);
 

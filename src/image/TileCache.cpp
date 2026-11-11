@@ -72,7 +72,7 @@ namespace tiv {
         constexpr unsigned EIGHTHS = 8;
         // Full size, a half, a quarter and an eighth.
         constexpr int JPEG_LEVELS = 4;
-        // Tiles asked for beyond this many are dropped, the view having moved on by the time they would come.
+        // Tiles asked for beyond this many are dropped. The view has moved on by the time they would come.
         constexpr std::size_t MAX_QUEUE = 64;
         // Left free on the drive beyond the pyramid, so making one never fills it.
         constexpr std::uintmax_t SPARE_DISK = std::uintmax_t{1024} * 1024 * 1024;
@@ -107,7 +107,7 @@ namespace tiv {
             std::uint64_t sourceContents = 0;
             // Where the level sizes start, and after them every tile's offset.
             std::uint64_t index = 0;
-            // Where the source's own index lies, when the finest level is read from the image
+            // Where the index of the source lies, when the finest level is read from the image
             // itself: a count, then that many words. Zero when it is stored.
             std::uint64_t source = 0;
         };
@@ -353,8 +353,8 @@ namespace tiv {
             return read;
         }
 
-        // Named for the image's contents, so a changed image never finds an old pyramid, and for
-        // the headroom an HDR one was mapped into.
+        // Named for the contents of the image, so a changed image never finds an old pyramid. The name of an
+        // HDR one also carries the headroom it was mapped into.
         std::filesystem::path name_of(const Identity &identity, const Tone::Display &display) {
             const std::u8string text =
                     utf8(std::format("{}|{:016x}", identity.size, identity.contents)) + pq_tag(display);
@@ -387,8 +387,8 @@ namespace tiv {
             return rest == utf8(SUFFIX) + utf8(PART) ? Named::Unfinished : Named::Foreign;
         }
 
-        // A pyramid of the same image made for another display's headroom, found by its header. Its
-        // highlights roll off where that display's did, but it saves a pass over the whole image.
+        // A pyramid of the same image made for the headroom of another display, found by its header. The
+        // highlights roll off where they did for that display, but it saves a pass over the whole image.
         std::filesystem::path made_for(const std::filesystem::path &dir, const Identity &identity,
                                        const Tone::Display &display) {
             std::error_code failure;
@@ -665,8 +665,8 @@ namespace tiv {
             bool _uncached = true;
         };
 
-        // Keeps each tile as its own block, for a pyramid of an image that fits in memory, which
-        // is never written to disk. Its offsets are the blocks' indices.
+        // Keeps each tile as a separate block, for a pyramid of an image that fits in memory and is
+        // never written to disk. The offsets are the block indices.
         class Blocks final : public Sink {
 
         public:
@@ -815,7 +815,7 @@ namespace tiv {
 
             // Rows of the finest level, starting on a tile row. They are copied and cut into tiles on a
             // thread of their own, so the decoder goes on to the next band meanwhile. The copy costs a
-            // few milliseconds a band, the overlap the whole time the tiles take.
+            // few milliseconds a band. The overlap saves the whole time the tiles take.
             bool band(const int rows, const std::span<const std::uint8_t> pixels) {
                 settle();
 
@@ -1298,7 +1298,7 @@ namespace tiv {
             }
 
         private:
-            // zstd's fastest, the state being read far more often than made.
+            // zstd's fastest, since the state is read far more often than made.
             static constexpr int STATE_LEVEL = 1;
             // A window and a row of the widest PNG a side can hold, far past any real one.
             static constexpr unsigned long long MAX_STATE = 1ULL << 32U;
@@ -1321,7 +1321,7 @@ namespace tiv {
         };
 
         // The file as the source of its finest level, when its format allows. The index kept from
-        // before spares the pass over the file. A PNG only gives its own when asked for small.
+        // before spares the pass over the file. A PNG gives the finest level only when asked for small.
         std::unique_ptr<TileCache::Source> open_source(const std::filesystem::path &file,
                                                        const std::vector<std::uint8_t> *kept, const bool small,
                                                        const Tone::Display &display) {
@@ -1364,7 +1364,7 @@ namespace tiv {
             Mapped mapped;
             Decode::JpegBands bands;
 
-            // Finding the markers reads the whole file, taking the kept ones only its ends.
+            // Finding the markers reads the whole file. Taking the kept ones reads only its ends.
             if (kind != Decode::Format::Jpeg
                 || !Mapped::open(file, &mapped, nullptr,
                                  kept != nullptr ? Mapped::Use::Scattered : Mapped::Use::Through)) {
@@ -1496,7 +1496,7 @@ namespace tiv {
                 return got;
             }
 
-            // Nothing to keep, the file being read again each time.
+            // Nothing to keep, as the file is read again each time.
             [[nodiscard]] std::vector<std::uint8_t> index() const override { return {}; }
 
             void cancel() override { _stop.request(); }
@@ -1582,7 +1582,7 @@ namespace tiv {
             return source->probe() ? std::move(source) : nullptr;
         }
 
-        // A sink two threads put into, the Builder cutting its bands and the source keeping its state.
+        // A sink two threads put into: the Builder cuts its bands and the source keeps its state.
         class Locked final : public Sink {
 
         public:
@@ -1945,16 +1945,16 @@ namespace tiv {
                                                 const Tone::Display &display, const Store store, const bool small,
                                                 std::atomic<float> *progress, std::string *error, Decode::Abort *abort,
                                                 const bool lean) {
-        // An HDR JPEG is lifted by its gain map as a whole, which the source's bands do not do.
-        // Only a PNG tone maps its own rows. A JPEG's gain map lifts the whole image, which bands do not.
+        // Only a PNG tone maps its own rows. An HDR JPEG is lifted by its gain map as a whole, which the
+        // bands of a source do not do.
         std::unique_ptr<Source> source = open_source(file, nullptr, small, display);
 
         if (source != nullptr && display.hdr() && source->encoding() != Bitmap::Encoding::Pq) {
             source = nullptr;
         }
 
-        // Decoded as a pass without a source is, so its rows are the same. A pyramid on disk could not
-        // find it again when opened, having nothing kept to open it by.
+        // The rescan decodes as a pass without a source does, so the rows are the same. A pyramid on disk
+        // could not find this source again when opened, as it keeps nothing to open it by.
         if (source == nullptr && lean && store == Store::Memory) {
             source = open_rescan(file, display);
         }

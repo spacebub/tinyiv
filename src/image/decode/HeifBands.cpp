@@ -137,7 +137,7 @@ namespace tiv::Decode {
             || tiling.number_of_extra_dimensions != 0 || tiling.tile_width == 0 || tiling.tile_height == 0
             || heif_image_handle_get_luma_bits_per_pixel(handle) != 8
             || heif_image_handle_get_chroma_bits_per_pixel(handle) != 8
-            // A tile decoded on its own comes without the alpha, which lies in grids of its own.
+            // A tile decoded alone comes without the alpha, which lies in separate grids.
             || heif_image_handle_has_alpha_channel(handle) != 0) {
             return nullptr;
         }

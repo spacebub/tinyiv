@@ -23,7 +23,7 @@ namespace tiv {
 
     public:
         // Rows arrive top first, from row from on, which is a multiple of factor. Height is
-        // the whole image's.
+        // the height of the whole image.
         BoxShrink(int width, int height, int factor, Bitmap *target, int from = 0);
 
         // Rows arrive bottom first, from the last.

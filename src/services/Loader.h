@@ -31,9 +31,9 @@
 #include "image/decode/Decode.h"
 
 namespace tiv {
-    // Requests coalesce to the latest, the files around it decode in parallel nearest first, and whatever
+    // Requests coalesce to the latest. The files around it decode in parallel, nearest first, and whatever
     // navigation has passed is aborted. The cache keeps full resolution for the image on screen and its two
-    // neighbours, screen sized pyramids for the rest and a few just passed, the farthest evicted first.
+    // neighbours, and screen sized pyramids for the rest and a few just passed. The farthest go first.
     class Loader {
 
     public:
@@ -64,9 +64,9 @@ namespace tiv {
             std::filesystem::path tileFolder;
         };
 
-        // Full resolution is capped where the image's pyramid would take more than half the
-        // machine's memory, and never below this. It is also what an image falls back to when
-        // the system has too little left for the whole of it.
+        // Full resolution is capped where the pyramid of the image would take more than half the memory of the
+        // machine, and never below this. It is also what an image falls back to when the system has too little
+        // left for the whole of it.
         static constexpr std::int64_t MIN_PIXELS = std::int64_t{128} * 1000 * 1000;
 
         // The most pixels one image decodes to. An image beyond it streams down to fit.
@@ -86,17 +86,16 @@ namespace tiv {
         // The smallest level is the screen divided by this.
         static constexpr int THUMB_DIVISOR = 4;
 
-        // Sized by the system: the cache holds this share of what the system could hand out if
-        // the cache were empty, measured again at every show() and decode, so it grows on a roomy
-        // machine and gives way when something else is hungry. Never below the floor.
+        // The cache holds this share of what the system could hand out if the cache were empty. That is
+        // measured again at every show() and decode, so the cache grows on a roomy machine and gives way
+        // when something else is hungry. Never below the floor.
         static constexpr std::size_t CACHE_SHARE = 3;
         static constexpr std::size_t MIN_CACHE_BYTES = std::size_t{512} * 1024 * 1024;
         static constexpr int MAX_WORKERS = 4;
 
-        // Zero cache bytes means the share of free memory above, followed as it changes, and any
-        // other number holds. Zero workers means as many as the machine warrants, or one in footprint
-        // mode. Footprint mode streams every still image and holds as little of it in memory as the
-        // view allows, writing nothing to disk outside streaming mode. Show it no files ahead or behind.
+        // Zero cache bytes follows the share of free memory above, and any other number holds. Zero workers means as
+        // many as the machine warrants, or one in footprint mode. That mode streams every still image, holds as little
+        // as the view allows and writes to disk only in streaming mode. Show it no files ahead or behind.
         explicit Loader(std::uint32_t eventType, std::size_t cacheBytes = 0, int workers = 0, bool footprint = false);
         ~Loader();
 
@@ -108,14 +107,14 @@ namespace tiv {
         // Previews are sized to this.
         void set_screen(int width, int height);
 
-        // Where pyramids on disk go, as TileCache::location() takes it, whether a PNG keeps
-        // only places to begin again, and whether images that fit in memory go on disk too.
-        // Said before the first show().
+        // Where pyramids on disk go, as TileCache::location() takes it. Small keeps only places to begin
+        // again for a PNG, and persist puts images that fit in memory on disk too. Said before the first
+        // show().
         void set_tiles(std::filesystem::path folder, bool small, bool persist);
 
         // HDR images decode for this display, and wait until it has been said, so nothing is
-        // made for the wrong one. What is decoded of them for another goes, and so does
-        // whatever such a decode still running makes.
+        // made for the wrong one. Anything decoded of them for another display goes, and so does
+        // the output of any such decode still running.
         void set_display(const Tone::Display &display);
 
         // The image to show, then the ones to have ready either side, nearest first.

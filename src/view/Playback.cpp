@@ -74,7 +74,8 @@ namespace tiv {
             return false;
         }
 
-        // Behind by a whole run or more, as after a stall, it picks up from now instead of racing to catch up.
+        // When it falls behind by a whole run or more, as after a stall, it picks up from now instead of
+        // racing to catch up.
         if (now - _due >= static_cast<std::uint64_t>(_animation->duration())) {
             _due = now;
         }

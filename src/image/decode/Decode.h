@@ -64,7 +64,7 @@ namespace tiv::Decode {
     };
 
     // Lets another thread cut a decode short. Once requested, every load using it fails
-    // until reset(). The direct decoders check between rows, libvips is told to stop.
+    // until reset(). The direct decoders check between rows, and libvips is told to stop.
     class Abort {
 
     public:
@@ -103,15 +103,15 @@ namespace tiv::Decode {
     bool probe(const std::filesystem::path &file, Info *info, std::string *error = nullptr);
 
     enum class Fit : std::uint8_t {
-        // A box smaller than the image asks for the size fitted into it: formats that scale cheaply
-        // deliver that size, the rest deliver the image whole and leave the shrinking to the caller.
+        // A box smaller than the image asks for the size fitted into it. Formats that scale cheaply
+        // deliver that size. The rest deliver the image whole and leave the shrinking to the caller.
         Cheap,
         // Every format delivers a size within the box without ever holding the image whole.
         Force,
     };
 
-    // Decodes into a bitmap as stored, the orientation left for drawing, the box in the shown orientation.
-    // RGBA8 unless HDR goes to an HDR display, as PQ rolled off into its headroom with any gain map weighed.
+    // Decodes into a bitmap as stored and leaves the orientation for drawing. The box is in the shown orientation.
+    // Output is RGBA8. HDR for an HDR display comes as PQ, rolled off into its headroom with any gain map weighed.
     // For SDR, HDR is tone mapped or brought down by its gain map. Scalable formats fit the box, larger or smaller.
     bool load(const std::filesystem::path &file, int boxWidth, int boxHeight, Bitmap *out, std::string *error = nullptr,
               Abort *abort = nullptr, Fit fit = Fit::Cheap, const Tone::Display &display = {});
@@ -132,10 +132,9 @@ namespace tiv::Decode {
     bool load_frames(const std::filesystem::path &file, std::size_t maxBytes, std::vector<Frame> *out,
                      std::string *error = nullptr, Abort *abort = nullptr);
 
-    // Hands the image over as stored, top to bottom, in bands of the rows given, so any size decodes in
-    // the memory of one band. Begin first hears the size, the alpha and the bands' encoding, chosen as
-    // load() would for the display. Either returning false stops the decode. A JPEG shrinks on the way
-    // by 2, 4 or 8, as cheaply as its blocks scale. Any other format comes at full size whatever is asked.
+    // Hands the image over as stored, top to bottom, in bands of the rows given, so any size decodes in the memory of
+    // one band. Begin first hears the size, the alpha and the band encoding that load() would pick for the display.
+    // Either returning false stops the decode. Only a JPEG shrinks on the way, by 2, 4 or 8 as its blocks scale.
     using Begin = std::function<bool(int width, int height, bool alpha, Bitmap::Encoding encoding)>;
     using Take = std::function<bool(int y, int rows, std::span<const std::uint8_t> pixels)>;
 

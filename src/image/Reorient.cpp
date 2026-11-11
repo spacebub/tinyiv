@@ -87,7 +87,7 @@ namespace tiv {
             }
         }
 
-        // The edits a metadata block needs, and whether what it becomes is the smallest block
+        // The edited metadata block, and whether it changed. Removable means it became the smallest block
         // saying 1, which the file did not have before this wrote it.
         struct Edited {
             bool changed = false;
@@ -109,8 +109,7 @@ namespace tiv {
             return true;
         }
 
-        // --- JPEG: the Exif APP1 segment, https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf, 4.5.4 ---
-
+        // The Exif APP1 segment of JPEG: https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf, 4.5.4
         Bytes jpeg_segment(const std::span<const std::uint8_t> block) {
             Bytes held = {0xFF, 0xE1};
 
@@ -206,8 +205,6 @@ namespace tiv {
             return plan;
         }
 
-        // --- PNG: the eXIf chunk, https://www.w3.org/TR/png-3/#eXIf ---
-
         // https://www.w3.org/TR/png-3/#D-CRCAppendix
         std::uint32_t crc32(const std::span<const std::uint8_t> data) {
             static const std::array<std::uint32_t, 256> TABLE = [] {
@@ -235,6 +232,7 @@ namespace tiv {
             return c ^ 0xFFFFFFFFU;
         }
 
+        // The eXIf chunk of PNG: https://www.w3.org/TR/png-3/#eXIf
         Bytes png_chunk(const std::span<const std::uint8_t> block) {
             Bytes held;
 
@@ -296,8 +294,7 @@ namespace tiv {
             return plan;
         }
 
-        // --- WebP: the EXIF chunk of the extended format, https://developers.google.com/speed/webp/docs/riff_container ---
-
+        // The EXIF chunk of WebP: https://developers.google.com/speed/webp/docs/riff_container
         constexpr std::size_t RIFF_HEADER = 12;
         constexpr std::size_t CHUNK_HEADER = 8;
         constexpr std::uint8_t FLAG_EXIF = 0x08;
@@ -478,8 +475,6 @@ namespace tiv {
 
             return plan;
         }
-
-        // --- TIFF: the Orientation tag of IFD0 ---
 
         Plan plan_tiff(const std::span<const std::uint8_t> data, const int orientation) {
             Plan plan;

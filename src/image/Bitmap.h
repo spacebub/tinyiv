@@ -30,8 +30,8 @@ namespace tiv {
         enum class Encoding : std::uint8_t {
             // RGBA8 sRGB.
             Srgb,
-            // HDR for an HDR display: one 32 bit word a pixel of BT.2020 in PQ, 10 bits each
-            // of red from the lowest, green and blue, then 2 of alpha.
+            // HDR for an HDR display: one 32 bit word a pixel, BT.2020 in PQ. Red takes the lowest
+            // 10 bits, then green and blue take 10 each and alpha takes the top 2.
             Pq,
         };
 

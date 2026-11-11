@@ -137,7 +137,7 @@ namespace tiv {
                 s0 = _mm256_srli_epi16(_mm256_add_epi16(s0, two), 2);
                 s1 = _mm256_srli_epi16(_mm256_add_epi16(s1, two), 2);
 
-                // packus interleaves the two by lane, the permute puts the pixels back in order.
+                // packus interleaves the two by lane. The permute puts the pixels back in order.
                 const __m256i packed = _mm256_permute4x64_epi64(_mm256_packus_epi16(s0, s1), 0b11011000);
 
                 _mm256_storeu_si256(reinterpret_cast<__m256i *>(out + (static_cast<std::size_t>(x) * 4)), packed);
@@ -147,8 +147,8 @@ namespace tiv {
                            out + (static_cast<std::size_t>(x) * 4), pairs - x);
         }
 
-        // Each field of the words is pulled into lanes of its own, the rows added, and hadd adds
-        // the pairs, leaving the lanes in the order 0 1 4 5 2 3 6 7, which the permute undoes.
+        // Each field of the words moves into lanes of its own, and the rows are added. hadd then adds
+        // the pairs and leaves the lanes in the order 0 1 4 5 2 3 6 7, which the permute undoes.
         TIV_AVX2 void halve_row_pq_avx2(const std::uint8_t *top, const std::uint8_t *bottom, std::uint8_t *out,
                                         const int pairs) {
             const __m256i ten = _mm256_set1_epi32(static_cast<int>(Bitmap::PQ_MASK));

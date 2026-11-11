@@ -37,7 +37,7 @@ namespace tiv::Decode {
         constexpr std::uint32_t MAX_SIDE = std::uint32_t{1} << 30U;
 
         // Errors come back as failed reads, and libvips owns the global handlers, so each handle
-        // is given its own that say nothing.
+        // gets handlers that say nothing.
         int quiet(TIFF * /*handle*/, void * /*user*/, const char * /*module*/, const char * /*format*/,
                   va_list /*arguments*/) {
             return 1;

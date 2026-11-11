@@ -70,7 +70,7 @@ namespace tiv::Bmp {
         struct Channel {
             std::uint32_t shift = 0;
             std::uint32_t low = 0;
-            // From the channel's own width to eight bits.
+            // From the width of the channel to eight bits.
             std::array<std::uint8_t, 256> scale{};
         };
 
@@ -100,7 +100,7 @@ namespace tiv::Bmp {
 
         std::span<const std::uint8_t> _pixels;
         std::span<const std::uint8_t> _mask;
-        // RGBA per entry, the bitmap's own order.
+        // RGBA per entry, in the order the bitmap lists them.
         std::array<std::uint8_t, std::size_t{256} * 4> _palette{};
         std::array<Channel, 4> _channels{};
         std::size_t _stride = 0;

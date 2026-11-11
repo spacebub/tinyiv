@@ -45,7 +45,7 @@ namespace tiv::Decode {
             return static_cast<int>((static_cast<unsigned>(events) | ...));
         }
 
-        // libjxl's workers spin while they wait, so a pool the size of the machine costs several times the
+        // libjxl's workers spin while they wait. A pool the size of the machine costs several times the
         // CPU of a small one for the same wall time, and several decodes run at once.
         std::size_t jxl_threads() {
             return static_cast<std::size_t>(
@@ -130,13 +130,13 @@ namespace tiv::Decode {
         }
 
         // A gain map that brings an HDR base down to its SDR rendition, as a jhgm box carries it.
-        // Gains outside the base's colours are in sRGB's, the only ones read.
+        // Gains not in the base colours are in sRGB, the only other colours read.
         struct JxlGain {
             GainMap::Metadata metadata;
             Bitmap map;
         };
 
-        // Where a run of pixels libjxl hands over goes, and what hears it has landed.
+        // Where each run of pixels from libjxl goes, and what hears that it has landed.
         using JxlPlace = std::function<std::span<std::uint8_t>(std::size_t x, std::size_t y, std::size_t pixels)>;
         using JxlLanded = std::function<void(std::size_t y, std::size_t pixels)>;
 
@@ -149,7 +149,7 @@ namespace tiv::Decode {
             // Held apart, as the applier keeps the map's address.
             std::unique_ptr<JxlGain> gainMap;
             std::optional<GainMap::Applier> gain;
-            // Into the colour space the gains apply in and back, when that is not the base's own.
+            // Into the colour space the gains apply in and back, when that is not the colour space of the base.
             std::optional<std::pair<Tone::Matrix, Tone::Matrix>> gainColours;
             JxlPlace place;
             JxlLanded landed;
@@ -212,7 +212,7 @@ namespace tiv::Decode {
             static_cast<const JxlOutput *>(opaque)->take(x, y, pixels, samples);
         }
 
-        // Told the colour encoding, says how the pixels come out, or nothing for RGBA8 as stored.
+        // Given the colour encoding, says how the pixels come out. Nothing means RGBA8 as stored.
         using JxlSetup = std::function<std::optional<JxlOutput>(const Tone::Source &tone, int width, int height)>;
 
         bool jxl_output(JxlDecoder *decoder, Bitmap &held, JxlOutput *output) {
@@ -309,7 +309,7 @@ namespace tiv::Decode {
         }
 
         // Without a setup the samples come out as stored, which a gain map wants. libjxl runs
-        // with its own thread pool, which libvips does not use.
+        // a separate thread pool, which libvips does not use.
         Direct jxl_decode(const std::span<const std::uint8_t> data, Bitmap *out, const Abort *abort,
                           const JxlSetup &setup) {
             const JxlHandle handle(true);
@@ -388,7 +388,7 @@ namespace tiv::Decode {
 
             std::unique_ptr<JxlGain> gain = jxl_gain(data);
             const float weight = gain != nullptr ? gain->metadata.weight(std::log2(display.headroom)) : 0.0F;
-            // Brought down to SDR, the gain map leaves nothing to roll off, and clipping keeps its colours.
+            // Once a gain map brings the image down to SDR, nothing is left to roll off. Clipping keeps its colours.
             const bool rolledOff = weight == 0.0F || display.hdr();
             JxlOutput held;
 
@@ -590,8 +590,7 @@ namespace tiv::Decode {
         }
 
         // libjxl keeps float rows along every group border of a lossy frame, for the filters that
-        // run across groups, which comes to about 2.7 bytes a pixel in measurements. Lossless
-        // frames need far less.
+        // run across groups. That measures about 2.7 bytes a pixel. Lossless frames need far less.
         constexpr double JXL_LOSSY_BYTES = 2.8;
         constexpr double JXL_LOSSLESS_BYTES = 1.0;
     }

@@ -26,9 +26,9 @@ namespace tiv::StatusBar {
     // How often a loading bar wants redrawing to keep moving.
     constexpr int LOADING_TICK_MS = 100;
 
-    // The left text is cut to what fits beside the right one, and the middle one, centred for
-    // as long as it clears both, to what fits between them. While loading, a highlight sweeps
-    // along the top edge and a spinner follows the right text.
+    // The left text is cut to what fits beside the right one. The middle one is cut to what fits between
+    // them, and stays centred for as long as it clears both. While loading, a highlight sweeps along the
+    // top edge and a spinner follows the right text.
     void draw(SDL_Renderer *renderer, const Rect &bar, float scale, const std::string &left, const std::string &middle,
               const std::string &right, bool loading);
 

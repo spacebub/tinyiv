@@ -18,7 +18,7 @@
 #include "gallery/Folder.h"
 
 namespace tiv {
-    // The user's settings, one key = value a line, # starting a comment.
+    // User settings. The file holds one key = value a line, and # starts a comment.
     struct Config {
         enum class KeepAwake : std::uint8_t {
             Always,
@@ -30,8 +30,8 @@ namespace tiv {
         // the image's folder.
         std::filesystem::path cache;
 
-        // A huge PNG keeps only the points decoding can resume from, about a third of the space, instead
-        // of every tile, at the cost of waiting for bands of rows when panning at full size.
+        // A huge PNG keeps only the points decoding can resume from, not every tile. That takes about a
+        // third of the space, but panning at full size waits for bands of rows.
         bool small = false;
 
         // Streaming mode is on from the start, before S is ever pressed.

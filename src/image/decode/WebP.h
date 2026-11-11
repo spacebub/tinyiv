@@ -24,7 +24,7 @@ namespace tiv::Decode::WebP {
     // An animation is left to libvips, which counts its frames.
     bool probe(std::span<const std::uint8_t> data, Info *info);
 
-    // Native size, since libwebp's own scaling measured slower than a full decode and halving.
+    // Native size, as scaling in libwebp is slower than a full decode and halving.
     // Animation stays with libvips.
     Direct load(const std::filesystem::path &file, std::span<const std::uint8_t> data, Bitmap *out, std::string *error,
                 const Abort *abort);

@@ -53,7 +53,7 @@ namespace tiv::Decode {
         // Adobe's, which says whether three channels are YCbCr or RGB.
         constexpr std::uint8_t APP14 = 0xEE;
         constexpr int BLOCK = 8;
-        // Each band pays for its own header, and a margin when chroma is subsampled, so a thread
+        // Each band pays for a separate header, and a margin when chroma is subsampled, so a thread
         // takes at least this many rows.
         constexpr int MIN_ROWS = 64;
 
@@ -62,13 +62,13 @@ namespace tiv::Decode {
         constexpr std::array<std::uint8_t, 2> END = {0xFF, 0xD9};
 
 #if defined(__x86_64__) || defined(_M_X64)
-        // 32 bytes a step, each 0xFF before last handed to visit in order until it says to stop.
+        // 32 bytes a step. Each 0xFF before last goes to visit in order, until visit says to stop.
         template <typename Visit>
         TIV_AVX2 void each_mark_avx2(const std::uint8_t *at, const std::uint8_t *last, const Visit &visit) {
             const __m256i mark = _mm256_set1_epi8(static_cast<char>(MARK));
 
             for (; at + 32 <= last; at += 32) {
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,portability-simd-intrinsics)
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast,portability-simd-intrinsics): the scan loads 32 bytes with intrinsics.
                 const __m256i block = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(at));
                 auto mask = static_cast<unsigned>(_mm256_movemask_epi8(_mm256_cmpeq_epi8(block, mark)));
 
@@ -117,9 +117,8 @@ namespace tiv::Decode {
             return marker >= RST0 && marker <= RST7;
         }
 
-        // Feeds libjpeg its parts one after another without joining them: the header made for a band,
-        // then the band's data where it lies in the file, then EOI.
-        // As "Compressed data handling (source and destination managers)" in libjpeg.txt describes:
+        // Feeds libjpeg the header made for a band, then the band data where it lies in the file, then EOI, without
+        // joining them. See "Compressed data handling (source and destination managers)" in libjpeg.txt:
         // https://github.com/libjpeg-turbo/libjpeg-turbo/blob/main/doc/libjpeg.txt
         class Chain {
 
@@ -145,7 +144,7 @@ namespace tiv::Decode {
                     ++chain._next;
                 }
 
-                // Past the end, as libjpeg's own sources do: a fake EOI ends the image.
+                // Past the end, as the sources built into libjpeg do: a fake EOI ends the image.
                 const std::span<const std::uint8_t> part =
                         chain._next < chain._parts.size() ? chain._parts.at(chain._next++) : std::span(END);
 
@@ -489,7 +488,7 @@ namespace tiv::Decode {
         const int base = scaled(top, num);
         const auto batch = static_cast<std::size_t>(std::max(handle.info.rec_outbuf_height, 1));
 
-        // The margin above only has to be entropy decoded, skipping spares its transforms.
+        // The margin above only has to be entropy decoded. Skipping it spares the transforms.
         if (const int above = keepTop - base; above > 0) {
             jpeg_skip_scanlines(&handle.info, static_cast<JDIMENSION>(above));
         }

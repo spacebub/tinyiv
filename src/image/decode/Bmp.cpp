@@ -38,7 +38,7 @@ namespace tiv {
         constexpr std::size_t FILE_HEADER = 14;
         constexpr std::uint32_t CORE_HEADER = 12;
         constexpr std::uint32_t INFO_HEADER = 40;
-        // BITMAPV2INFOHEADER adds the colour masks to the info header, V3 the alpha mask.
+        // BITMAPV2INFOHEADER adds the colour masks to the info header, and V3 adds the alpha mask.
         constexpr std::uint32_t V2_HEADER = 52;
         constexpr std::uint32_t V3_HEADER = 56;
         constexpr std::uint32_t OS2_HEADER = 64;
@@ -135,7 +135,7 @@ namespace tiv {
 
         template <bool Stream>
         TIV_AVX2 void bgr_avx2(const std::uint8_t *in, std::uint8_t *out, const int width) {
-            // Each lane spreads four pixels from a load of its own, the alpha byte is ored in.
+            // Each lane spreads four pixels from a separate load. The alpha byte is ored in.
             // clang-format off
             const __m256i order = _mm256_setr_epi8(2, 1, 0, -1, 5, 4, 3, -1, 8, 7, 6, -1, 11, 10, 9, -1,
                                                    2, 1, 0, -1, 5, 4, 3, -1, 8, 7, 6, -1, 11, 10, 9, -1);

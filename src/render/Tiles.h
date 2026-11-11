@@ -69,7 +69,7 @@ namespace tiv {
         // Bytes of the tiles meeting the area that upload() would upload with no limit on the budget.
         [[nodiscard]] std::size_t uploadable_bytes(const Rect &area) const;
 
-        // The tile cache's keys of the tiles meeting the area that have no texture, nearest its
+        // The tile cache keys of the tiles meeting the area that have no texture, nearest its
         // centre first. Nothing for a bitmap, which has every tile at hand.
         void missing(const Rect &area, std::vector<TileCache::Key> *out) const;
 

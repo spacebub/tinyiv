@@ -20,10 +20,9 @@
 #include "image/decode/Decode.h"
 
 namespace tiv::Decode {
-    // A HEIF or AVIF image stored as a grid of tiles, each coded on its own, so any band of rows
-    // decodes from the tiles it meets and tiles decode side by side. libheif decodes each tile:
-    // https://github.com/strukturag/libheif (LGPL-3.0), a context per thread, since tiles of one
-    // are not decoded at once from several.
+    // A HEIF or AVIF image stored as a grid of separately coded tiles. Any band of rows decodes from the tiles
+    // it meets, and tiles decode side by side. libheif decodes each tile: https://github.com/strukturag/libheif
+    // (LGPL-3.0). Each thread gets a context, since one context does not decode tiles from several at once.
     class HeifBands {
 
     public:
@@ -41,8 +40,8 @@ namespace tiv::Decode {
         [[nodiscard]] int width() const { return _width; }
         [[nodiscard]] int height() const { return _height; }
 
-        // The rows from top, count of them or to the bottom, as RGBA into out, which is as wide as
-        // the image. Uses up to threads threads.
+        // Count rows from top, or up to the bottom, as RGBA into out, which is as wide as the image.
+        // Uses up to threads threads.
         bool decode(int top, int count, Bitmap *out, int threads, const Abort *abort) const;
 
     private:

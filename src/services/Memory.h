@@ -14,8 +14,8 @@
 
 namespace tiv::Memory {
 
-    // Returns what the allocator holds freed to the system. It keeps freed buffers for reuse,
-    // which saves zeroing fresh pages while decodes follow one another, so this is for once
+    // Returns to the system what the allocator holds freed. The allocator keeps freed buffers for
+    // reuse, which saves zeroing fresh pages while decodes follow one another. This is for once
     // they stop.
     void give_back();
 

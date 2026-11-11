@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
-# Read by the vcpkg toolchain in project(). The release only triplet builds the dependencies in
-# half the time. A build tree configured on another triplet keeps it, host tools included, as
-# the toolchain caches only the target triplet.
+# Read by the vcpkg toolchain in project(). The release only triplet builds the dependencies in half the time. A build
+# tree configured on another triplet keeps it, host tools included, as the toolchain caches only the target triplet:
 # https://learn.microsoft.com/en-us/vcpkg/users/buildsystems/cmake-integration#vcpkg_target_triplet
 if (CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
     set(VCPKG_TARGET_TRIPLET x64-windows-release CACHE STRING "vcpkg triplet the dependencies are built for")
@@ -105,7 +104,7 @@ include(Format)
 include(GitRevision)
 include(ReuseApp)
 
-# Built here on every system, as few have SDL 3 installed, and linked statically, so nothing of it
+# SDL is built here on every system, as few have SDL 3 installed. It links statically, so nothing of it
 # is installed.
 include(FetchContent)
 

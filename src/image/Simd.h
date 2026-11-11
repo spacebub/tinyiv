@@ -10,7 +10,7 @@
 #define TIV_IMAGE_SIMD_H
 
 
-// GCC and Clang only compile AVX2 intrinsics in a function marked for them, MSVC takes them anywhere.
+// GCC and Clang only compile AVX2 intrinsics in a function marked for them. MSVC takes them anywhere.
 #if defined(_MSC_VER) && !defined(__clang__)
 #define TIV_AVX2
 #else

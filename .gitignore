@@ -1,4 +1,4 @@
-# Build trees, the last one Visual Studio's own default
+# Build trees, the last one the Visual Studio default
 /build*/
 /cmake-build-*/
 /out/

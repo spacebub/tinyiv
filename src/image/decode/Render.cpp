@@ -33,7 +33,7 @@ namespace tiv {
 
         // librsvg sizes every filter and mask buffer to the whole document, and libvips renders
         // an SVG in tiles this size, each drawing the whole document again. So the part is cut
-        // into pieces, each a document of its own that shows only the piece and fits one tile.
+        // into pieces, each a separate document that shows only the piece and fits one tile.
         constexpr int SVG_TILE = 2000;
 
         // A blur reaches past the piece it lands in, so this much around each is drawn and dropped.
@@ -46,7 +46,7 @@ namespace tiv {
             int height = 0;
         };
 
-        // One piece of the part as a document of its own, drawn with its reach and cropped back.
+        // One piece of the part as a separate document, drawn with its reach and cropped back.
         bool render_svg_piece(const std::span<const std::uint8_t> document, const double scale,
                               const Decode::Size whole, const Part piece, Bitmap *out) {
             const int left = std::max(piece.x - SVG_REACH, 0);
@@ -54,7 +54,7 @@ namespace tiv {
             const int width = std::min(piece.x + piece.width + SVG_REACH, whole.width) - left;
             const int height = std::min(piece.y + piece.height + SVG_REACH, whole.height) - top;
 
-            // Pieces draw on threads of their own, so a piece with no memory for it fails like a bad one.
+            // Pieces draw on separate threads, so a piece with no memory for it fails like a bad one.
             try {
                 const std::string narrowed =
                         Svg::narrow(document, scale, whole.width, whole.height, left, top, width, height);
@@ -79,7 +79,7 @@ namespace tiv {
             }
         }
 
-        // The pieces render on threads of their own, since libvips would draw them one by one.
+        // The pieces render on separate threads, since libvips would draw them one by one.
         bool render_svg(const std::span<const std::uint8_t> document, const double scale, const Decode::Size whole,
                         const Part part, Bitmap *out, const Decode::Abort *abort) {
             constexpr int STEP = SVG_TILE - (2 * SVG_REACH);

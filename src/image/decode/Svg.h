@@ -17,7 +17,7 @@
 namespace tiv::Svg {
 
     // The document rewritten to show only part of itself. libvips renders the whole of it at
-    // the scale to wholeWidth by wholeHeight, the part is in those pixels and the rewritten
+    // the scale to wholeWidth by wholeHeight. The part is in those pixels, and the rewritten
     // document renders to exactly its size. Empty when the root element cannot be rewritten.
     [[nodiscard]] std::string narrow(std::span<const std::uint8_t> document, double scale, int wholeWidth,
                                      int wholeHeight, int x, int y, int width, int height);

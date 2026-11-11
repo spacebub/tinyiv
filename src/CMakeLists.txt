@@ -109,7 +109,7 @@ target_link_libraries(tinyiv PRIVATE SDL3::SDL3-static PkgConfig::VIPS PkgConfig
 
 set_target_properties(tinyiv PROPERTIES WIN32_EXECUTABLE ON)
 
-# Windows takes the window icon from the resources, everywhere else it is set on the window.
+# Windows takes the window icon from the resources. Everywhere else it is set on the window.
 if (WIN32)
     target_sources(tinyiv PRIVATE
             resources/Win32/tinyiv.rc

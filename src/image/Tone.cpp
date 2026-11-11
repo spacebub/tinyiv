@@ -32,7 +32,7 @@ namespace tiv {
         constexpr float HLG_PEAK_NITS = 1000.0F;
         constexpr float HLG_GAMMA = 1.2F;
 
-        // Linear light up to this share of the headroom is left alone, the rest bends towards
+        // Linear light up to this share of the headroom is left alone. The rest bends towards
         // the headroom without reaching it.
         constexpr float KNEE = 0.8F;
 
@@ -284,7 +284,7 @@ namespace tiv {
 
         using Luma = std::array<float, 3>;
 
-        // The Y row of the primaries' RGB to XYZ.
+        // The Y row of the RGB to XYZ matrix for the primaries.
         Luma luma_of(const Tone::Primaries primaries) {
             const Matrix xyz = to_xyz(primaries);
 
@@ -511,8 +511,8 @@ namespace tiv {
                       : _mm256_and_si256(_mm256_i32gather_epi32(table, slot, 1), _mm256_set1_epi32(0xFF));
         }
 
-        // Both encoders eight pixels at a time, the same arithmetic as the scalar loops, which
-        // take whatever is left over. The matrix, if any, goes first. Returns how many pixels it did.
+        // Both encoders, eight pixels at a time. The arithmetic matches the scalar loops, which take
+        // whatever is left over. The matrix, if any, goes first. Returns how many pixels it did.
         template <bool Pq, bool Convert>
         TIV_AVX2 std::size_t encode_avx2(const float *rgba, std::uint8_t *out, const std::size_t pixels,
                                          const float headroom, const bool rolledOff, const Matrix &matrix) {

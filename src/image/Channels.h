@@ -43,12 +43,12 @@ namespace tiv::Channels {
     void deinterleave(const std::uint8_t *rgba, std::size_t pixels, bool greenApart, std::uint8_t *red,
                       std::uint8_t *green, std::uint8_t *blue, std::uint8_t *alpha);
 
-    // Over the row of residuals, the sum of each byte's magnitude as a signed number, and the sum of
-    // each byte's difference from the one before it, the first from zero: what compresses as it is
-    // against what slope() would leave.
+    // Two sums over a row of residuals, to weigh the row as it is against what slope() would leave. Plain
+    // adds the magnitude of each byte as a signed number. Sloped adds the difference of each byte from
+    // the one before it, with zero before the first.
     void magnitudes(const std::uint8_t *row, std::size_t bytes, std::uint64_t *plain, std::uint64_t *sloped);
 
-    // Each byte of the row less the one before it, in place, the first kept, which prefix() undoes.
+    // Each byte of the row less the one before it, in place. The first byte stays, and prefix() undoes it.
     void slope(std::uint8_t *row, std::size_t bytes);
 
     // Each byte of the row added into the sum beside it.

@@ -56,9 +56,9 @@ namespace tiv::Decode {
         // Where in the data each step's rows begin.
         [[nodiscard]] std::span<const std::uint64_t> starts() const { return _starts; }
 
-        // The rows from top, count of them or to the bottom, scaled by num eighths, into out, which
-        // is as wide as the scaled image and holds at least the scaled rows. Uses up to threads threads.
-        // The top has to be a multiple of 8, where a scaled row begins.
+        // Count rows from top, or up to the bottom, scaled by num eighths into out. Out is as wide as the
+        // scaled image and holds at least the scaled rows. Uses up to threads threads. Top has to be a
+        // multiple of 8, where a scaled row begins.
         bool decode(std::span<const std::uint8_t> data, int top, int count, unsigned num, Bitmap *out, int threads,
                     const Abort *abort) const;
         // As above, the data read as it is needed.

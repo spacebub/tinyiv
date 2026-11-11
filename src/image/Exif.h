@@ -29,10 +29,9 @@ namespace tiv::Exif {
     // Spec: EXIF 2.32 (CIPA DC-008), section 4.6.4, tag 0x0112.
     [[nodiscard]] int orientation(std::span<const std::uint8_t> block);
 
-    // Splices, at offsets into the block, that make IFD0 of a TIFF header block say the orientation. A tag
-    // already there is patched. Otherwise IFD0 is copied to the end with the tag added, which writing 1 later
-    // undoes to the same bytes. False when the block is not TIFF or the tag is not a single SHORT.
-    // https://www.itu.int/itudoc/itu-t/com16/tiff-fx/docs/tiff6.pdf, section 2.
+    // Splices that make IFD0 say the orientation. A tag already there is patched. Otherwise IFD0 is copied to
+    // the end with the tag added, and writing 1 later restores the same bytes. False when the block is not TIFF
+    // or the tag is not a single SHORT: https://www.itu.int/itudoc/itu-t/com16/tiff-fx/docs/tiff6.pdf, section 2.
     bool orient(std::span<const std::uint8_t> block, int orientation, std::vector<Splice> *out);
 
     // The smallest TIFF header block that holds the orientation.

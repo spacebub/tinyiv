@@ -22,7 +22,7 @@ namespace tiv {
     // of the image shown with the orientation.
     [[nodiscard]] Rect oriented(const Rect &unit, int orientation);
 
-    // Everything is in pixels, zoom is screen pixels per image pixel.
+    // Everything is in pixels. Zoom is screen pixels per image pixel.
     class Viewport {
 
     public:

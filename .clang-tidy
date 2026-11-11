@@ -25,7 +25,7 @@ Checks: >
 #   easily-swappable-parameters: width and height pairs are everywhere in a viewer.
 #   avoid-magic-numbers, magic-numbers: constants are named where a name helps, not by rule.
 #   non-private-member-variables (both spellings): plain structs carry data.
-#   pro-type-union-access: SDL_Event is a union, there is no other way to read it.
+#   pro-type-union-access: SDL_Event is a union. There is no other way to read it.
 #   include-cleaner: clangd does this live.
 #   trailing-return-type: a style choice, not used here.
 #   avoid-pragma-once: header guards are used instead, so the check is moot.

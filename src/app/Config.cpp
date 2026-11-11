@@ -110,13 +110,13 @@ namespace tiv {
 
         struct Setting {
             std::string_view key;
-            // What the file says of it and its default, as written into a file that lacks it.
+            // The description and default line of the key, as written into a file that lacks it.
             std::string_view text;
             // False when the value is not one the key takes.
             bool (*apply)(Config &config, std::string_view value);
         };
 
-        // Scanned in order for each line, which stays nanoseconds at any count a person edits by hand.
+        // Each line scans this in order. That takes nanoseconds at any count a person edits by hand.
         constexpr std::array SETTINGS{
                 Setting{
                         .key = "cache",

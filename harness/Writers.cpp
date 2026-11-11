@@ -1204,7 +1204,7 @@ namespace harness::Writers {
             }
         }
 
-        // Too short for an absolute run. An RLE4 run alternates its two nibbles, an RLE8 run cannot.
+        // Too short for an absolute run. An RLE4 run alternates its two nibbles. An RLE8 run cannot.
         void put_short(const std::span<const std::uint8_t> run, const bool nibbles, Bytes &out) {
             if (nibbles) {
                 out.push_back(static_cast<std::uint8_t>(run.size()));

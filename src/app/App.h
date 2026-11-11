@@ -95,7 +95,7 @@ namespace tiv {
         void set_fullscreen(bool on);
         void follow_awake() const;
         [[nodiscard]] bool bar_shown() const;
-        // Of the top and of the bottom bar alike, zero while they are hidden.
+        // The top and the bottom bar share this height. It is zero while they are hidden.
         [[nodiscard]] int bar_height() const;
         void toggle_bar();
 
@@ -138,7 +138,7 @@ namespace tiv {
         [[nodiscard]] int frame_wait_ms() const;
         [[nodiscard]] Rect play_bar() const;
 
-        // Where in the folder the image is and its name, marked while turned and not saved.
+        // The place in the folder and the image name. A mark shows while the image is turned and not saved.
         [[nodiscard]] std::string title() const;
         // The two halves of the title: where in the folder, then the name.
         [[nodiscard]] std::string position() const;
@@ -151,7 +151,8 @@ namespace tiv {
         [[nodiscard]] std::string mode_text() const;
         // The image on screen streams from tiles because it is too large for memory, not by the mode.
         [[nodiscard]] bool always_streamed() const;
-        // " in" and the folder tiles being made go to, with the home folder as ~. Empty in memory.
+        // " in" and then the folder that new tiles go to, with the home folder written as ~.
+        // Empty when the tiles stay in memory.
         [[nodiscard]] std::string where_tiles_go() const;
         [[nodiscard]] std::string details() const;
 
@@ -197,7 +198,7 @@ namespace tiv {
         std::uint64_t _shownAt = 0;
         std::uintmax_t _bytes = 0;
         std::uint64_t _generation = 0;
-        // Whose levels the canvas holds.
+        // The generation of the image whose levels the canvas holds.
         std::uint64_t _shown = 0;
         // Something of the current image is still on its way: its first pixels, or the whole
         // image behind a preview.
@@ -237,8 +238,8 @@ namespace tiv {
         bool _running = true;
         bool _dirty = true;
         int _repaints = 0;
-        // Presentation waits for the display. Without it, a frame of a drag follows the one before after
-        // half a refresh at the soonest.
+        // Presentation waits for the display. Without it, each frame of a drag comes at least half a refresh
+        // after the one before.
         bool _vsync = true;
         float _refreshRate = 60.0F;
         // In SDL_GetTicksNS() time.

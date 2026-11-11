@@ -77,7 +77,7 @@ namespace tiv {
             };
         }
 
-        // A share of the outer rect back in the outer rect's own terms.
+        // A share of the outer rect, mapped back to the coordinates of the outer rect.
         Rect at(const Rect &unit, const Rect &outer) {
             return {
                     .x = outer.x + (unit.x * outer.width),
@@ -572,8 +572,8 @@ namespace tiv {
                                           });
     }
 
-    // Over the budget, tiles nobody drew this frame go: the neighbours' fine levels first,
-    // then the current image's, never the coarsest of any and never a warm level within the screen.
+    // Over the budget, tiles nobody drew this frame go. Fine levels of the neighbours go first, then those
+    // of the current image. The coarsest level of any image and a warm level within the screen never go.
     void Canvas::evict() {
         std::size_t over = vram() > _budget ? vram() - _budget : 0;
 
