@@ -202,6 +202,27 @@ namespace harness {
         push(event);
     }
 
+    void Driver::hold(const SDL_Keycode key, const int repeats) {
+        SDL_Event event{};
+
+        event.type = SDL_EVENT_KEY_DOWN;
+        event.key.windowID = _window;
+        event.key.key = key;
+        event.key.down = true;
+        push(event);
+
+        event.key.repeat = true;
+
+        for (int i = 0; i < repeats; ++i) {
+            push(event);
+        }
+
+        event.type = SDL_EVENT_KEY_UP;
+        event.key.down = false;
+        event.key.repeat = false;
+        push(event);
+    }
+
     void Driver::wheel(const int notches) {
         const SDL_Point window = size();
         SDL_Event event{};

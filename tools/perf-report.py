@@ -140,16 +140,29 @@ def annotate(symbols):
     return written
 
 
+FRAME = re.compile(r"^(.*) \((.*)\)$")
+
+
+# Also returns the share of all samples each caller spent in libc, the largest first. libc carries
+# no symbols on Arch, so its time can only be told apart by who called into it.
 def fold():
     print("folding the stacks, which reads every sample")
-    process = subprocess.Popen(["perf", "script", "-i", str(DATA), "-F", "comm,period,ip,sym", "--no-inline"],
+    process = subprocess.Popen(["perf", "script", "-i", str(DATA), "-F", "comm,period,ip,sym,dso", "--no-inline"],
                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     stacks = collections.Counter()
-    comm, period, frames = None, 0, []
+    libc = collections.Counter()
+    comm, period, frames, libraries = None, 0, [], []
 
     def close():
-        if comm is not None:
-            stacks[";".join([comm] + frames[::-1])] += period
+        if comm is None:
+            return
+
+        stacks[";".join([comm] + frames[::-1])] += period
+
+        if libraries and libraries[0].startswith("libc.so"):
+            named = (f"{frame}  ({library})" for frame, library in zip(frames[1:], libraries[1:])
+                     if frame != "[unknown]" and not library.startswith("libc.so"))
+            libc[next(named, "no caller with a name")] += period
 
     for line in process.stdout:
         if not line.strip():
@@ -158,10 +171,14 @@ def fold():
         if not line[0].isspace():
             close()
             parts = line.split()
-            comm, period, frames = " ".join(parts[:-1]) or "?", int(parts[-1]) if parts[-1].isdigit() else 1, []
+            comm, period = " ".join(parts[:-1]) or "?", int(parts[-1]) if parts[-1].isdigit() else 1
+            frames, libraries = [], []
         else:
             parts = line.split(None, 1)
-            frames.append(parts[1].strip().replace(";", ":") if len(parts) > 1 else "[unknown]")
+            match = FRAME.match(parts[1].strip()) if len(parts) > 1 else None
+
+            frames.append(match.group(1).replace(";", ":") if match else "[unknown]")
+            libraries.append(Path(match.group(2)).name if match else "[unknown]")
 
     close()
     process.wait()
@@ -179,9 +196,14 @@ def fold():
 
             break
 
+    total = sum(stacks.values()) or 1
+
+    return "\n".join(f"{100 * count / total:10.2f}%  {caller}" for caller, count in libc.most_common(20))
+
 
 def main():
     own = hottest_own(8)
+    libc = fold()
     sections = [
         "# Profile of tiv_harness\n",
         "\n".join(machine()) + "\n",
@@ -193,6 +215,10 @@ def main():
         "## Libraries\n\nThe codecs, libvips and the GPU driver are shared objects. The tinyiv code and SDL are "
         f"inside {BINARY}.\n",
         block(report("--no-children", "--sort", "dso", "-g", "none", "--percent-limit", "0.3")),
+        "## Time in libc, by caller\n\nlibc carries no symbols, so each of its samples goes to the nearest caller "
+        "with a name, as a share of all samples. A libc routine that keeps no frame hides the function that "
+        "called it, and the one above that is named.\n",
+        block(libc),
         "## Hottest functions\n",
         block(report("--no-children", "--sort", "dso,sym", "-g", "none", "--percent-limit", "0.3", limit=60)),
         f"## Functions in {BINARY}, self time\n",
@@ -215,7 +241,6 @@ def main():
         sections += ["## Counters\n", block((OUT / "stat.txt").read_text())]
 
     listings = annotate(own[:5])
-    fold()
 
     files = [
         "## Files\n",

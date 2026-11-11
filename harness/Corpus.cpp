@@ -49,7 +49,7 @@ namespace harness {
         using Writers::Rows;
 
         // Bumped whenever a spec changes, so an older corpus is written again.
-        constexpr int GENERATOR = 2;
+        constexpr int GENERATOR = 3;
 
         constexpr std::string_view STAMP = ".stamp";
 
@@ -467,6 +467,30 @@ namespace harness {
                     {
                             .name = "jpeg-grey.jpg",
                             .set = [](Writers::Jpeg &spec) { spec.colour = Writers::JpegColour::Grey; },
+                    },
+                    {
+                            // Every MP entry counts far more images than the segment holds, which a
+                            // reader that trusts the count walks for minutes.
+                            .name = "jpeg-mpf-overcount.jpg",
+                            .set =
+                                    [](Writers::Jpeg &spec) {
+                                        constexpr std::uint32_t ENTRIES = 400;
+                                        constexpr std::uint32_t TAG_MP_ENTRY = 0xB002;
+                                        constexpr std::uint32_t UNDEFINED = 7;
+                                        Bytes body = text(std::string_view("MPF\0II*\0", 8));
+
+                                        Writers::put_le(body, 8, 4);
+                                        Writers::put_le(body, ENTRIES, 2);
+
+                                        for (std::uint32_t i = 0; i < ENTRIES; ++i) {
+                                            Writers::put_le(body, TAG_MP_ENTRY, 2);
+                                            Writers::put_le(body, UNDEFINED, 2);
+                                            Writers::put_le(body, 0xFFFFFFFFU, 4);
+                                            Writers::put_le(body, 0xFFFFFF00U, 4);
+                                        }
+
+                                        spec.markers.emplace_back(APP2, std::move(body));
+                                    },
                     },
                     {
                             .name = "jpeg-cmyk.jpg",

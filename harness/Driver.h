@@ -61,6 +61,8 @@ namespace harness {
         bool settle(std::string_view step);
 
         void key(SDL_Keycode key, SDL_Keymod mod = SDL_KMOD_NONE);
+        // The key held down long enough to repeat this many times.
+        void hold(SDL_Keycode key, int repeats);
         // Positive notches go to the next image, as the wheel turned down does.
         void wheel(int notches);
         // Window points. Moves are spread evenly along the way.

@@ -34,7 +34,7 @@ corpus and 4 GB on the full one.
   `stacks.folded` for a flame graph. `--dwarf` unwinds by DWARF when frame pointers fall short.
   `--stat` adds a second run that counts cycles, instructions and misses. perf records user call
   chains only, which `perf_event_paranoid` at 2 allows. libc on Arch carries no symbols, so its
-  samples show as addresses.
+  samples show as addresses. The report credits them to the functions that called into libc.
 - `sanitize` builds Debug with `-DTIV_SANITIZE=ON` and runs the small corpus. Any report from
   AddressSanitizer or UndefinedBehaviorSanitizer fails the run, and so does a leak with a frame
   that has a name. `tools/sanitizer-verdict.py` reads the log. A leak allocated only from a library
@@ -84,7 +84,7 @@ Each sitting writes a `tinyiv.conf`, opens a folder of the corpus and works thro
 | `persist`   | Builds huge images on disk, then opens them from disk and rebuilds one       |
 | `small`     | Does the same with `cache_mode = small`                                      |
 | `footprint` | Runs photos and huge images with `memory_mode = footprint`                   |
-| `beside`    | Leaves `cache` empty, so pyramids go in `tinyiv-cache` beside the images     |
+| `beside`    | Leaves `cache` empty, so pyramids go in `tinyiv-cache` beside the images. Files of other programs in that folder have to survive |
 
 ## How a step waits
 

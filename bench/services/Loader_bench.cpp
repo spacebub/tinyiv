@@ -9,8 +9,12 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <benchmark/benchmark.h>
@@ -19,6 +23,8 @@
 #include "support/Memory.h"
 #include "support/Register.h"
 
+#include "image/Pyramid.h"
+#include "image/decode/Decode.h"
 #include "services/Loader.h"
 
 namespace bench {
@@ -242,6 +248,71 @@ namespace bench {
                                             benchmark::Counter(static_cast<double>(loader.cached_files())));
             Memory::report_peak(state);
         }
+
+        // The file under as many names as the window holds, since the loader tells images apart by path.
+        std::vector<std::filesystem::path> linked(const std::filesystem::path &file, const int count) {
+            const std::filesystem::path dir = Corpus::dir() / "linked";
+            std::vector<std::filesystem::path> held;
+            std::error_code failure;
+
+            std::filesystem::create_directories(dir, failure);
+
+            for (int i = 0; i < count; ++i) {
+                std::filesystem::path link = dir / (std::to_string(i) + file.extension().string());
+
+                if (!std::filesystem::exists(link, failure)) {
+                    std::filesystem::create_hard_link(file, link, failure);
+                }
+
+                held.push_back(std::move(link));
+            }
+
+            return held;
+        }
+
+        // A step onto a file not decoded yet while every worker is busy prefetching files the step
+        // keeps in its window: how long the image the user is looking at waits behind them.
+        void Loader_land_busy(benchmark::State &state, const std::filesystem::path &file, const int workers) {
+            constexpr std::size_t LANDING = 3;
+            const std::vector<std::filesystem::path> files = linked(file, AHEAD + BEHIND + 2);
+
+            for ([[maybe_unused]] auto step : state) {
+                tiv::Loader loader(EVENT, 0, workers);
+                tiv::Loader::Result result;
+                tiv::Decode::Info info;
+                std::shared_ptr<const tiv::Pyramid> pyramid;
+                const Step first = step_at(files, 0, 1);
+                const Step landing = step_at(files, LANDING, 1);
+
+                loader.set_screen(SCREEN_WIDTH, SCREEN_HEIGHT);
+                loader.show(1, first.current, first.ahead, first.behind);
+
+                if (!wait_for(loader, 1, &result) || result.kind == tiv::Loader::Kind::Failed) {
+                    state.SkipWithError("no result: " + result.error);
+
+                    break;
+                }
+
+                // Once the nearest neighbour is in, the workers are on files further out.
+                while (!loader.cached(first.ahead.front(), &info, &pyramid)) {
+                    std::this_thread::sleep_for(std::chrono::microseconds(200));
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+                const Clock::time_point asked = Clock::now();
+
+                loader.show(2, landing.current, landing.ahead, landing.behind);
+
+                if (!wait_for(loader, 2, &result) || result.kind == tiv::Loader::Kind::Failed) {
+                    state.SkipWithError("no result: " + result.error);
+
+                    break;
+                }
+
+                state.SetIterationTime(std::chrono::duration<double>(Clock::now() - asked).count());
+            }
+        }
     }
 
     void register_loader() {
@@ -261,6 +332,14 @@ namespace bench {
                 ->Unit(benchmark::kMillisecond)
                 ->UseManualTime()
                 ->Iterations(3);
+        for (const std::string_view name : {"noise.png", "noise.jxl"}) {
+            benchmark::RegisterBenchmark("Loader_land_busy/" + std::string(name) + "/2workers", Loader_land_busy,
+                                         Corpus::file(name), 2)
+                    ->Unit(benchmark::kMillisecond)
+                    ->UseManualTime()
+                    ->Iterations(5);
+        }
+
         benchmark::RegisterBenchmark("Loader_walk/corpus/500ms", Loader_walk, corpus, 500, 20)
                 ->Unit(benchmark::kMillisecond)
                 ->UseRealTime()

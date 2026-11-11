@@ -183,9 +183,16 @@ namespace harness {
 
             const std::string made = slurp(Sandbox::config());
 
-            for (const std::string_view key :
-                 {"cache =", "cache_mode =", "streaming_mode =", "persist_streams =", "memory_mode =", "sort =",
-                  "prevent_sleep =", "hdr_white ="}) {
+            for (const std::string_view key : {
+                         "cache =",
+                         "cache_mode =",
+                         "streaming_mode =",
+                         "persist_streams =",
+                         "memory_mode =",
+                         "sort =",
+                         "prevent_sleep =",
+                         "hdr_white =",
+                 }) {
                 driver.check(made.contains(key), std::format("the config made on first start lacks {}", key));
             }
 
@@ -277,9 +284,17 @@ namespace harness {
                 d.settle("help");
                 d.check(!d.state().help, "a click outside the keybinds did not put them away");
 
-                d.key(SDLK_F);
+                // Fullscreen takes the press alone, where every repeat would switch it back and forth.
+                d.hold(SDLK_F, 3);
                 d.settle("fullscreen");
-                d.check(d.state().fullscreen, "F did not go fullscreen");
+                d.check(d.state().fullscreen, "F held down did not go fullscreen once");
+
+                const tiv::App::State held = d.state();
+
+                d.hold(SDLK_RIGHT, 2);
+                d.settle("held step");
+                d.check(d.state().index == (held.index + 3) % held.count,
+                        "Right held down did not step on each repeat");
                 d.key(SDLK_F11);
                 d.settle("fullscreen");
 
@@ -528,12 +543,27 @@ namespace harness {
             Sandbox::copy(Sandbox::corpus() / "huge", work / "huge");
             configure({.cache = {}, .streaming = true, .persist = true});
 
+            // Files of other programs in the folder, named as a download in progress and as a pyramid.
+            const std::filesystem::path cache = work / "huge" / "tinyiv-cache";
+            const std::array strangers{cache / "download.part", cache / "terrain.tiles"};
+
+            std::filesystem::create_directories(cache);
+
+            for (const std::filesystem::path &stranger : strangers) {
+                std::ofstream(stranger, std::ios::binary) << "not a pyramid";
+            }
+
             driver.session(in_copy(library, work / "huge", "huge"), [&](Driver &d) {
                 open(d);
                 walk(library, d, "build");
             });
 
-            driver.check(files_under(work / "huge" / "tinyiv-cache") > 0, "no tinyiv-cache folder beside the images");
+            driver.check(files_under(cache) > strangers.size(), "no tinyiv-cache folder beside the images");
+
+            for (const std::filesystem::path &stranger : strangers) {
+                driver.check(slurp(stranger) == "not a pyramid",
+                             stranger.filename().string() + " in the cache folder did not survive the builds");
+            }
         }
 
         constexpr std::array SITTINGS{
