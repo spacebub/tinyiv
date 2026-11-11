@@ -216,6 +216,8 @@ namespace tiv {
         bool _seeking = false;
         // Only the image on screen is decoded and held, as little of it as the view allows.
         bool _footprint = false;
+        // The streamed image shows from a tile cache made for another display, until Shift+R rebuilds it.
+        bool _stale = false;
 
         std::uint64_t _movedAt = 0;
         // When streaming mode or the order last switched, zero before either has.

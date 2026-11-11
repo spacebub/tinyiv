@@ -171,6 +171,10 @@ namespace tiv {
 
         [[nodiscard]] Bitmap::Encoding encoding() const { return _encoding; }
 
+        // Made for another display than the one open() was given, so the tones differ from a fresh
+        // decode until Shift+R rebuilds it.
+        [[nodiscard]] bool stale() const { return _stale; }
+
         // The tile when it is in memory, else null.
         [[nodiscard]] std::shared_ptr<const Bitmap> find(const Key &key) const;
 
@@ -254,6 +258,7 @@ namespace tiv {
         int _sourced = 0;
         // Pins only the coarsest level, drops tiles once uploaded and reads on one thread.
         bool _lean = false;
+        bool _stale = false;
 
         mutable std::mutex _guard;
         mutable std::condition_variable _wake;

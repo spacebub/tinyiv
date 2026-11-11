@@ -504,6 +504,7 @@ namespace tiv {
         _loading = true;
         _building = false;
         _streamed = false;
+        _stale = false;
         _failure.clear();
         _seeking = false;
         _playback.stop();
@@ -892,6 +893,7 @@ namespace tiv {
             const auto image = static_cast<std::uint64_t>(_folder.index());
 
             _streamed = result.tileCache != nullptr;
+            _stale = _streamed && result.tileCache->stale();
             follow_output(result);
 
             if (_streamed) {
@@ -1431,10 +1433,19 @@ namespace tiv {
     }
 
     std::string App::modes() const {
-        const bool streaming = _loader->streaming_all();
+        std::string text;
 
-        return std::format("{}{}{}", streaming ? "STREAMING" : "", streaming && _linear ? "  " : "",
-                           _linear ? "HDR" : "");
+        for (const auto &[shown, tag] : {
+                     std::pair{_loader->streaming_all(), "STREAMING"},
+                     std::pair{_stale, "STALE CACHE"},
+                     std::pair{_linear, "HDR"},
+             }) {
+            if (shown) {
+                text += text.empty() ? tag : std::format("  {}", tag);
+            }
+        }
+
+        return text;
     }
 
     std::string App::details() const {

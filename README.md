@@ -79,6 +79,13 @@ other way around. tinyiv looks for the cache in three places: the `cache` folder
 `tinyiv-cache` folder next to the image and your user cache folder. Shift+R rebuilds the cache
 of the streamed image on screen with the current settings.
 
+An HDR image keeps one cache per display brightness, and changing `hdr_white` counts as a new
+brightness. When only a cache made for another brightness or for SDR exists, tinyiv shows it and
+the bottom bar says `STALE CACHE`. Its highlights then differ from a fresh decode. Shift+R
+replaces it with a cache made for the display in use. In footprint mode, Shift+R writes the new
+cache only while streaming mode is on. A stale cache that reads full resolution from the image
+itself, as a small mode PNG cache does, is never used. The image decodes again instead.
+
 ## License
 
 GPL-3.0-or-later.

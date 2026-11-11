@@ -1867,8 +1867,18 @@ namespace tiv {
             return nullptr;
         }
 
+        const std::filesystem::path exact = name_of(identity, display);
+
         for (const std::filesystem::path &path : candidates(dirs, identity, display)) {
             if (std::shared_ptr<TileCache> tileCache = open_at(path, file, display, lean); tileCache != nullptr) {
+                tileCache->_stale = path.filename() != exact;
+
+                // The source decodes its rows for this display, so a stale pyramid that reads its
+                // finest level from it would mix two displays.
+                if (tileCache->_stale && tileCache->_sourced > 0) {
+                    continue;
+                }
+
                 return tileCache;
             }
         }

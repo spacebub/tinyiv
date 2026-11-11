@@ -5,6 +5,7 @@
 ### Added
 
 - `hdr_white` setting: how bright the white of an HDR image shows, in nits. It defaults to 100, which leaves more room for highlights
+- The bottom bar says `STALE CACHE` when a streamed HDR image shows from a cache made for another display or `hdr_white`. Shift+R rebuilds it
 
 ### Changed
 
