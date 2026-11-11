@@ -5,8 +5,14 @@ add_executable(tinyiv
         app/App.h
         app/Config.cpp
         app/Config.h
+        app/Hud.cpp
+        app/Hud.h
         app/Input.cpp
         app/Input.h
+        app/Picture.cpp
+        app/Picture.h
+        app/Window.cpp
+        app/Window.h
 
         gallery/Folder.cpp
         gallery/Folder.h

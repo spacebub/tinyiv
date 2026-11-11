@@ -18,12 +18,11 @@
 
 #include <SDL3/SDL.h>
 
-#include "app/Config.h"
 #include "app/Input.h"
+#include "app/Picture.h"
+#include "app/Window.h"
 #include "gallery/Folder.h"
-#include "image/Tone.h"
 #include "image/decode/Decode.h"
-#include "render/Canvas.h"
 #include "services/Loader.h"
 #include "services/Refiner.h"
 #include "view/Playback.h"
@@ -81,54 +80,19 @@ public:
     [[nodiscard]] State state() const;
 
 private:
-    struct Size {
-        int width = 0;
-        int height = 0;
-    };
-
-    bool open_window(std::string *error);
     void layout();
     void update_display();
-    void update_refresh();
-    bool make_renderer(bool linear);
-    void follow_output(const Loader::Result &result);
-    void set_fullscreen(bool on);
-    void follow_awake() const;
     [[nodiscard]] bool bar_shown() const;
     // The top and the bottom bar share this height. It is zero while they are hidden.
     [[nodiscard]] int bar_height() const;
     void toggle_bar();
 
-    // Direction is the way the wheel was going, so prefetch leans that way.
-    void show(int index, int direction);
+    void deliver();
     void handle(const SDL_Event &event);
     bool handle_play_bar(const SDL_Event &event);
     bool handle_help(const SDL_Event &event);
     void seek_to(double x);
     void step_frame(int delta);
-    void deliver();
-    void deliver_detail();
-    void give_back();
-    void warm_neighbours();
-    // Reads the image from disk again, dropping any turn not saved.
-    void reload();
-    void rebuild();
-    // Composes a turn or flip with how the image is shown.
-    void turn(int by);
-    // Writes how the image is turned into its file, when it is turned.
-    void save();
-    // Switches streaming mode, where every still image shows from a pyramid of tiles.
-    void toggle_stream();
-    // Sorts the folder the next way along, keeping the image on screen.
-    void next_order();
-    // How the image on screen is drawn, from how it is stored.
-    [[nodiscard]] int orientation() const;
-    // The size of the image on screen as stored, and as shown.
-    [[nodiscard]] Size stored() const;
-    [[nodiscard]] Size shown() const;
-    // The view changed, so the part on screen may want rendering again once it rests.
-    void moved();
-    void refine();
     void frame();
 
     void wait_for_event();
@@ -138,110 +102,30 @@ private:
     [[nodiscard]] int frame_wait_ms() const;
     [[nodiscard]] Rect play_bar() const;
 
-    // The place in the folder and the image name. A mark shows while the image is turned and not saved.
-    [[nodiscard]] std::string title() const;
-    // The two halves of the title: where in the folder, then the name.
-    [[nodiscard]] std::string position() const;
-    [[nodiscard]] std::string name() const;
-    // The modes that are on, for the bottom bar.
-    [[nodiscard]] std::string modes() const;
-    [[nodiscard]] std::string failure_text(const std::string &error) const;
-    // The streaming mode shows for a moment after it switches, in the bar or as a badge.
-    [[nodiscard]] bool flashing() const;
-    [[nodiscard]] std::string mode_text() const;
-    // The image on screen streams from tiles because it is too large for memory, not by the mode.
-    [[nodiscard]] bool always_streamed() const;
-    // " in" and then the folder that new tiles go to, with the home folder written as ~.
-    // Empty when the tiles stay in memory.
-    [[nodiscard]] std::string where_tiles_go() const;
-    [[nodiscard]] std::string details() const;
-
-    // What was last sent to the refiner, so a request that failed is not repeated.
-    struct Ask {
-        std::uint64_t generation = 0;
-        double scale = 0.0;
-        int x = 0;
-        int y = 0;
-        int width = 0;
-        int height = 0;
-
-        bool operator==(const Ask &) const = default;
-    };
-
-    SDL_Window *_window = nullptr;
-    SDL_Renderer *_renderer = nullptr;
-    // Shared by each renderer the window has, null where the gpu renderer is not available.
-    SDL_GPUDevice *_device = nullptr;
+    Window _window;
     std::uint32_t _loaderEvent = 0;
     std::uint32_t _refinerEvent = 0;
     // A tile cache read a tile the view asked for.
     std::uint32_t _tileCacheEvent = 0;
-    Tone::Display _display;
 
     Folder _folder;
     Viewport _viewport;
     Playback _playback;
     Input _input;
-    std::unique_ptr<Canvas> _canvas;
+    Picture _picture;
     std::unique_ptr<Loader> _loader;
     std::unique_ptr<Refiner> _refiner;
 
-    Decode::Info _info;
-    // Turns and flips on top of the orientation the file says, until saved.
-    int _turn = 1;
-    float _hdrWhite = 100.0F;
-    // Replaces the image details in the bottom bar until the next image or turn.
-    std::string _message;
     bool _help = false;
-    // Images came and went since freed memory was last given back.
-    bool _giveBack = false;
-    std::uint64_t _shownAt = 0;
-    std::uintmax_t _bytes = 0;
-    std::uint64_t _generation = 0;
-    // The generation of the image whose levels the canvas holds.
-    std::uint64_t _shown = 0;
-    // Something of the current image is still on its way: its first pixels, or the whole
-    // image behind a preview.
-    bool _loading = false;
-    // The image is too large for memory, and its tiles are being written to disk.
-    bool _building = false;
-    // The image shows from disk.
-    bool _streamed = false;
-    // The renderer draws in linear light, for an HDR image.
-    bool _linear = false;
-    int _direction = 1;
-    // Shown in place of an image that could not be opened.
-    std::string _failure;
-    // What the last press of S or O did, shown for a moment after.
-    std::string _flash;
-    // Where the tiles being made go on disk, empty when they stay in memory.
-    std::filesystem::path _tileFolder;
     // A drag that started on the play bar's track.
     bool _seeking = false;
-    // Only the image on screen is decoded and held, as little of it as the view allows.
-    bool _footprint = false;
-    // The streamed image shows from a tile cache made for another display, until Shift+R rebuilds it.
-    bool _stale = false;
 
-    std::uint64_t _movedAt = 0;
-    // When streaming mode or the order last switched, zero before either has.
-    std::uint64_t _switchedAt = 0;
-    // Moved and not yet looked at by refine().
-    bool _settling = false;
-    Ask _asked;
-
-    bool _fullscreen = false;
-    Config::KeepAwake _awake = Config::KeepAwake::Fullscreen;
     // Whether the bars show, kept apart for windowed and fullscreen: I switches the one in use.
     bool _barWindowed = true;
     bool _barFullscreen = false;
     bool _running = true;
     bool _dirty = true;
     int _repaints = 0;
-    // Presentation waits for the display. Without it, each frame of a drag comes at least half a refresh
-    // after the one before.
-    bool _vsync = true;
-    float _refreshRate = 60.0F;
     // In SDL_GetTicksNS() time.
     std::uint64_t _drawnAt = 0;
 };
