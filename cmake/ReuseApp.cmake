@@ -38,6 +38,7 @@ function(tiv_reuse_app target)
     target_include_directories(${target} PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_compile_options(${target} PRIVATE ${TIV_COMPILE_FLAGS})
     tiv_vulkan(${target})
+    tiv_wayland(${target})
     # The libvips 7 compatibility macros rename plain identifiers such as error_exit, which libjpeg uses.
     target_compile_definitions(${target} PRIVATE VIPS_DISABLE_COMPAT TIV_VERSION="${PROJECT_VERSION}")
 

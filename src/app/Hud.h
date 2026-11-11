@@ -35,7 +35,7 @@ struct Frame {
     int bar = 0;
     bool bars = false;
     bool help = false;
-    bool linear = false;
+    bool hdr10 = false;
     bool streaming = false;
     float progress = 0.0F;
     const Folder *folder = nullptr;

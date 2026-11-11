@@ -57,7 +57,7 @@ public:
     [[nodiscard]] Painter *painter() const;
     [[nodiscard]] Canvas &canvas() const { return *_canvas; }
     [[nodiscard]] const Tone::Display &display() const { return _display; }
-    [[nodiscard]] bool linear() const { return _linear; }
+    [[nodiscard]] bool hdr10() const { return _hdr10; }
     [[nodiscard]] bool fullscreen() const { return _fullscreen; }
     [[nodiscard]] bool vsync() const;
     [[nodiscard]] bool lost() const { return _vulkan != nullptr && _vulkan->lost(); }
@@ -66,6 +66,7 @@ public:
 private:
     void follow_awake() const;
     [[nodiscard]] bool make_vulkan(std::string *error);
+    bool update_vulkan_display();
 
     SDL_Window *_window = nullptr;
     SDL_Renderer *_renderer = nullptr;
@@ -78,7 +79,7 @@ private:
     Tone::Display _display;
     float _hdrWhite = 100.0F;
     bool _lean = false;
-    bool _linear = false;
+    bool _hdr10 = false;
     bool _fullscreen = false;
     Config::KeepAwake _awake = Config::KeepAwake::Fullscreen;
     // Presentation waits for the display. Without it, each frame of a drag comes at least half a refresh

@@ -35,6 +35,7 @@ void skip(std::string_view why);
 
 void register_painter();
 void register_compare();
+void register_tone();
 
 }
 

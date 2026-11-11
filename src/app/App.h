@@ -64,7 +64,7 @@ public:
         bool failed = false;
         bool streamed = false;
         bool streaming = false;
-        bool linear = false;
+        bool hdr10 = false;
         bool animated = false;
         bool playing = false;
         std::size_t frame = 0;

@@ -25,8 +25,7 @@
 
 namespace tiv {
 namespace {
-// Where HDR puts SDR white: https://www.itu.int/pub/R-REP-BT.2408
-constexpr float SDR_WHITE_NITS = 203.0F;
+using Tone::PQ_REFERENCE_NITS;
 
 // HLG is shown as on the reference display of BT.2100, 1000 nits with a system gamma of 1.2.
 constexpr float HLG_PEAK_NITS = 1000.0F;
@@ -41,20 +40,27 @@ constexpr std::size_t ENCODED = 16384;
 constexpr std::size_t CHUNK = 256;
 
 // The brightest PQ holds, relative to SDR white.
-constexpr float PQ_TOP = 10000.0F / SDR_WHITE_NITS;
+constexpr float PQ_TOP = 10000.0F / PQ_REFERENCE_NITS;
 constexpr std::uint32_t TEN_BITS = 1023;
 
-// The PQ EOTF of SMPTE ST 2084 and BT.2100 table 4, in nits: https://www.itu.int/rec/R-REC-BT.2100
+// The constants of the PQ curve in SMPTE ST 2084 and BT.2100 table 4: https://www.itu.int/rec/R-REC-BT.2100
+constexpr double PQ_M1 = 2610.0 / 16384.0;
+constexpr double PQ_M2 = 2523.0 / 4096.0 * 128.0;
+constexpr double PQ_C1 = 3424.0 / 4096.0;
+constexpr double PQ_C2 = 2413.0 / 4096.0 * 32.0;
+constexpr double PQ_C3 = 2392.0 / 4096.0 * 32.0;
+
+// The PQ EOTF, in nits.
 float pq_nits(const float signal) {
-    constexpr double M1 = 2610.0 / 16384.0;
-    constexpr double M2 = 2523.0 / 4096.0 * 128.0;
-    constexpr double C1 = 3424.0 / 4096.0;
-    constexpr double C2 = 2413.0 / 4096.0 * 32.0;
-    constexpr double C3 = 2392.0 / 4096.0 * 32.0;
+    const double power = std::pow(std::clamp(static_cast<double>(signal), 0.0, 1.0), 1.0 / PQ_M2);
 
-    const double power = std::pow(std::clamp(static_cast<double>(signal), 0.0, 1.0), 1.0 / M2);
+    return static_cast<float>(std::pow(std::max(power - PQ_C1, 0.0) / (PQ_C2 - (PQ_C3 * power)), 1.0 / PQ_M1)
+                              * 10000.0);
+}
 
-    return static_cast<float>(std::pow(std::max(power - C1, 0.0) / (C2 - (C3 * power)), 1.0 / M1) * 10000.0);
+// The inverse EOTF from y, the light relative to 10000 nits raised to M1.
+double pq_encoded(const double y) {
+    return std::pow((PQ_C1 + (PQ_C2 * y)) / (1.0 + (PQ_C3 * y)), PQ_M2);
 }
 
 // The inverse HLG OETF of BT.2100 table 5, scene light from 0 to 1.
@@ -80,7 +86,7 @@ Table fill(float (*decode)(float)) {
 }
 
 float pq_relative(const float signal) {
-    return pq_nits(signal) / SDR_WHITE_NITS;
+    return pq_nits(signal) / PQ_REFERENCE_NITS;
 }
 
 float identity(const float signal) {
@@ -143,14 +149,18 @@ const SrgbTable &srgb_table() {
 }
 
 // The sRGB curve of IEC 61966-2-1 undone, for 8 bit samples.
+float srgb_decoded(const std::uint8_t value) {
+    const double v = value / 255.0;
+
+    return static_cast<float>(v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4));
+}
+
 const std::array<float, 256> &srgb_linear() {
     static const std::array<float, 256> TABLE = [] {
         std::array<float, 256> held{};
 
         for (std::size_t i = 0; i < held.size(); ++i) {
-            const double v = static_cast<double>(i) / 255.0;
-
-            held.at(i) = static_cast<float>(v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4));
+            held.at(i) = srgb_decoded(static_cast<std::uint8_t>(i));
         }
 
         return held;
@@ -163,17 +173,12 @@ const std::array<float, 256> &srgb_linear() {
 // which spends the steps where the curve is steep, near black.
 const PqTable &pq_table() {
     static const PqTable TABLE = [] {
-        constexpr double M1 = 2610.0 / 16384.0;
-        constexpr double M2 = 2523.0 / 4096.0 * 128.0;
-        constexpr double C1 = 3424.0 / 4096.0;
-        constexpr double C2 = 2413.0 / 4096.0 * 32.0;
-        constexpr double C3 = 2392.0 / 4096.0 * 32.0;
         PqTable held{};
 
         for (std::size_t i = 0; i < ENCODED; ++i) {
             const double root = static_cast<double>(i) / static_cast<double>(ENCODED - 1);
-            const double power = std::pow(root * root, M1);
-            const double signal = std::pow((C1 + (C2 * power)) / (1.0 + (C3 * power)), M2);
+            const double power = std::pow(root * root, PQ_M1);
+            const double signal = pq_encoded(power);
 
             held.at(i) = static_cast<std::uint16_t>(std::lround(signal * TEN_BITS));
         }
@@ -400,7 +405,7 @@ TIV_AVX2 std::size_t hlg_avx2(const Luma &luma, float *rgba, const std::size_t p
 // HLG's OOTF, which brightens by the luminance of the scene: BT.2100, table 5.
 void hlg_display(const Luma &luma, std::span<float> rgba) {
     const auto [kr, kg, kb] = luma;
-    const float scale = HLG_PEAK_NITS / SDR_WHITE_NITS;
+    const float scale = HLG_PEAK_NITS / PQ_REFERENCE_NITS;
     std::size_t first = 0;
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -492,10 +497,10 @@ TIV_AVX2 __m256 finite_avx2(const __m256 value) {
                          _mm256_min_ps(value, _mm256_set1_ps(1.0e6F)));
 }
 
-TIV_AVX2 __m256i slots_avx2(const __m256 value, const bool pq) {
+TIV_AVX2 __m256i slots_avx2(const __m256 value, const bool pq, const float pqScale) {
     constexpr auto TOP = static_cast<float>(ENCODED - 1);
     const __m256 one = _mm256_set1_ps(1.0F);
-    const __m256 clamped = pq ? _mm256_sqrt_ps(_mm256_min_ps(_mm256_mul_ps(value, _mm256_set1_ps(1.0F / PQ_TOP)), one))
+    const __m256 clamped = pq ? _mm256_sqrt_ps(_mm256_min_ps(_mm256_mul_ps(value, _mm256_set1_ps(pqScale)), one))
                               : _mm256_min_ps(value, one);
 
     return _mm256_cvttps_epi32(_mm256_add_ps(_mm256_mul_ps(clamped, _mm256_set1_ps(TOP)), _mm256_set1_ps(0.5F)));
@@ -513,6 +518,7 @@ TIV_AVX2 std::size_t encode_avx2(const float *rgba,
                                  std::uint8_t *out,
                                  const std::size_t pixels,
                                  const float headroom,
+                                 const float pqScale,
                                  const bool rolledOff,
                                  const Matrix &matrix) {
     const __m256 knee = _mm256_set1_ps(KNEE * headroom);
@@ -567,10 +573,10 @@ TIV_AVX2 std::size_t encode_avx2(const float *rgba,
 
         const __m256i alpha = _mm256_cvttps_epi32(_mm256_add_ps(_mm256_mul_ps(a, alphaTop), half));
         const int shift = Pq ? 10 : 8;
-        __m256i word = look_up_avx2(table, slots_avx2(r, Pq), Pq);
+        __m256i word = look_up_avx2(table, slots_avx2(r, Pq, pqScale), Pq);
 
-        word = _mm256_or_si256(word, _mm256_slli_epi32(look_up_avx2(table, slots_avx2(g, Pq), Pq), shift));
-        word = _mm256_or_si256(word, _mm256_slli_epi32(look_up_avx2(table, slots_avx2(b, Pq), Pq), shift * 2));
+        word = _mm256_or_si256(word, _mm256_slli_epi32(look_up_avx2(table, slots_avx2(g, Pq, pqScale), Pq), shift));
+        word = _mm256_or_si256(word, _mm256_slli_epi32(look_up_avx2(table, slots_avx2(b, Pq, pqScale), Pq), shift * 2));
         word = _mm256_or_si256(word, _mm256_slli_epi32(alpha, Pq ? 30 : 24));
 
         _mm256_storeu_si256(reinterpret_cast<__m256i *>(out + (done * 4)), _mm256_permutevar8x32_epi32(word, order));
@@ -586,6 +592,7 @@ std::size_t encode_vector(const std::span<const float> rgba,
                           const std::span<std::uint8_t> out,
                           const bool pq,
                           const float headroom,
+                          const float pqScale,
                           const bool rolledOff,
                           const Matrix *matrix) {
 #if defined(__x86_64__) || defined(_M_X64)
@@ -593,20 +600,23 @@ std::size_t encode_vector(const std::span<const float> rgba,
         const std::size_t pixels = std::min(rgba.size(), out.size()) / 4;
 
         if (pq) {
-            return matrix != nullptr
-                           ? encode_avx2<true, true>(rgba.data(), out.data(), pixels, headroom, rolledOff, *matrix)
-                           : encode_avx2<true, false>(rgba.data(), out.data(), pixels, headroom, rolledOff, Matrix{});
+            return matrix != nullptr ? encode_avx2<true, true>(
+                                               rgba.data(), out.data(), pixels, headroom, pqScale, rolledOff, *matrix)
+                                     : encode_avx2<true, false>(
+                                               rgba.data(), out.data(), pixels, headroom, pqScale, rolledOff, Matrix{});
         }
 
-        return matrix != nullptr
-                       ? encode_avx2<false, true>(rgba.data(), out.data(), pixels, headroom, rolledOff, *matrix)
-                       : encode_avx2<false, false>(rgba.data(), out.data(), pixels, headroom, rolledOff, Matrix{});
+        return matrix != nullptr ? encode_avx2<false, true>(
+                                           rgba.data(), out.data(), pixels, headroom, pqScale, rolledOff, *matrix)
+                                 : encode_avx2<false, false>(
+                                           rgba.data(), out.data(), pixels, headroom, pqScale, rolledOff, Matrix{});
     }
 #else
     (void)rgba;
     (void)out;
     (void)pq;
     (void)headroom;
+    (void)pqScale;
     (void)rolledOff;
 #endif
 
@@ -659,6 +669,7 @@ void encode_srgb(const std::span<const float> rgba,
 void encode_pq(const std::span<const float> rgba,
                const std::span<std::uint8_t> out,
                const float headroom,
+               const float pqScale,
                const bool rolledOff,
                const std::size_t from) {
     constexpr std::size_t BLOCK = 64;
@@ -683,11 +694,11 @@ void encode_pq(const std::span<const float> rgba,
             const float scale = rolledOff && peak > knee ? (knee + (room * over / (over + room))) / peak : 1.0F;
 
             slots[at] = static_cast<std::uint16_t>(
-                    static_cast<std::int32_t>((std::sqrt(std::min(r * scale * (1.0F / PQ_TOP), 1.0F)) * TOP) + 0.5F));
+                    static_cast<std::int32_t>((std::sqrt(std::min(r * scale * pqScale, 1.0F)) * TOP) + 0.5F));
             slots[at + 1] = static_cast<std::uint16_t>(
-                    static_cast<std::int32_t>((std::sqrt(std::min(g * scale * (1.0F / PQ_TOP), 1.0F)) * TOP) + 0.5F));
+                    static_cast<std::int32_t>((std::sqrt(std::min(g * scale * pqScale, 1.0F)) * TOP) + 0.5F));
             slots[at + 2] = static_cast<std::uint16_t>(
-                    static_cast<std::int32_t>((std::sqrt(std::min(b * scale * (1.0F / PQ_TOP), 1.0F)) * TOP) + 0.5F));
+                    static_cast<std::int32_t>((std::sqrt(std::min(b * scale * pqScale, 1.0F)) * TOP) + 0.5F));
             slots[at + 3] = static_cast<std::uint16_t>(
                     static_cast<std::int32_t>((std::min(finite(in[at + 3]), 1.0F) * 3.0F) + 0.5F));
         }
@@ -792,14 +803,17 @@ void Tone::Mapper::linear(const std::span<const float> in, const int channels, c
 void Tone::Mapper::finish(const std::span<float> rgba, const std::span<std::uint8_t> out) const {
     const bool pq = _display.hdr();
     const float headroom = pq ? _display.headroom : 1.0F;
-    const std::size_t done = encode_vector(rgba, out, pq, headroom, _rolledOff, _convert ? &_toOutput : nullptr);
+    // At the default white the ratio is exactly 1.
+    const float pqScale = (1.0F / PQ_TOP) * (_display.whiteNits / PQ_REFERENCE_NITS);
+    const std::size_t done =
+            encode_vector(rgba, out, pq, headroom, pqScale, _rolledOff, _convert ? &_toOutput : nullptr);
 
     if (_convert) {
         apply_matrix(_toOutput, rgba.subspan(std::min(done * 4, rgba.size())));
     }
 
     if (pq) {
-        encode_pq(rgba, out, headroom, _rolledOff, done);
+        encode_pq(rgba, out, headroom, pqScale, _rolledOff, done);
     } else {
         encode_srgb(rgba, out, _rolledOff, done);
     }
@@ -866,5 +880,13 @@ void Tone::Mapper::map(const std::span<const float> in,
 
                 finish(rgba, bytes);
             });
+}
+
+float Tone::pq_signal(const float nits) {
+    return static_cast<float>(pq_encoded(std::pow(std::clamp(static_cast<double>(nits) / 10000.0, 0.0, 1.0), PQ_M1)));
+}
+
+float Tone::from_srgb(const std::uint8_t value) {
+    return srgb_decoded(value);
 }
 }

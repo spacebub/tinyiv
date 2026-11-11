@@ -50,7 +50,7 @@ struct Config {
     KeepAwake awake = KeepAwake::Fullscreen;
 
     // How bright the white of an HDR image shows on an HDR display, in nits. Highlights use the
-    // headroom above it, up to the peak the display reports.
+    // headroom above it, up to the peak the display reports, so a higher white leaves them less.
     int hdrWhite = 100;
 
     // $XDG_CONFIG_HOME/tinyiv/tinyiv.conf, or tinyiv.conf beside the executable on Windows.

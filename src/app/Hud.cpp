@@ -122,7 +122,7 @@ std::string modes(const Frame &frame) {
     for (const auto &[shown, tag] : {
                  std::pair{frame.streaming, "STREAMING"},
                  std::pair{frame.picture->stale(), "STALE CACHE"},
-                 std::pair{frame.linear, "HDR"},
+                 std::pair{frame.hdr10, "HDR"},
          }) {
         if (shown) {
             text += text.empty() ? tag : std::format("  {}", tag);

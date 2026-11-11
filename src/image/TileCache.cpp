@@ -156,8 +156,17 @@ std::u8string utf8(const std::string_view text) {
     return {text.begin(), text.end()};
 }
 
+// The default white adds no tag, so the name matches what the SDL renderer gives.
 std::u8string pq_tag(const Tone::Display &display) {
-    return display.hdr() ? utf8(std::format("|pq|{:.2f}", display.headroom)) : std::u8string{};
+    if (!display.hdr()) {
+        return {};
+    }
+
+    if (display.whiteNits == Tone::Display{}.whiteNits) {
+        return utf8(std::format("|pq|{:.2f}", display.headroom));
+    }
+
+    return utf8(std::format("|pq|{:.2f}|{:.0f}", display.headroom, display.whiteNits));
 }
 
 std::filesystem::path from_utf8(const char *text) {

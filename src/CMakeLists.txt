@@ -97,6 +97,8 @@ add_executable(tinyiv
         render/StatusBar.h
         render/Tiles.cpp
         render/Tiles.h
+        render/WaylandColor.cpp
+        render/WaylandColor.h
 
         render/gpu/Api.h
         render/gpu/Buffer.cpp
@@ -129,6 +131,7 @@ add_executable(tinyiv
 target_include_directories(tinyiv PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(tinyiv PRIVATE ${TIV_COMPILE_FLAGS})
 tiv_vulkan(tinyiv)
+tiv_wayland(tinyiv)
 # The libvips 7 compatibility macros rename plain identifiers such as error_exit, which libjpeg uses.
 target_compile_definitions(tinyiv PRIVATE VIPS_DISABLE_COMPAT)
 target_compile_definitions(tinyiv PRIVATE TIV_VERSION="${PROJECT_VERSION}")

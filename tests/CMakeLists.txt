@@ -2,6 +2,8 @@ add_executable(tiv_tests
         Check.h
         Main.cpp
 
+        image/Tone_test.cpp
+
         render/Compare_test.cpp
         render/Painter_test.cpp)
 

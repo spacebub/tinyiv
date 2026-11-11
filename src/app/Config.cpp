@@ -227,8 +227,8 @@ constexpr std::array SETTINGS{
         Setting{
                 .key = "hdr_white",
                 .text = "# How bright the white of an HDR image shows on an HDR display, in nits, from\n"
-                        "# 50 to 1000. Lower leaves more room for highlights, higher makes the whole\n"
-                        "# image brighter.\n"
+                        "# 50 to 1000. Lower leaves more room for highlights. Higher makes the whole\n"
+                        "# image brighter at the expense of highlights, which a dim display then crushes.\n"
                         "hdr_white = 100\n",
                 .apply =
                         [](Config &config, const std::string_view value) {

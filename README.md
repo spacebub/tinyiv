@@ -69,7 +69,7 @@ start and later adds any missing setting with its default value.
 | `memory_mode`     | `speed` or `footprint`. Speed decodes the images around the current one ahead of time, so stepping through a folder is instant. Footprint keeps only what is on screen. Every image streams, and tiles leave memory once drawn. PNGs, TIFFs and non-progressive JPEGs are read again from the file at full size instead of kept. Nothing is written to disk unless streaming mode is on. Each step and zoom waits for decoding. |
 | `sort`            | `a-z`, `z-a`, `newest`, `oldest` or `size`. The order of the images in a folder. Newest and oldest go by the last modified time. Size puts the smallest first. O switches the order while tinyiv runs and leaves the file unchanged.                                                                                                                                                                                            |
 | `prevent_sleep`   | `always`, `fullscreen` or `never`. When tinyiv prevents sleep.                                                                                                                                                                                                                                                                                                                                                                  |
-| `hdr_white`       | Nits, from 50 to 1000. How bright the white of an HDR image shows on an HDR display. Lower leaves more room for highlights. Higher makes the whole image brighter.                                                                                                                                                                                                                                                              |
+| `hdr_white`       | Nits, from 50 to 1000. How bright the white of an HDR image shows on an HDR display. Lower leaves more room for highlights. Higher makes the whole image brighter at the expense of highlights, which a dim display then crushes.                                                                                                                                                                                               |
 
 If the cache folder can't be written, tinyiv falls back to your user cache folder.
 
@@ -81,10 +81,10 @@ of the streamed image on screen with the current settings.
 
 An HDR image keeps one cache per display brightness, and changing `hdr_white` counts as a new
 brightness. When only a cache made for another brightness or for SDR exists, tinyiv shows it and
-the bottom bar says `STALE CACHE`. Its highlights then differ from a fresh decode. Shift+R
-replaces it with a cache made for the display in use. In footprint mode, Shift+R writes the new
-cache only while streaming mode is on. A stale cache that reads full resolution from the image
-itself, as a small mode PNG cache does, is never used. The image decodes again instead.
+the bottom bar says `STALE CACHE`. Its brightness and highlights can then differ from a fresh
+decode. Shift+R replaces it with a cache made for the display in use. In footprint mode, Shift+R
+writes the new cache only while streaming mode is on. A stale cache that reads full resolution from
+the image itself, as a small mode PNG cache does, is never used. The image decodes again instead.
 
 ## License
 

@@ -24,8 +24,10 @@
 
 #include "image/Bitmap.h"
 #include "image/Orient.h"
+#include "image/Tone.h"
 #include "render/Font.h"
 #include "render/Painter.h"
+#include "render/WaylandColor.h"
 #include "render/gpu/Api.h"
 #include "render/gpu/Buffer.h"
 #include "render/gpu/Device.h"
@@ -248,7 +250,18 @@ std::unique_ptr<VulkanPainter> VulkanPainter::create(SDL_Window *window, std::st
     std::unique_ptr<VulkanPainter> painter(new VulkanPainter(std::move(device)));
 
     painter->_window = window;
-    painter->_swapchain = std::make_unique<Swapchain>(*painter->_device);
+
+    const char *driver = SDL_GetCurrentVideoDriver();
+    const bool wayland = driver != nullptr && std::string_view(driver) == "wayland";
+
+#ifdef TIV_WAYLAND
+    if (wayland) {
+        painter->_colour = WaylandColor::create(window);
+    }
+#endif
+
+    painter->_sdrOnly = wayland && painter->_colour == nullptr;
+    painter->_swapchain = std::make_unique<Swapchain>(*painter->_device, painter->_colour != nullptr);
 
     if (!painter->start(error)) {
         return nullptr;
@@ -582,11 +595,73 @@ bool VulkanPainter::remake_swapchain() {
     _device->api().DeviceWaitIdle(_device->handle());
     drop_framebuffers();
 
-    return _swapchain->make(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), _wanted);
+    // Mesa describes every swapchain but a pass-through one, and two descriptions close the window.
+    if (_colour != nullptr && (_wanted == Swapchain::Output::Sdr || !supports(Swapchain::Output::Hdr10))) {
+        _colour->forget();
+    }
+
+    if (!_swapchain->make(static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height), _wanted)) {
+        return false;
+    }
+
+    describe();
+
+    return true;
+}
+
+void VulkanPainter::describe() {
+    if (_swapchain == nullptr || _swapchain->output() != Swapchain::Output::Hdr10) {
+        return;
+    }
+
+    if (_colour != nullptr) {
+        // A refused description would leave PQ on a surface the compositor reads as sRGB.
+        // The next frame makes the SDR swapchain.
+        if (!_colour->describe(_hdr.minimum, _hdr.peak)) {
+            _sdrOnly = true;
+            _wanted = Swapchain::Output::Sdr;
+            _stale = true;
+        }
+    } else {
+        _swapchain->set_metadata(_hdr.minimum, _hdr.peak);
+    }
+}
+
+void VulkanPainter::set_hdr(const Hdr &hdr) {
+    const bool moved = hdr.minimum != _hdr.minimum || hdr.peak != _hdr.peak;
+
+    _hdr = hdr;
+
+    if (moved) {
+        describe();
+    }
+}
+
+const WaylandColor::Output *VulkanPainter::wayland_output() {
+    return _colour != nullptr ? &_colour->output() : nullptr;
+}
+
+// The bars and text are sRGB colours. On a PQ output they are encoded for white at the white of the images.
+Colour VulkanPainter::shown(const Colour colour) const {
+    if (output() != Swapchain::Output::Hdr10) {
+        return colour;
+    }
+
+    const auto encode = [&](const std::uint8_t value) {
+        const float signal = Tone::pq_signal(Tone::from_srgb(value) * _hdr.whiteNits);
+
+        return static_cast<std::uint8_t>(std::lround(std::clamp(signal, 0.0F, 1.0F) * 255.0F));
+    };
+
+    return {.r = encode(colour.r), .g = encode(colour.g), .b = encode(colour.b), .a = colour.a};
 }
 
 bool VulkanPainter::supports(const Swapchain::Output output) const {
-    return _swapchain != nullptr ? _swapchain->supports(output) : output == _offscreen.output;
+    if (_swapchain == nullptr) {
+        return output == _offscreen.output;
+    }
+
+    return (output == Swapchain::Output::Sdr || !_sdrOnly) && _swapchain->supports(output);
 }
 
 bool VulkanPainter::set_output(const Swapchain::Output output) {
@@ -594,7 +669,7 @@ bool VulkanPainter::set_output(const Swapchain::Output output) {
         return output == _offscreen.output;
     }
 
-    if (!_swapchain->supports(output)) {
+    if (!supports(output)) {
         return false;
     }
 
@@ -642,7 +717,7 @@ bool VulkanPainter::begin_frame(const Colour clear) {
         const VkExtent2D current = _swapchain->extent();
         const bool resized = std::cmp_not_equal(width, current.width) || std::cmp_not_equal(height, current.height);
 
-        if ((!_swapchain->made() || resized) && !remake_swapchain()) {
+        if ((!_swapchain->made() || resized || std::exchange(_stale, false)) && !remake_swapchain()) {
             return false;
         }
 
@@ -674,13 +749,15 @@ bool VulkanPainter::begin_frame(const Colour clear) {
         return false;
     }
 
+    const Colour background = shown(clear);
+
     _clear = {
             .float32 =
                     {
-                            static_cast<float>(clear.r) / 255.0F,
-                            static_cast<float>(clear.g) / 255.0F,
-                            static_cast<float>(clear.b) / 255.0F,
-                            static_cast<float>(clear.a) / 255.0F,
+                            static_cast<float>(background.r) / 255.0F,
+                            static_cast<float>(background.g) / 255.0F,
+                            static_cast<float>(background.b) / 255.0F,
+                            static_cast<float>(background.a) / 255.0F,
                     },
     };
     _push.width = static_cast<float>(_extent.width);
@@ -831,13 +908,13 @@ void VulkanPainter::fill(const Rect &rect, const Colour colour) {
             v,
             u,
             v,
-            packed(colour));
+            packed(shown(colour)));
 }
 
 void VulkanPainter::triangles(const std::span<const Point> points, const Colour colour) {
     const float u = cell_x(WHITE) + (CELL / 2.0F);
     const float v = cell_y(WHITE) + (CELL / 2.0F);
-    const std::uint32_t shade = packed(colour);
+    const std::uint32_t shade = packed(shown(colour));
     const std::size_t count = points.size() / 3 * 3;
 
     for (const Point &point : points.first(count)) {
@@ -851,7 +928,7 @@ void VulkanPainter::triangles(const std::span<const Point> points, const Colour 
 
 void VulkanPainter::text(const float x, const float y, const float scale, std::string_view text, const Colour colour) {
     const float side = Font::SIZE * scale;
-    const std::uint32_t shade = packed(colour);
+    const std::uint32_t shade = packed(shown(colour));
     float left = x;
 
     while (!text.empty()) {

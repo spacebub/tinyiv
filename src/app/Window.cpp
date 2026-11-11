@@ -295,7 +295,7 @@ bool Window::make_renderer(const bool linear) {
         return false;
     }
 
-    _linear = linear;
+    _hdr10 = linear;
 
     const int vsync = vsync_setting(_renderer, _window);
 
@@ -308,7 +308,7 @@ bool Window::make_renderer(const bool linear) {
     return true;
 }
 
-// SDR images stay on the SDR output, only PQ ones switch to linear.
+// SDR images stay on the SDR output, only PQ ones switch to HDR: HDR10 on Vulkan, linear on SDL.
 void Window::follow_output(const Loader::Result &result) {
     bool pq = false;
 
@@ -318,13 +318,23 @@ void Window::follow_output(const Loader::Result &result) {
         pq = result.pyramid->levels.front()->encoding() == Bitmap::Encoding::Pq;
     }
 
-    const bool linear = pq && _display.hdr();
+    const bool hdr = pq && _display.hdr();
 
-    if (linear == _linear || _vulkan != nullptr) {
+    if (_vulkan != nullptr) {
+        // The device and every tile stay, only the swapchain is made again.
+        if (hdr != _hdr10) {
+            _vulkan->set_output(hdr ? gpu::Swapchain::Output::Hdr10 : gpu::Swapchain::Output::Sdr);
+            _hdr10 = _vulkan->output() == gpu::Swapchain::Output::Hdr10;
+        }
+
         return;
     }
 
-    if (!make_renderer(linear) && linear && !make_renderer(false)) {
+    if (hdr == _hdr10) {
+        return;
+    }
+
+    if (!make_renderer(hdr) && hdr && !make_renderer(false)) {
         std::println(stderr, "tinyiv: {}", SDL_GetError());
     }
 }
@@ -347,6 +357,10 @@ void Window::follow_awake() const {
 // HDR images decode for the headroom the window has above hdr_white, and show again once decoded.
 // SDL measures that headroom from the SDR white of the display instead.
 bool Window::update_display() {
+    if (_vulkan != nullptr) {
+        return update_vulkan_display();
+    }
+
     const SDL_PropertiesID properties = SDL_GetWindowProperties(_window);
     const bool hdr =
             _device != nullptr && SDL_GetBooleanProperty(properties, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
@@ -360,6 +374,45 @@ bool Window::update_display() {
     }
 
     _display.headroom = headroom;
+
+    return true;
+}
+
+// The Vulkan renderer passes PQ through, so white goes into the encoding of the images. On Wayland the
+// compositor anchors PQ reference white, 203 nits, to the reference of the display. White at W nits is
+// then encoded at W x 203 / reference.
+bool Window::update_vulkan_display() {
+    const WaylandColor::Output *wayland = _vulkan->wayland_output();
+    const bool hdr = _vulkan->supports(gpu::Swapchain::Output::Hdr10)
+                     && (wayland != nullptr ? wayland->hdr
+                                            : SDL_GetBooleanProperty(SDL_GetWindowProperties(_window),
+                                                                     SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN,
+                                                                     false));
+    const float peak = wayland != nullptr ? wayland->peak : peak_nits(_window);
+    const float reference = wayland != nullptr ? wayland->reference : Tone::PQ_REFERENCE_NITS;
+    Tone::Display display;
+
+    if (hdr && peak > 0.0F && reference > 0.0F) {
+        const float white = std::min(_hdrWhite, peak / MIN_HDR_HEADROOM);
+
+        display.headroom = std::round(peak / white * HEADROOM_STEPS) / HEADROOM_STEPS;
+        display.whiteNits = std::round(white * Tone::PQ_REFERENCE_NITS / reference);
+    }
+
+    // The description counts in the encoding, where the reference of the display is 203.
+    const float scale = reference > 0.0F ? Tone::PQ_REFERENCE_NITS / reference : 1.0F;
+
+    _vulkan->set_hdr({
+            .minimum = (wayland != nullptr ? wayland->minimum : 0.0F) * scale,
+            .peak = peak * scale,
+            .whiteNits = display.whiteNits,
+    });
+
+    if (display == _display) {
+        return false;
+    }
+
+    _display = display;
 
     return true;
 }
@@ -401,6 +454,6 @@ float Window::density() const {
 
 // Linear output puts white at the SDR white of the display, which hdr_white overrides.
 float Window::color_scale() const {
-    return _linear && _renderer != nullptr ? shown_white(_window, _hdrWhite) / sdr_white_nits(_window) : 1.0F;
+    return _hdr10 && _renderer != nullptr ? shown_white(_window, _hdrWhite) / sdr_white_nits(_window) : 1.0F;
 }
 }

@@ -19,6 +19,7 @@
 
 #include "image/Bitmap.h"
 #include "image/Orient.h"
+#include "image/Tone.h"
 #include "render/Painter.h"
 #include "render/SdlPainter.h"
 
@@ -32,7 +33,6 @@ create_texture(SDL_Renderer *renderer, const Bitmap::Encoding encoding, const in
         return SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, width, height);
     }
 
-    constexpr float SDR_WHITE_NITS = 203.0F;
     const SDL_PropertiesID properties = SDL_CreateProperties();
 
     SDL_SetNumberProperty(properties, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER, SDL_PIXELFORMAT_ABGR2101010);
@@ -40,7 +40,7 @@ create_texture(SDL_Renderer *renderer, const Bitmap::Encoding encoding, const in
     SDL_SetNumberProperty(properties, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER, SDL_TEXTUREACCESS_STATIC);
     SDL_SetNumberProperty(properties, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, width);
     SDL_SetNumberProperty(properties, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, height);
-    SDL_SetFloatProperty(properties, SDL_PROP_TEXTURE_CREATE_SDR_WHITE_POINT_FLOAT, SDR_WHITE_NITS);
+    SDL_SetFloatProperty(properties, SDL_PROP_TEXTURE_CREATE_SDR_WHITE_POINT_FLOAT, Tone::PQ_REFERENCE_NITS);
 
     SDL_Texture *texture = SDL_CreateTextureWithProperties(renderer, properties);
 

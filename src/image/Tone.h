@@ -39,13 +39,26 @@ struct Source {
     [[nodiscard]] bool hdr() const { return transfer != Transfer::Sdr; }
 };
 
+// The reference white of PQ, which BT.2408 and the colour protocol anchor to.
+inline constexpr float PQ_REFERENCE_NITS = 203.0F;
+
 // What the image is shown on. Headroom is how much brighter than SDR white it goes, 1 for
 // an SDR display.
 struct Display {
     float headroom = 1.0F;
+    // The Vulkan renderer passes PQ through untouched, so white is set in the encoding. The SDL renderer
+    // scales it when drawing.
+    float whiteNits = PQ_REFERENCE_NITS;
 
     [[nodiscard]] bool hdr() const { return headroom > 1.0F; }
+    bool operator==(const Display &) const = default;
 };
+
+// The PQ signal from 0 to 1 for light in nits, the inverse EOTF of SMPTE ST 2084.
+[[nodiscard]] float pq_signal(float nits);
+
+// An sRGB code value from 0 to 255 as linear light, SDR white at 1.
+[[nodiscard]] float from_srgb(std::uint8_t value);
 
 // From the code points of ITU-T H.273, which nclx, cICP and JPEG XL carry.
 [[nodiscard]] Source from_cicp(int primaries, int transfer);

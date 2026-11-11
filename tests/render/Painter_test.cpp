@@ -27,6 +27,7 @@
 
 #include "image/Bitmap.h"
 #include "image/Orient.h"
+#include "image/Tone.h"
 #include "render/Font.h"
 #include "render/Painter.h"
 #include "render/gpu/Device.h"
@@ -629,6 +630,23 @@ void pq_passes_through() {
             },
             "PQ 1:1");
     painter->release_tile(tile);
+
+    // A bar on a PQ output is encoded on the CPU, white at the white of the images.
+    painter->set_hdr({.minimum = 0.0F, .peak = 600.0F, .whiteNits = 100.0F});
+
+    const Frame bar = draw(
+            *painter,
+            CLEAR,
+            [](Painter &p) { p.fill({.width = 8, .height = 8}, {.r = 255, .g = 255, .b = 255}); },
+            true);
+    const auto white = static_cast<int>(std::lround(tiv::Tone::pq_signal(100.0F) * 1023.0F));
+
+    compare(
+            bar,
+            {.width = 8, .height = 8},
+            5,
+            [&](int, int) { return Rgba{.r = white, .g = white, .b = white}; },
+            "PQ bar");
 }
 
 void guarded(void (*body)()) {

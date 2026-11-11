@@ -106,6 +106,7 @@ include(Embed)
 include(Format)
 include(GitRevision)
 include(ReuseApp)
+include(Wayland)
 
 # SDL is built here on every system, as few have SDL 3 installed. It links statically, so nothing of it
 # is installed.

@@ -21,7 +21,9 @@
 
 #include <SDL3/SDL.h>
 
+#include "image/Tone.h"
 #include "render/Painter.h"
+#include "render/WaylandColor.h"
 #include "render/gpu/Buffer.h"
 #include "render/gpu/Device.h"
 #include "render/gpu/Pipelines.h"
@@ -58,8 +60,18 @@ public:
     void upload(Tile tile, const std::uint8_t *pixels, std::size_t pitch) override;
     [[nodiscard]] int max_tile() const override;
 
+    struct Hdr {
+        float minimum = 0.0F;
+        float peak = 0.0F;
+        // Nits that PQ encodes SDR white at, for the bars and text.
+        float whiteNits = Tone::PQ_REFERENCE_NITS;
+    };
+
     // Remakes the swapchain at once. False when the surface has no HDR10.
     bool set_output(Swapchain::Output output);
+    void set_hdr(const Hdr &hdr);
+    // Null off Wayland, where the window properties of SDL describe the display.
+    [[nodiscard]] const WaylandColor::Output *wayland_output();
     [[nodiscard]] bool supports(Swapchain::Output output) const;
     [[nodiscard]] Swapchain::Output output() const;
     [[nodiscard]] bool waits_for_display() const;
@@ -113,6 +125,8 @@ private:
     void record(VkCommandBuffer commands, const Slot &slot, const Pipelines::Kit &kit);
     void add(Kind kind, std::uint32_t slab, std::uint32_t count);
     void ui_quad(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, std::uint32_t colour);
+    void describe();
+    [[nodiscard]] Colour shown(Colour colour) const;
     [[nodiscard]] static bool grow(Device &device, Buffer *buffer, std::size_t bytes, VkBufferUsageFlags usage);
 
     std::unique_ptr<Device> _device;
@@ -120,6 +134,12 @@ private:
     std::unique_ptr<Staging> _staging;
     std::unique_ptr<Pipelines> _pipelines;
     std::unique_ptr<TilePool> _pool;
+    std::unique_ptr<WaylandColor> _colour;
+    // Set on Wayland when the colour manager cannot take PQ with luminances.
+    // HDR would then be tone mapped from 10000 nits.
+    bool _sdrOnly = false;
+    bool _stale = false;
+    Hdr _hdr;
     std::unique_ptr<Swapchain> _swapchain;
     Swapchain::Output _wanted = Swapchain::Output::Sdr;
     Offscreen _offscreen;

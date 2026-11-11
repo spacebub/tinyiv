@@ -32,7 +32,9 @@ public:
         Failed,
     };
 
-    explicit Swapchain(Device &device);
+    // With passThrough, HDR goes out as PQ on a surface the application describes.
+    // Without it, HDR goes out as HDR10.
+    Swapchain(Device &device, bool passThrough);
     ~Swapchain();
 
     Swapchain(const Swapchain &) = delete;
@@ -55,14 +57,19 @@ public:
     [[nodiscard]] VkImageView view(std::uint32_t index) const { return _views.at(index); }
     [[nodiscard]] VkSemaphore rendered(std::uint32_t index) const { return _rendered.at(index); }
 
+    // For an HDR10 output that is not passed through, as Windows takes it. Nothing otherwise.
+    void set_metadata(float minimum, float peak);
+
     Acquired acquire(VkSemaphore available, std::uint32_t *index);
     // False when the swapchain wants remaking.
     bool present(std::uint32_t index);
 
 private:
     void drop_images();
+    [[nodiscard]] VkSurfaceFormatKHR wanted(Output output) const;
 
     Device *_device;
+    bool _passThrough;
     VkSwapchainKHR _swapchain = VK_NULL_HANDLE;
     Output _output = Output::Sdr;
     VkFormat _format = VK_FORMAT_UNDEFINED;

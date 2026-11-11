@@ -17,17 +17,19 @@
 
 namespace tiv::gpu {
 namespace {
-struct Wanted {
-    VkFormat format;
-    VkColorSpaceKHR space;
+constexpr VkSurfaceFormatKHR SDR{
+        .format = VK_FORMAT_B8G8R8A8_UNORM,
+        .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR,
 };
-
-constexpr Wanted SDR{.format = VK_FORMAT_B8G8R8A8_UNORM, .space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-constexpr Wanted HDR10{.format = VK_FORMAT_A2B10G10R10_UNORM_PACK32, .space = VK_COLOR_SPACE_HDR10_ST2084_EXT};
-
-const Wanted &wanted(const Swapchain::Output output) {
-    return output == Swapchain::Output::Hdr10 ? HDR10 : SDR;
-}
+constexpr VkSurfaceFormatKHR HDR10{
+        .format = VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+        .colorSpace = VK_COLOR_SPACE_HDR10_ST2084_EXT,
+};
+// The same PQ words, which the driver leaves for the application to describe.
+constexpr VkSurfaceFormatKHR PASS_THROUGH{
+        .format = VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+        .colorSpace = VK_COLOR_SPACE_PASS_THROUGH_EXT,
+};
 
 std::vector<VkSurfaceFormatKHR> formats(const Device &device) {
     const Api &vk = device.api();
@@ -42,14 +44,22 @@ std::vector<VkSurfaceFormatKHR> formats(const Device &device) {
     return all;
 }
 
-bool offers(const std::vector<VkSurfaceFormatKHR> &all, const Wanted &want) {
+bool offers(const std::vector<VkSurfaceFormatKHR> &all, const VkSurfaceFormatKHR &want) {
     return std::ranges::any_of(all, [&](const VkSurfaceFormatKHR &each) {
-        return each.format == want.format && each.colorSpace == want.space;
+        return each.format == want.format && each.colorSpace == want.colorSpace;
     });
 }
 }
 
-Swapchain::Swapchain(Device &device) : _device(&device) {
+Swapchain::Swapchain(Device &device, const bool passThrough) : _device(&device), _passThrough(passThrough) {
+}
+
+VkSurfaceFormatKHR Swapchain::wanted(const Output output) const {
+    if (output == Output::Sdr) {
+        return SDR;
+    }
+
+    return _passThrough ? PASS_THROUGH : HDR10;
 }
 
 Swapchain::~Swapchain() {
@@ -104,7 +114,7 @@ bool Swapchain::make(const std::uint32_t width, const std::uint32_t height, cons
     }
 
     const std::vector<VkSurfaceFormatKHR> all = formats(*_device);
-    Wanted chosen = wanted(output);
+    VkSurfaceFormatKHR chosen = wanted(output);
 
     if (!offers(all, chosen)) {
         chosen = SDR;
@@ -116,9 +126,9 @@ bool Swapchain::make(const std::uint32_t width, const std::uint32_t height, cons
         });
 
         if (!offers(all, chosen) && plain != all.end()) {
-            chosen = {.format = plain->format, .space = plain->colorSpace};
+            chosen = *plain;
         } else if (!offers(all, chosen) && !all.empty()) {
-            chosen = {.format = all.front().format, .space = all.front().colorSpace};
+            chosen = all.front();
         }
     }
 
@@ -145,7 +155,7 @@ bool Swapchain::make(const std::uint32_t width, const std::uint32_t height, cons
             .surface = _device->surface(),
             .minImageCount = images,
             .imageFormat = chosen.format,
-            .imageColorSpace = chosen.space,
+            .imageColorSpace = chosen.colorSpace,
             .imageExtent = extent,
             .imageArrayLayers = 1,
             .imageUsage =
@@ -202,7 +212,9 @@ bool Swapchain::make(const std::uint32_t width, const std::uint32_t height, cons
         }
     }
 
-    _output = chosen.format == HDR10.format && chosen.space == HDR10.space ? Output::Hdr10 : Output::Sdr;
+    _output = chosen.format == wanted(Output::Hdr10).format && chosen.colorSpace == wanted(Output::Hdr10).colorSpace
+                      ? Output::Hdr10
+                      : Output::Sdr;
     _format = chosen.format;
     _extent = extent;
     _mailbox = mailbox;
@@ -252,5 +264,27 @@ bool Swapchain::present(const std::uint32_t index) {
     _device->check(result);
 
     return false;
+}
+
+void Swapchain::set_metadata(const float minimum, const float peak) {
+    if (_passThrough || _output != Output::Hdr10 || _swapchain == VK_NULL_HANDLE || !_device->hdr_metadata()) {
+        return;
+    }
+
+    // The primaries and white point of BT.2020, which PQ tiles are encoded in.
+    const VkHdrMetadataEXT metadata{
+            .sType = VK_STRUCTURE_TYPE_HDR_METADATA_EXT,
+            .displayPrimaryRed = {.x = 0.708F, .y = 0.292F},
+            .displayPrimaryGreen = {.x = 0.170F, .y = 0.797F},
+            .displayPrimaryBlue = {.x = 0.131F, .y = 0.046F},
+            .whitePoint = {.x = 0.3127F, .y = 0.3290F},
+            .maxLuminance = peak,
+            .minLuminance = minimum,
+            .maxContentLightLevel = peak,
+            // Unknown, which a frame of images rarely comes near.
+            .maxFrameAverageLightLevel = 0.0F,
+    };
+
+    _device->api().SetHdrMetadataEXT(_device->handle(), 1, &_swapchain, &metadata);
 }
 }

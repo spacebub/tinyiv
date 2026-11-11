@@ -203,7 +203,7 @@ App::State App::state() const {
             .failed = !_picture.failure().empty(),
             .streamed = _picture.streamed(),
             .streaming = _loader->streaming_all(),
-            .linear = _window.linear(),
+            .hdr10 = _window.hdr10(),
             .animated = _playback.active(),
             .playing = _playback.playing(),
             .frame = _playback.frame(),
@@ -236,6 +236,7 @@ void App::handle(const SDL_Event &event) {
         return;
     }
 
+    // SDL follows the same colour feedback as the Wayland module and raises a window event when it changes.
     if (is_window_event(event)) {
         layout();
         update_display();
@@ -502,7 +503,7 @@ void App::frame() {
                       .bar = bar,
                       .bars = bar_shown(),
                       .help = _help,
-                      .linear = _window.linear(),
+                      .hdr10 = _window.hdr10(),
                       .streaming = _loader->streaming_all(),
                       .progress = _loader->progress(),
                       .folder = &_folder,

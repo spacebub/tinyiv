@@ -234,7 +234,7 @@ void Loader::set_display(const Tone::Display &display) {
     {
         const std::scoped_lock hold(_guard);
 
-        if (_displayKnown && _display.headroom == display.headroom) {
+        if (_displayKnown && _display == display) {
             return;
         }
 
@@ -1095,7 +1095,7 @@ void Loader::store(const std::filesystem::path &file, Entry entry) {
 
         // Stopped too late to cut short, and it may have read what the file said before. An
         // HDR image decoded for a display since replaced is dropped the same way.
-        const bool stale = entry.info.hdr && entry.display.headroom != _display.headroom;
+        const bool stale = entry.info.hdr && entry.display != _display;
 
         if (finish(file) || stale) {
             if (entry.pyramid != nullptr) {
