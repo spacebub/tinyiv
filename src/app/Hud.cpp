@@ -304,7 +304,7 @@ std::string failure_text(const Folder &folder, const std::string &error) {
 }
 
 const OrderText &next_order(const Folder::Order order) {
-    const auto *const at = std::ranges::find(ORDERS, order, &OrderText::order);
+    const auto at = std::ranges::find(ORDERS, order, &OrderText::order);
 
     return std::next(at) == ORDERS.end() ? ORDERS.front() : *std::next(at);
 }

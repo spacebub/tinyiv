@@ -196,7 +196,7 @@ constexpr std::array SETTINGS{
                         "sort = a-z\n",
                 .apply =
                         [](Config &config, const std::string_view value) {
-                            const auto *const found = std::ranges::find(ORDER_NAMES, value, &OrderName::name);
+                            const auto found = std::ranges::find(ORDER_NAMES, value, &OrderName::name);
 
                             if (found == ORDER_NAMES.end()) {
                                 return false;
@@ -213,7 +213,7 @@ constexpr std::array SETTINGS{
                         "prevent_sleep = fullscreen\n",
                 .apply =
                         [](Config &config, const std::string_view value) {
-                            const auto *const found = std::ranges::find(AWAKE_NAMES, value, &AwakeName::name);
+                            const auto found = std::ranges::find(AWAKE_NAMES, value, &AwakeName::name);
 
                             if (found == AWAKE_NAMES.end()) {
                                 return false;
