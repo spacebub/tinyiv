@@ -22,20 +22,30 @@ if [ "${1:-}" = "--inside" ]; then
     cp -L /usr/lib/x86_64-linux-gnu/libheif/plugins/libheif-libde265.so \
         /usr/lib/x86_64-linux-gnu/libheif/plugins/libheif-dav1d.so "$PLUGINS/"
 
-    linuxdeploy --appdir /work/AppDir --executable /work/AppDir/usr/bin/tinyiv --deploy-deps-only "$PLUGINS" \
+    # libvips loads its AVIF, PDF and JPEG XL loaders as modules from a path fixed at build time. The
+    # AppImage carries them under the same multiarch folder, which AppRun points VIPSHOME above.
+    # ImageMagick and OpenSlide stay out.
+    MODULE_DIR=$(ls -d /usr/lib/x86_64-linux-gnu/vips-modules-*)
+    MODULES=/work/AppDir/usr/lib/x86_64-linux-gnu/$(basename "$MODULE_DIR")
+    mkdir -p "$MODULES"
+    cp -L "$MODULE_DIR"/vips-heif.so "$MODULE_DIR"/vips-poppler.so "$MODULE_DIR"/vips-jxl.so "$MODULES/"
+
+    linuxdeploy --appdir /work/AppDir --executable /work/AppDir/usr/bin/tinyiv \
+        --deploy-deps-only "$PLUGINS" --deploy-deps-only "$MODULES" \
         --desktop-file /work/AppDir/usr/share/applications/tinyiv.desktop \
         --icon-file /src/assets/tinyiv-256.png --icon-filename tinyiv \
         --custom-apprun /src/packaging/linux/AppRun
 
     # dlopen ignores the runpath of the binary, so each plugin needs its own to find the bundled libraries.
     patchelf --set-rpath '$ORIGIN/../..' "$PLUGINS"/*.so
+    patchelf --set-rpath '$ORIGIN/../..' "$MODULES"/*.so
 
     # linuxdeploy leaves the compiler runtime out, but the binary needs the one of gcc 14. AppRun
     # uses it only when the host libstdc++ lacks a version named in needed.
     COMPAT=/work/AppDir/usr/lib/compat
     mkdir -p "$COMPAT"
     cp -L /usr/lib/x86_64-linux-gnu/libstdc++.so.6 /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 "$COMPAT/"
-    objdump -T /work/AppDir/usr/bin/tinyiv /work/AppDir/usr/lib/*.so* "$PLUGINS"/*.so \
+    objdump -T /work/AppDir/usr/bin/tinyiv /work/AppDir/usr/lib/*.so* "$PLUGINS"/*.so "$MODULES"/*.so \
         | grep -o 'GLIBCXX_[0-9.]*' | sort -uV | tail -n 1 > "$COMPAT/needed"
 
     ARCH=x86_64 appimagetool --runtime-file /opt/runtime-x86_64 /work/AppDir "/work/tinyiv-$TIV_VERSION-x86_64.AppImage"

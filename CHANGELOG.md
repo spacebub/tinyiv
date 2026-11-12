@@ -12,6 +12,7 @@
 
 - HDR on Wayland shows black as black and highlights at the full peak of the display. Before, blacks were grey or the whole image was dim
 - On Wayland, HDR white shows at exactly the brightness `hdr_white` sets
+- The AppImage opens AVIF and PDF files on every distribution, not only on Debian based ones
 
 ## 1.3.6 - 2026-11-11
 

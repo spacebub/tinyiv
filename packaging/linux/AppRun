@@ -3,6 +3,8 @@
 HERE=${APPDIR:-$(dirname "$(readlink -f "$0")")}
 
 export LIBHEIF_PLUGIN_PATH="$HERE/usr/lib/libheif/plugins"
+# libvips looks for its modules in $VIPSHOME/x86_64-linux-gnu instead of the path it was built for.
+export VIPSHOME="$HERE/usr/lib"
 
 # Host GPU drivers load into the process later and may need a newer libstdc++ than the bundled one.
 # So the host copy wins whenever it has every version the bundle needs.
