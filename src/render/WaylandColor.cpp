@@ -25,7 +25,7 @@
 
 namespace tiv {
 namespace {
-// Version 1 is all that wayland-protocols 1.41 has, and nothing newer is used.
+// Nothing of later versions is used.
 constexpr std::uint32_t VERSION = 1;
 constexpr float MIN_LUMINANCE_SCALE = 10000.0F;
 

@@ -13,7 +13,7 @@ Wayland, and libx11, libxext, libxcursor, libxfixes, libxi, libxrandr and libxss
 configure stops when SDL finds no Wayland, as HDR needs it.
 
 tinyiv links libwayland-client too. It generates the colour management protocol with
-wayland-scanner from wayland-protocols 1.41 or later. On Arch the packages carry those names, EGL
+wayland-scanner, from the copy that comes with SDL. On Arch the packages carry those names, EGL
 comes with `libglvnd`, and the Vulkan headers are `vulkan-headers`. Then:
 
 ```

@@ -2,8 +2,6 @@
 if (UNIX AND NOT APPLE)
     find_program(TIV_WAYLAND_SCANNER wayland-scanner REQUIRED)
     pkg_check_modules(WAYLAND REQUIRED IMPORTED_TARGET wayland-client)
-    pkg_check_modules(WAYLAND_PROTOCOLS REQUIRED wayland-protocols>=1.41)
-    pkg_get_variable(TIV_WAYLAND_PROTOCOLS wayland-protocols pkgdatadir)
     set(TIV_WAYLAND ON)
 endif ()
 
@@ -14,7 +12,9 @@ function(tiv_wayland target)
     endif ()
 
     set(dir "${CMAKE_CURRENT_BINARY_DIR}/wayland")
-    set(xml "${TIV_WAYLAND_PROTOCOLS}/staging/color-management/color-management-v1.xml")
+    # SDL uses the interface definitions of tinyiv in place of its own, as the linker keeps the first it
+    # meets, so both come from the copy of the protocol in SDL.
+    set(xml "${sdl3_SOURCE_DIR}/wayland-protocols/color-management-v1.xml")
 
     add_custom_command(
             OUTPUT "${dir}/color-management-v1.h" "${dir}/color-management-v1.c"
